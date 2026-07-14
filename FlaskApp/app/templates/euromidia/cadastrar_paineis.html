@@ -1,0 +1,874 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Cadastrar painel | Euromídia{% endblock %}
+
+{% block content %}
+<style>
+  .cadastro-painel-page {
+    max-width: 1480px;
+    margin: 0 auto;
+  }
+
+  .cadastro-painel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 16px;
+  }
+
+  .cadastro-painel-header h1 {
+    margin: 0;
+    color: var(--euro-blue);
+    font-size: clamp(1.55rem, 2.5vw, 2.1rem);
+    line-height: 1.15;
+  }
+
+  .cadastro-painel-header p {
+    max-width: 820px;
+    margin: 8px 0 0;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+
+  .cadastro-painel-form {
+    display: grid;
+    gap: 16px;
+  }
+
+  .cadastro-section {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .cadastro-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 15px 18px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(90deg, rgba(0, 40, 132, .07), rgba(255, 179, 0, .06));
+  }
+
+  .cadastro-section-header h2 {
+    margin: 0;
+    color: var(--euro-blue);
+    font-size: 1rem;
+  }
+
+  .cadastro-section-header span {
+    color: var(--muted);
+    font-size: .78rem;
+  }
+
+  .cadastro-section-body {
+    padding: 18px;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 15px;
+  }
+
+  .col-2 { grid-column: span 2; }
+  .col-3 { grid-column: span 3; }
+  .col-4 { grid-column: span 4; }
+  .col-5 { grid-column: span 5; }
+  .col-6 { grid-column: span 6; }
+  .col-8 { grid-column: span 8; }
+  .col-12 { grid-column: 1 / -1; }
+
+  .field-help {
+    display: block;
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: .75rem;
+    line-height: 1.4;
+  }
+
+  .required-mark {
+    color: #dc2626;
+  }
+
+  .boolean-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(130px, 1fr));
+    gap: 10px;
+  }
+
+  .boolean-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .boolean-card:hover {
+    border-color: rgba(0, 40, 132, .35);
+    background: rgba(0, 40, 132, .025);
+  }
+
+  .boolean-card input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--euro-blue);
+    flex: 0 0 auto;
+  }
+
+  .boolean-card span {
+    font-size: .85rem;
+    font-weight: 800;
+  }
+
+  .faces-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .face-row {
+    display: grid;
+    grid-template-columns: 70px minmax(110px, .45fr) minmax(180px, 1fr) minmax(180px, .75fr);
+    align-items: end;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #f8fafc;
+  }
+
+  .face-index {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    margin-bottom: 1px;
+    border-radius: 50%;
+    background: var(--euro-blue);
+    color: #fff;
+    font-size: .85rem;
+    font-weight: 900;
+  }
+
+  .face-type-readonly {
+    display: flex;
+    align-items: center;
+    min-height: 42px;
+    padding: 9px 12px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 10px;
+    background: #fff;
+    color: #475569;
+    font-size: .85rem;
+    font-weight: 800;
+  }
+
+  .upload-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, .7fr);
+    gap: 18px;
+    align-items: stretch;
+  }
+
+  .upload-dropzone {
+    position: relative;
+    display: grid;
+    place-items: center;
+    min-height: 190px;
+    padding: 22px;
+    border: 2px dashed #b7c3d4;
+    border-radius: 14px;
+    background: #f8fafc;
+    text-align: center;
+    cursor: pointer;
+    transition: .18s ease;
+  }
+
+  .upload-dropzone:hover,
+  .upload-dropzone.is-dragging {
+    border-color: var(--euro-blue-2);
+    background: rgba(3, 64, 167, .05);
+  }
+
+  .upload-dropzone input[type="file"] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .upload-icon {
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    margin: 0 auto 10px;
+    border-radius: 14px;
+    background: rgba(0, 40, 132, .1);
+    color: var(--euro-blue);
+    font-size: 1.65rem;
+    font-weight: 900;
+  }
+
+  .upload-title {
+    margin: 0;
+    color: var(--euro-blue);
+    font-weight: 900;
+  }
+
+  .upload-copy {
+    margin: 7px 0 0;
+    color: var(--muted);
+    font-size: .8rem;
+    line-height: 1.5;
+  }
+
+  .preview-card {
+    display: grid;
+    place-items: center;
+    min-height: 250px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: #0f172a;
+  }
+
+  .preview-card img {
+    display: none;
+    width: 100%;
+    height: 100%;
+    max-height: 330px;
+    object-fit: contain;
+  }
+
+  .preview-empty {
+    padding: 22px;
+    color: #cbd5e1;
+    text-align: center;
+    font-size: .84rem;
+    line-height: 1.5;
+  }
+
+  .error-summary {
+    margin-bottom: 16px;
+    padding: 14px 16px;
+    border: 1px solid #fecaca;
+    border-left: 6px solid #dc2626;
+    border-radius: 12px;
+    background: #fef2f2;
+    color: #7f1d1d;
+  }
+
+  .error-summary strong {
+    display: block;
+    margin-bottom: 7px;
+  }
+
+  .error-summary ul {
+    margin: 0;
+    padding-left: 20px;
+  }
+
+  .form-actions-sticky {
+    position: sticky;
+    bottom: 12px;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 13px 16px;
+    border: 1px solid rgba(0, 40, 132, .16);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .96);
+    box-shadow: 0 10px 30px rgba(15, 23, 42, .12);
+    backdrop-filter: blur(8px);
+  }
+
+  .form-actions-sticky p {
+    margin: 0;
+    color: var(--muted);
+    font-size: .78rem;
+  }
+
+  .btn[disabled] {
+    opacity: .62;
+    cursor: wait;
+  }
+
+  @media (max-width: 1100px) {
+    .col-2, .col-3, .col-4 { grid-column: span 6; }
+    .col-5, .col-6, .col-8 { grid-column: span 12; }
+    .boolean-grid { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
+    .face-row { grid-template-columns: 58px 1fr 1.4fr; }
+    .face-row .face-type-group { grid-column: 2 / -1; }
+  }
+
+  @media (max-width: 760px) {
+    .cadastro-painel-header,
+    .form-actions-sticky {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .form-grid { grid-template-columns: 1fr; }
+    .form-grid > * { grid-column: 1 / -1; }
+    .boolean-grid { grid-template-columns: 1fr 1fr; }
+    .face-row { grid-template-columns: 48px 1fr; }
+    .face-row > *:not(.face-index-wrap) { grid-column: 2; }
+    .face-index-wrap { grid-row: 1 / span 3; align-self: start; }
+    .upload-layout { grid-template-columns: 1fr; }
+    .form-actions-sticky .actions { width: 100%; margin: 0; }
+    .form-actions-sticky .btn { flex: 1 1 auto; text-align: center; }
+  }
+</style>
+
+<div class="cadastro-painel-page">
+  <header class="cadastro-painel-header">
+    <div>
+      <h1>Cadastrar painel</h1>
+      <p>
+        Cadastre os dados principais, as faces relacionadas e, se disponível,
+        a imagem principal do painel. O cadastro só é confirmado quando todas
+        as etapas forem gravadas com sucesso.
+      </p>
+    </div>
+    <a class="btn btn-secondary" href="{{ url_for('Paineis.lista_paineis') }}">Voltar para painéis</a>
+  </header>
+
+  {% if erros %}
+    <div class="error-summary" role="alert" aria-live="assertive">
+      <strong>Revise os dados antes de continuar:</strong>
+      <ul>
+        {% for erro in erros %}
+          <li>{{ erro }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <form
+    id="formCadastroPainel"
+    class="cadastro-painel-form"
+    method="post"
+    action="{{ url_for('Paineis.cadastrar_paineis') }}"
+    enctype="multipart/form-data"
+  >
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <section class="card cadastro-section">
+      <div class="cadastro-section-header">
+        <h2>1. Identificação</h2>
+        <span>Dados básicos do painel</span>
+      </div>
+      <div class="cadastro-section-body">
+        <div class="form-grid">
+          <div class="col-3">
+            <label for="cod_ponto">CodPonto <span class="required-mark">*</span></label>
+            <input
+              id="cod_ponto"
+              name="cod_ponto"
+              type="number"
+              min="1"
+              step="1"
+              required
+              value="{{ valores.cod_ponto }}"
+              placeholder="Ex.: 759"
+            >
+          </div>
+
+          <div class="col-5">
+            <label for="tipo">Tipo <span class="required-mark">*</span></label>
+            <select id="tipo" name="tipo" required>
+              <option value="">Selecione o tipo</option>
+              {% for tipo_painel in tipos_painel %}
+                <option value="{{ tipo_painel }}" {% if valores.tipo == tipo_painel %}selected{% endif %}>
+                  {{ tipo_painel }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="col-2">
+            <label for="quantidade_faces">Quantidade de faces <span class="required-mark">*</span></label>
+            <input
+              id="quantidade_faces"
+              name="quantidade_faces"
+              type="number"
+              min="1"
+              max="50"
+              step="1"
+              required
+              value="{{ valores.quantidade_faces }}"
+            >
+          </div>
+
+          <div class="col-2">
+            <label for="exibidora">Exibidora</label>
+            <input id="exibidora" name="exibidora" maxlength="60" value="{{ valores.exibidora }}">
+          </div>
+
+          <div class="col-12">
+            <div class="boolean-grid">
+              <label class="boolean-card">
+                <input type="checkbox" name="bit_ativo" value="1" {% if valores.bit_ativo %}checked{% endif %}>
+                <span>Ativo</span>
+              </label>
+              <label class="boolean-card">
+                <input type="checkbox" name="bit_proprio" value="1" {% if valores.bit_proprio %}checked{% endif %}>
+                <span>Próprio</span>
+              </label>
+              <label class="boolean-card">
+                <input type="checkbox" name="bit_aluguel" value="1" {% if valores.bit_aluguel %}checked{% endif %}>
+                <span>Aluguel</span>
+              </label>
+              <label class="boolean-card">
+                <input type="checkbox" name="bit_iluminado" value="1" {% if valores.bit_iluminado %}checked{% endif %}>
+                <span>Iluminado</span>
+              </label>
+              <label class="boolean-card">
+                <input type="checkbox" name="bit_energia" value="1" {% if valores.bit_energia %}checked{% endif %}>
+                <span>Energia</span>
+              </label>
+              <label class="boolean-card">
+                <input type="checkbox" name="bit_internet" value="1" {% if valores.bit_internet %}checked{% endif %}>
+                <span>Internet</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card cadastro-section">
+      <div class="cadastro-section-header">
+        <h2>2. Localização</h2>
+        <span>Endereço e coordenadas geográficas</span>
+      </div>
+      <div class="cadastro-section-body">
+        <div class="form-grid">
+          <div class="col-5">
+            <label for="logradouro">Logradouro</label>
+            <input id="logradouro" name="logradouro" maxlength="200" value="{{ valores.logradouro }}">
+          </div>
+          <div class="col-2">
+            <label for="numero">Número</label>
+            <input id="numero" name="numero" maxlength="20" value="{{ valores.numero }}">
+          </div>
+          <div class="col-3">
+            <label for="bairro">Bairro</label>
+            <input id="bairro" name="bairro" maxlength="100" value="{{ valores.bairro }}">
+          </div>
+          <div class="col-2">
+            <label for="cep">CEP</label>
+            <input id="cep" name="cep" maxlength="30" inputmode="numeric" value="{{ valores.cep }}" placeholder="00000-000">
+          </div>
+
+          <div class="col-4">
+            <label for="cidade">Cidade</label>
+            <input id="cidade" name="cidade" maxlength="150" value="{{ valores.cidade }}">
+          </div>
+          <div class="col-2">
+            <label for="uf">UF</label>
+            <input id="uf" name="uf" maxlength="2" value="{{ valores.uf }}" placeholder="SP">
+          </div>
+          <div class="col-6">
+            <label for="sentido">Sentido</label>
+            <input id="sentido" name="sentido" maxlength="200" value="{{ valores.sentido }}">
+          </div>
+
+          <div class="col-6">
+            <label for="referencia">Referência</label>
+            <input id="referencia" name="referencia" maxlength="200" value="{{ valores.referencia }}">
+          </div>
+          <div class="col-3">
+            <label for="latitude">Latitude</label>
+            <input id="latitude" name="latitude" inputmode="decimal" value="{{ valores.latitude }}" placeholder="-22.905000">
+            <span class="field-help">Valor entre -90 e 90.</span>
+          </div>
+          <div class="col-3">
+            <label for="longitude">Longitude</label>
+            <input id="longitude" name="longitude" inputmode="decimal" value="{{ valores.longitude }}" placeholder="-47.060000">
+            <span class="field-help">Valor entre -180 e 180.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card cadastro-section">
+      <div class="cadastro-section-header">
+        <h2>3. Estrutura e operação</h2>
+        <span>Dimensões, datas e características físicas</span>
+      </div>
+      <div class="cadastro-section-body">
+        <div class="form-grid">
+          <div class="col-3">
+            <label for="formato_lxa">Formato L x A</label>
+            <input id="formato_lxa" name="formato_lxa" maxlength="20" value="{{ valores.formato_lxa }}" placeholder="Ex.: 4,00 x 3,00">
+          </div>
+          <div class="col-3">
+            <label for="formato_lona_acabada_lxa_m">Lona acabada L x A (m)</label>
+            <input id="formato_lona_acabada_lxa_m" name="formato_lona_acabada_lxa_m" maxlength="20" value="{{ valores.formato_lona_acabada_lxa_m }}">
+          </div>
+          <div class="col-2">
+            <label for="area_total_m">Área total (m²)</label>
+            <input id="area_total_m" name="area_total_m" inputmode="decimal" value="{{ valores.area_total_m }}" placeholder="0,00">
+          </div>
+          <div class="col-2">
+            <label for="tipo_solo">Tipo de solo</label>
+            <input id="tipo_solo" name="tipo_solo" maxlength="10" value="{{ valores.tipo_solo }}">
+          </div>
+          <div class="col-2">
+            <label for="id_produto">IDProduto</label>
+            <input id="id_produto" name="id_produto" type="number" min="1" step="1" value="{{ valores.id_produto }}">
+          </div>
+
+          <div class="col-3">
+            <label for="data_instalacao">Data de instalação</label>
+            <input id="data_instalacao" name="data_instalacao" type="date" value="{{ valores.data_instalacao }}">
+          </div>
+          <div class="col-3">
+            <label for="data_retirada">Data de retirada</label>
+            <input id="data_retirada" name="data_retirada" type="date" value="{{ valores.data_retirada }}">
+          </div>
+          <div class="col-6">
+            <label for="restricoes">Restrições</label>
+            <textarea id="restricoes" name="restricoes" maxlength="200" rows="3">{{ valores.restricoes }}</textarea>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card cadastro-section">
+      <div class="cadastro-section-header">
+        <h2>4. Indicadores e classificação</h2>
+        <span>Campos opcionais de enriquecimento</span>
+      </div>
+      <div class="cadastro-section-body">
+        <div class="form-grid">
+          <div class="col-3">
+            <label for="id_dim_publico_alvo">IDDimPublicoAlvo</label>
+            <input id="id_dim_publico_alvo" name="id_dim_publico_alvo" type="number" min="1" step="1" value="{{ valores.id_dim_publico_alvo }}">
+          </div>
+          <div class="col-3">
+            <label for="quantidade_empresas_regiao">Empresas na região</label>
+            <input id="quantidade_empresas_regiao" name="quantidade_empresas_regiao" type="number" min="0" step="1" value="{{ valores.quantidade_empresas_regiao }}">
+          </div>
+          <div class="col-3">
+            <label for="quantidade_segmentos_regiao">Segmentos na região</label>
+            <input id="quantidade_segmentos_regiao" name="quantidade_segmentos_regiao" type="number" min="0" step="1" value="{{ valores.quantidade_segmentos_regiao }}">
+          </div>
+          <div class="col-3">
+            <label for="classe_segmento_predominante">Classe predominante</label>
+            <input id="classe_segmento_predominante" name="classe_segmento_predominante" maxlength="200" value="{{ valores.classe_segmento_predominante }}">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card cadastro-section">
+      <div class="cadastro-section-header">
+        <h2>5. Faces do painel</h2>
+        <span>Relacionadas automaticamente ao painel cadastrado</span>
+      </div>
+      <div class="cadastro-section-body">
+        <div id="facesList" class="faces-list">
+          {% for item in faces %}
+            <div class="face-row" data-face-row>
+              <div class="face-index-wrap">
+                <div class="face-index" data-face-index>{{ loop.index }}</div>
+              </div>
+              <div>
+                <label>Face <span class="required-mark">*</span></label>
+                <input
+                  name="face"
+                  maxlength="5"
+                  required
+                  value="{{ item.face }}"
+                  data-face-name
+                  autocomplete="off"
+                >
+              </div>
+              <div>
+                <label>CodFace <span class="required-mark">*</span></label>
+                <input
+                  name="cod_face"
+                  maxlength="20"
+                  required
+                  value="{{ item.cod_face }}"
+                  data-cod-face
+                  data-auto="{% if item.cod_face %}0{% else %}1{% endif %}"
+                  autocomplete="off"
+                  placeholder="Ex.: 759A"
+                >
+              </div>
+              <div class="face-type-group">
+                <label>Tipo herdado do painel</label>
+                <div class="face-type-readonly" data-face-type>Selecione o tipo do painel</div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        <span class="field-help">
+          Ao alterar a quantidade de faces, a tela cria ou remove as linhas automaticamente.
+          O tipo de cada face será o mesmo tipo escolhido para o painel.
+        </span>
+      </div>
+    </section>
+
+    <section class="card cadastro-section">
+      <div class="cadastro-section-header">
+        <h2>6. Imagem principal</h2>
+        <span>Opcional — JPG, PNG ou WEBP, até 15 MB</span>
+      </div>
+      <div class="cadastro-section-body">
+        <div class="form-grid" style="margin-bottom: 15px;">
+          <div class="col-6">
+            <label for="imagem_cod_face">Face vinculada à imagem</label>
+            <select id="imagem_cod_face" name="imagem_cod_face" data-selected="{{ valores.imagem_cod_face }}">
+              <option value="">Selecione a face</option>
+            </select>
+            <span class="field-help">A tabela de imagens se relaciona com uma face, por isso a vinculação é obrigatória quando houver arquivo.</span>
+          </div>
+          <div class="col-6" style="display: flex; align-items: end;">
+            <label class="boolean-card" style="width: 100%;">
+              <input type="checkbox" name="bit_imagem_orcamento" value="1" {% if valores.bit_imagem_orcamento %}checked{% endif %}>
+              <span>Usar esta imagem nos orçamentos</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="upload-layout">
+          <label id="uploadDropzone" class="upload-dropzone" for="imagem_painel">
+            <input id="imagem_painel" name="imagem_painel" type="file" accept="image/jpeg,image/png,image/webp">
+            <div>
+              <div class="upload-icon" aria-hidden="true">↑</div>
+              <p class="upload-title">Clique ou arraste a imagem para cá</p>
+              <p id="uploadFileName" class="upload-copy">
+                A imagem será validada, recodificada e registrada em DimImagemPainel.
+              </p>
+            </div>
+          </label>
+
+          <div class="preview-card">
+            <img id="imagePreview" alt="Pré-visualização da imagem selecionada">
+            <div id="previewEmpty" class="preview-empty">
+              A pré-visualização aparecerá aqui.<br>
+              O arquivo não é enviado até você confirmar o cadastro.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="form-actions-sticky">
+      <p>Campos marcados com <span class="required-mark">*</span> são obrigatórios.</p>
+      <div class="actions" style="margin: 0;">
+        <a class="btn btn-secondary" href="{{ url_for('Paineis.lista_paineis') }}">Cancelar</a>
+        <button id="submitCadastroPainel" class="btn btn-primary" type="submit">Cadastrar painel</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<script>
+(() => {
+  const form = document.getElementById('formCadastroPainel');
+  const codPonto = document.getElementById('cod_ponto');
+  const quantidadeFaces = document.getElementById('quantidade_faces');
+  const tipoPainel = document.getElementById('tipo');
+  const facesList = document.getElementById('facesList');
+  const imagemFace = document.getElementById('imagem_cod_face');
+  const imagemInput = document.getElementById('imagem_painel');
+  const preview = document.getElementById('imagePreview');
+  const previewEmpty = document.getElementById('previewEmpty');
+  const uploadFileName = document.getElementById('uploadFileName');
+  const dropzone = document.getElementById('uploadDropzone');
+  const submitButton = document.getElementById('submitCadastroPainel');
+  const faceSelecionadaServidor = imagemFace.dataset.selected || '';
+  let previewUrl = null;
+
+  function letrasFace(indice) {
+    let numero = indice + 1;
+    let resultado = '';
+    while (numero > 0) {
+      numero -= 1;
+      resultado = String.fromCharCode(65 + (numero % 26)) + resultado;
+      numero = Math.floor(numero / 26);
+    }
+    return resultado;
+  }
+
+  function criarLinhaFace(indice) {
+    const letra = letrasFace(indice);
+    const linha = document.createElement('div');
+    linha.className = 'face-row';
+    linha.dataset.faceRow = '';
+    linha.innerHTML = `
+      <div class="face-index-wrap">
+        <div class="face-index" data-face-index>${indice + 1}</div>
+      </div>
+      <div>
+        <label>Face <span class="required-mark">*</span></label>
+        <input name="face" maxlength="5" required value="${letra}" data-face-name autocomplete="off">
+      </div>
+      <div>
+        <label>CodFace <span class="required-mark">*</span></label>
+        <input name="cod_face" maxlength="20" required data-cod-face data-auto="1" autocomplete="off" placeholder="Ex.: 759${letra}">
+      </div>
+      <div class="face-type-group">
+        <label>Tipo herdado do painel</label>
+        <div class="face-type-readonly" data-face-type>Selecione o tipo do painel</div>
+      </div>
+    `;
+    facesList.appendChild(linha);
+  }
+
+  function quantidadeNormalizada() {
+    const valor = Number.parseInt(quantidadeFaces.value || '1', 10);
+    if (!Number.isFinite(valor)) return 1;
+    return Math.min(50, Math.max(1, valor));
+  }
+
+  function atualizarIndicesETipos() {
+    const tipo = tipoPainel.value || 'Selecione o tipo do painel';
+    const linhas = [...facesList.querySelectorAll('[data-face-row]')];
+    linhas.forEach((linha, indice) => {
+      linha.querySelector('[data-face-index]').textContent = String(indice + 1);
+      linha.querySelector('[data-face-type]').textContent = tipo;
+    });
+  }
+
+  function gerarCodigosAutomaticos() {
+    const ponto = (codPonto.value || '').trim();
+    const linhas = [...facesList.querySelectorAll('[data-face-row]')];
+    linhas.forEach((linha, indice) => {
+      const faceInput = linha.querySelector('[data-face-name]');
+      const codFaceInput = linha.querySelector('[data-cod-face]');
+      if (!faceInput.value.trim()) faceInput.value = letrasFace(indice);
+      if (codFaceInput.dataset.auto === '1') {
+        codFaceInput.value = ponto ? `${ponto}${faceInput.value.trim().toUpperCase()}` : '';
+      }
+    });
+    atualizarSelectImagem();
+  }
+
+  function atualizarSelectImagem() {
+    const selecionadoAtual = imagemFace.value || faceSelecionadaServidor;
+    const codigos = [...facesList.querySelectorAll('[data-cod-face]')]
+      .map(input => input.value.trim().toUpperCase())
+      .filter(Boolean);
+
+    imagemFace.innerHTML = '<option value="">Selecione a face</option>';
+    codigos.forEach(codigo => {
+      const option = document.createElement('option');
+      option.value = codigo;
+      option.textContent = codigo;
+      option.selected = codigo === selecionadoAtual;
+      imagemFace.appendChild(option);
+    });
+
+    if (!imagemFace.value && codigos.length === 1) {
+      imagemFace.value = codigos[0];
+    }
+  }
+
+  function reconciliarFaces() {
+    const desejado = quantidadeNormalizada();
+    quantidadeFaces.value = String(desejado);
+    let linhas = [...facesList.querySelectorAll('[data-face-row]')];
+
+    while (linhas.length < desejado) {
+      criarLinhaFace(linhas.length);
+      linhas = [...facesList.querySelectorAll('[data-face-row]')];
+    }
+    while (linhas.length > desejado) {
+      linhas[linhas.length - 1].remove();
+      linhas = [...facesList.querySelectorAll('[data-face-row]')];
+    }
+
+    atualizarIndicesETipos();
+    gerarCodigosAutomaticos();
+  }
+
+  quantidadeFaces.addEventListener('change', reconciliarFaces);
+  quantidadeFaces.addEventListener('input', reconciliarFaces);
+  codPonto.addEventListener('input', gerarCodigosAutomaticos);
+  tipoPainel.addEventListener('change', atualizarIndicesETipos);
+
+  facesList.addEventListener('input', event => {
+    const linha = event.target.closest('[data-face-row]');
+    if (!linha) return;
+
+    if (event.target.matches('[data-cod-face]')) {
+      event.target.dataset.auto = '0';
+      event.target.value = event.target.value.toUpperCase();
+      atualizarSelectImagem();
+    }
+
+    if (event.target.matches('[data-face-name]')) {
+      event.target.value = event.target.value.toUpperCase();
+      const codFaceInput = linha.querySelector('[data-cod-face]');
+      if (codFaceInput.dataset.auto === '1') gerarCodigosAutomaticos();
+    }
+  });
+
+  function atualizarPreview() {
+    const arquivo = imagemInput.files && imagemInput.files[0];
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      previewUrl = null;
+    }
+
+    if (!arquivo) {
+      preview.removeAttribute('src');
+      preview.style.display = 'none';
+      previewEmpty.style.display = 'block';
+      uploadFileName.textContent = 'A imagem será validada, recodificada e registrada em DimImagemPainel.';
+      return;
+    }
+
+    previewUrl = URL.createObjectURL(arquivo);
+    preview.src = previewUrl;
+    preview.style.display = 'block';
+    previewEmpty.style.display = 'none';
+    uploadFileName.textContent = `${arquivo.name} • ${(arquivo.size / 1024 / 1024).toFixed(2)} MB`;
+
+    if (!imagemFace.value) {
+      atualizarSelectImagem();
+      const primeira = imagemFace.querySelector('option[value]:not([value=""])');
+      if (primeira) imagemFace.value = primeira.value;
+    }
+  }
+
+  imagemInput.addEventListener('change', atualizarPreview);
+  ['dragenter', 'dragover'].forEach(nome => {
+    dropzone.addEventListener(nome, () => dropzone.classList.add('is-dragging'));
+  });
+  ['dragleave', 'drop'].forEach(nome => {
+    dropzone.addEventListener(nome, () => dropzone.classList.remove('is-dragging'));
+  });
+
+  form.addEventListener('submit', () => {
+    submitButton.disabled = true;
+    submitButton.textContent = 'Cadastrando...';
+  });
+
+  atualizarIndicesETipos();
+  gerarCodigosAutomaticos();
+  atualizarSelectImagem();
+})();
+</script>
+{% endblock %}

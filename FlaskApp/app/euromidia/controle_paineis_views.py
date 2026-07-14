@@ -38724,3 +38724,697 @@ def _normalizar_filtros_clientes_para_backend(filtros):
         saida["cliente"] = "todos"
 
     return _bloquear_filtros_clientes_sem_permissao(saida)
+
+
+
+
+
+
+
+
+
+
+
+
+TIPOS_PAINEL_CADASTRO = (
+    "EMPENA",
+    "FRONT LIGHT",
+    "MOBILIÁRIO",
+    "MOBILIÁRIO URBANO DIGITAL",
+    "MUPI",
+    "PAINEL DIGITAL",
+    "RELÓGIO",
+    "TOPO",
+    "TRIEDRO",
+)
+
+
+def _cadastro_painel_renderizar(erros=None, status_code=200):
+    """Eu devolvo o formulário preservando os valores digitados."""
+    campos = (
+        "cod_ponto",
+        "quantidade_faces",
+        "tipo",
+        "cidade",
+        "uf",
+        "logradouro",
+        "sentido",
+        "bairro",
+        "referencia",
+        "numero",
+        "cep",
+        "latitude",
+        "longitude",
+        "formato_lxa",
+        "formato_lona_acabada_lxa_m",
+        "area_total_m",
+        "restricoes",
+        "tipo_solo",
+        "data_instalacao",
+        "data_retirada",
+        "exibidora",
+        "id_produto",
+        "id_dim_publico_alvo",
+        "quantidade_empresas_regiao",
+        "quantidade_segmentos_regiao",
+        "classe_segmento_predominante",
+        "imagem_cod_face",
+    )
+
+    valores = {campo: (request.form.get(campo) or "").strip() for campo in campos}
+    valores.update(
+        {
+            "bit_iluminado": request.form.get("bit_iluminado") == "1",
+            "bit_proprio": request.form.get("bit_proprio") == "1",
+            "bit_ativo": request.form.get("bit_ativo") == "1",
+            "bit_aluguel": request.form.get("bit_aluguel") == "1",
+            "bit_energia": request.form.get("bit_energia") == "1",
+            "bit_internet": request.form.get("bit_internet") == "1",
+            "bit_imagem_orcamento": request.form.get("bit_imagem_orcamento") == "1",
+        }
+    )
+
+    if request.method == "GET":
+        valores["quantidade_faces"] = "1"
+        valores["bit_ativo"] = True
+        valores["bit_imagem_orcamento"] = True
+
+    nomes_faces = request.form.getlist("face")
+    codigos_faces = request.form.getlist("cod_face")
+    total_linhas = max(len(nomes_faces), len(codigos_faces))
+
+    faces = []
+    for indice in range(total_linhas):
+        faces.append(
+            {
+                "face": (nomes_faces[indice] if indice < len(nomes_faces) else "").strip(),
+                "cod_face": (codigos_faces[indice] if indice < len(codigos_faces) else "").strip(),
+            }
+        )
+
+    if not faces:
+        faces = [{"face": "A", "cod_face": ""}]
+
+    resposta = render_template(
+        "euromidia/cadastrar_paineis.html",
+        tipos_painel=TIPOS_PAINEL_CADASTRO,
+        valores=valores,
+        faces=faces,
+        erros=list(erros or []),
+    )
+    return resposta, int(status_code)
+
+
+def _cadastro_painel_imagem_sanitizada(arquivo) -> dict:
+    """Eu valido o upload e o recodifico para não persistir bytes arbitrários."""
+    nome_original = secure_filename(str(getattr(arquivo, "filename", "") or ""))
+    extensao = Path(nome_original).suffix.lower()
+    if extensao == ".jpeg":
+        extensao = ".jpg"
+
+    formatos_por_extensao = {
+        ".jpg": {"JPEG"},
+        ".png": {"PNG"},
+        ".webp": {"WEBP"},
+    }
+    mimes_por_extensao = {
+        ".jpg": {"image/jpeg", "image/pjpeg"},
+        ".png": {"image/png"},
+        ".webp": {"image/webp"},
+    }
+
+    if extensao not in formatos_por_extensao:
+        raise ValueError("A imagem deve estar em JPG, PNG ou WEBP.")
+
+    mimetype = str(getattr(arquivo, "mimetype", "") or "").strip().lower()
+    if mimetype not in mimes_por_extensao[extensao]:
+        raise ValueError("O tipo do arquivo não corresponde à extensão da imagem.")
+
+    limite_bytes = int(
+        current_app.config.get(
+            "PAINEIS_TAMANHO_MAXIMO_IMAGEM_BYTES",
+            15 * 1024 * 1024,
+        )
+    )
+    limite_pixels = int(
+        current_app.config.get(
+            "PAINEIS_IMAGEM_MAX_PIXELS",
+            40_000_000,
+        )
+    )
+
+    try:
+        arquivo.stream.seek(0)
+        conteudo = arquivo.stream.read(limite_bytes + 1)
+        arquivo.stream.seek(0)
+    except Exception as exc:
+        raise ValueError("Não foi possível ler a imagem enviada.") from exc
+
+    if not conteudo:
+        raise ValueError("A imagem enviada está vazia.")
+    if len(conteudo) > limite_bytes:
+        raise ValueError(
+            f"A imagem excede o limite de {limite_bytes // (1024 * 1024)} MB."
+        )
+
+    try:
+        with Image.open(BytesIO(conteudo)) as imagem_validacao:
+            formato_real = str(imagem_validacao.format or "").upper()
+            imagem_validacao.verify()
+
+        if formato_real not in formatos_por_extensao[extensao]:
+            raise ValueError("O conteúdo da imagem não corresponde à extensão enviada.")
+
+        with Image.open(BytesIO(conteudo)) as imagem_original:
+            imagem = ImageOps.exif_transpose(imagem_original)
+            largura, altura = imagem.size
+
+            if largura <= 0 or altura <= 0:
+                raise ValueError("A imagem possui dimensões inválidas.")
+            if (largura * altura) > limite_pixels:
+                raise ValueError("A resolução da imagem excede o limite permitido.")
+
+            saida = BytesIO()
+            if extensao == ".jpg":
+                imagem.convert("RGB").save(
+                    saida,
+                    format="JPEG",
+                    quality=92,
+                    optimize=True,
+                )
+            elif extensao == ".png":
+                possui_alpha = "A" in imagem.getbands() or "transparency" in imagem.info
+                modo = "RGBA" if possui_alpha else "RGB"
+                imagem.convert(modo).save(saida, format="PNG", optimize=True)
+            else:
+                possui_alpha = "A" in imagem.getbands()
+                modo = "RGBA" if possui_alpha else "RGB"
+                imagem.convert(modo).save(
+                    saida,
+                    format="WEBP",
+                    quality=92,
+                    method=6,
+                )
+
+            conteudo_sanitizado = saida.getvalue()
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("O arquivo enviado não é uma imagem válida.") from exc
+
+    if not conteudo_sanitizado:
+        raise ValueError("Não foi possível processar a imagem enviada.")
+
+    return {
+        "bytes": conteudo_sanitizado,
+        "extensao": extensao,
+        "largura": int(largura),
+        "altura": int(altura),
+    }
+
+
+@paineis_bp.route("/cadastrar-paineis", methods=["GET", "POST"])
+@login_required
+@requer_permissao("ADMIN_TUDO")
+@limiter.limit("10 per minute", methods=["POST"])
+@retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
+def cadastrar_paineis():
+    """Eu cadastro o painel, suas faces e a imagem principal em uma única transação."""
+    if request.method == "GET":
+        return _cadastro_painel_renderizar()
+
+    erros = []
+
+    def _texto(nome, rotulo, maximo, obrigatorio=False, maiusculo=False):
+        valor = str(request.form.get(nome) or "").strip()
+        if maiusculo:
+            valor = valor.upper()
+        if obrigatorio and not valor:
+            erros.append(f"{rotulo} é obrigatório.")
+        if valor and len(valor) > int(maximo):
+            erros.append(f"{rotulo} deve ter no máximo {int(maximo)} caracteres.")
+        return valor or None
+
+    def _inteiro(nome, rotulo, obrigatorio=False, minimo=None, maximo=None):
+        valor_txt = str(request.form.get(nome) or "").strip()
+        if not valor_txt:
+            if obrigatorio:
+                erros.append(f"{rotulo} é obrigatório.")
+            return None
+        try:
+            valor = int(valor_txt)
+        except Exception:
+            erros.append(f"{rotulo} deve ser um número inteiro.")
+            return None
+        if minimo is not None and valor < minimo:
+            erros.append(f"{rotulo} deve ser maior ou igual a {minimo}.")
+        if maximo is not None and valor > maximo:
+            erros.append(f"{rotulo} deve ser menor ou igual a {maximo}.")
+        return valor
+
+    def _decimal(nome, rotulo, minimo=None, maximo=None):
+        valor_txt = str(request.form.get(nome) or "").strip()
+        if not valor_txt:
+            return None
+
+        normalizado = valor_txt
+        if "," in normalizado and "." in normalizado:
+            normalizado = normalizado.replace(".", "").replace(",", ".")
+        else:
+            normalizado = normalizado.replace(",", ".")
+
+        try:
+            valor = Decimal(normalizado)
+            if not valor.is_finite():
+                raise InvalidOperation
+        except Exception:
+            erros.append(f"{rotulo} deve ser um número válido.")
+            return None
+
+        if minimo is not None and valor < Decimal(str(minimo)):
+            erros.append(f"{rotulo} deve ser maior ou igual a {minimo}.")
+        if maximo is not None and valor > Decimal(str(maximo)):
+            erros.append(f"{rotulo} deve ser menor ou igual a {maximo}.")
+        return valor
+
+    def _data(nome, rotulo):
+        valor_txt = str(request.form.get(nome) or "").strip()
+        if not valor_txt:
+            return None
+        try:
+            return datetime.strptime(valor_txt, "%Y-%m-%d").date()
+        except Exception:
+            erros.append(f"{rotulo} possui uma data inválida.")
+            return None
+
+    cod_ponto = _inteiro("cod_ponto", "Código do ponto", obrigatorio=True, minimo=1)
+    quantidade_faces = _inteiro(
+        "quantidade_faces",
+        "Quantidade de faces",
+        obrigatorio=True,
+        minimo=1,
+        maximo=50,
+    )
+    tipo = _texto("tipo", "Tipo", 80, obrigatorio=True, maiusculo=True)
+    if tipo and tipo not in TIPOS_PAINEL_CADASTRO:
+        erros.append("O tipo de painel selecionado é inválido.")
+
+    cidade = _texto("cidade", "Cidade", 150)
+    uf = _texto("uf", "UF", 2, maiusculo=True)
+    if uf and (len(uf) != 2 or not uf.isalpha()):
+        erros.append("UF deve conter exatamente duas letras.")
+
+    logradouro = _texto("logradouro", "Logradouro", 200)
+    sentido = _texto("sentido", "Sentido", 200)
+    bairro = _texto("bairro", "Bairro", 100)
+    referencia = _texto("referencia", "Referência", 200)
+    numero = _texto("numero", "Número", 20)
+    cep = _texto("cep", "CEP", 30)
+    latitude = _decimal("latitude", "Latitude", minimo=-90, maximo=90)
+    longitude = _decimal("longitude", "Longitude", minimo=-180, maximo=180)
+    formato_lxa = _texto("formato_lxa", "Formato L x A", 20)
+    formato_lona = _texto(
+        "formato_lona_acabada_lxa_m",
+        "Formato da lona acabada",
+        20,
+    )
+    area_total = _decimal("area_total_m", "Área total", minimo=0)
+    restricoes = _texto("restricoes", "Restrições", 200)
+    tipo_solo = _texto("tipo_solo", "Tipo de solo", 10)
+    data_instalacao = _data("data_instalacao", "Data de instalação")
+    data_retirada = _data("data_retirada", "Data de retirada")
+    if data_instalacao and data_retirada and data_retirada < data_instalacao:
+        erros.append("A data de retirada não pode ser anterior à data de instalação.")
+
+    exibidora = _texto("exibidora", "Exibidora", 60)
+    id_produto = _inteiro("id_produto", "ID do produto", minimo=1)
+    id_dim_publico_alvo = _inteiro(
+        "id_dim_publico_alvo",
+        "ID do público-alvo",
+        minimo=1,
+    )
+    quantidade_empresas_regiao = _inteiro(
+        "quantidade_empresas_regiao",
+        "Quantidade de empresas na região",
+        minimo=0,
+    )
+    quantidade_segmentos_regiao = _inteiro(
+        "quantidade_segmentos_regiao",
+        "Quantidade de segmentos na região",
+        minimo=0,
+    )
+    classe_segmento_predominante = _texto(
+        "classe_segmento_predominante",
+        "Classe do segmento predominante",
+        200,
+    )
+
+    nomes_faces = request.form.getlist("face")
+    codigos_faces = request.form.getlist("cod_face")
+    total_linhas_faces = max(len(nomes_faces), len(codigos_faces))
+    faces = []
+
+    for indice in range(total_linhas_faces):
+        face = (nomes_faces[indice] if indice < len(nomes_faces) else "").strip().upper()
+        cod_face = (
+            codigos_faces[indice] if indice < len(codigos_faces) else ""
+        ).strip().upper()
+
+        if not face and not cod_face:
+            continue
+        if not face:
+            erros.append(f"A identificação da face {indice + 1} é obrigatória.")
+        if not cod_face:
+            erros.append(f"O código da face {indice + 1} é obrigatório.")
+        if len(face) > 5:
+            erros.append(f"A face {indice + 1} deve ter no máximo 5 caracteres.")
+        if len(cod_face) > 20:
+            erros.append(f"O código da face {indice + 1} deve ter no máximo 20 caracteres.")
+
+        faces.append({"face": face, "cod_face": cod_face})
+
+    if quantidade_faces is not None and len(faces) != quantidade_faces:
+        erros.append(
+            "A quantidade de faces informada deve ser igual ao número de faces preenchidas."
+        )
+
+    codigos_normalizados = [item["cod_face"] for item in faces if item["cod_face"]]
+    if len(codigos_normalizados) != len(set(codigos_normalizados)):
+        erros.append("Existem códigos de face repetidos no formulário.")
+
+    imagem_cod_face = str(request.form.get("imagem_cod_face") or "").strip().upper()
+    arquivo_imagem = request.files.get("imagem_painel")
+    possui_imagem = bool(
+        arquivo_imagem is not None
+        and str(getattr(arquivo_imagem, "filename", "") or "").strip()
+    )
+
+    if possui_imagem:
+        if not imagem_cod_face and codigos_normalizados:
+            imagem_cod_face = codigos_normalizados[0]
+        if imagem_cod_face not in codigos_normalizados:
+            erros.append("Selecione uma face válida para vincular a imagem.")
+
+    imagem_processada = None
+    if possui_imagem and not erros:
+        try:
+            imagem_processada = _cadastro_painel_imagem_sanitizada(arquivo_imagem)
+        except ValueError as exc:
+            erros.append(str(exc))
+
+    if erros:
+        return _cadastro_painel_renderizar(erros, status_code=400)
+
+    parametros_painel = {
+        "cod_ponto": cod_ponto,
+        "quantidade_faces": quantidade_faces,
+        "tipo": tipo,
+        "cidade": cidade,
+        "uf": uf,
+        "logradouro": logradouro,
+        "sentido": sentido,
+        "bairro": bairro,
+        "referencia": referencia,
+        "numero": numero,
+        "cep": cep,
+        "latitude": latitude,
+        "longitude": longitude,
+        "formato_lxa": formato_lxa,
+        "formato_lona": formato_lona,
+        "area_total": float(area_total) if area_total is not None else None,
+        "bit_iluminado": 1 if request.form.get("bit_iluminado") == "1" else 0,
+        "restricoes": restricoes,
+        "tipo_solo": tipo_solo,
+        "data_instalacao": data_instalacao,
+        "data_retirada": data_retirada,
+        "exibidora": exibidora,
+        "bit_proprio": 1 if request.form.get("bit_proprio") == "1" else 0,
+        "bit_ativo": 1 if request.form.get("bit_ativo") == "1" else 0,
+        "bit_aluguel": 1 if request.form.get("bit_aluguel") == "1" else 0,
+        "bit_energia": 1 if request.form.get("bit_energia") == "1" else 0,
+        "bit_internet": 1 if request.form.get("bit_internet") == "1" else 0,
+        "id_produto": id_produto,
+        "id_dim_publico_alvo": id_dim_publico_alvo,
+        "quantidade_empresas_regiao": quantidade_empresas_regiao,
+        "quantidade_segmentos_regiao": quantidade_segmentos_regiao,
+        "classe_segmento_predominante": classe_segmento_predominante,
+    }
+
+    caminho_imagem_salva = None
+
+    try:
+        painel_existente = db.session.execute(
+            text("""
+                SELECT TOP (1) IDDimPaineisEuromidia
+                FROM [Integracao].[Silver].[DimPaineisEuromidia]
+                WHERE CodPonto = :cod_ponto
+            """),
+            {"cod_ponto": cod_ponto},
+        ).scalar()
+
+        if painel_existente is not None:
+            db.session.rollback()
+            return _cadastro_painel_renderizar(
+                [f"Já existe um painel cadastrado com o CodPonto {cod_ponto}."],
+                status_code=409,
+            )
+
+        parametros_cod_faces = {
+            f"cod_face_{indice}": codigo
+            for indice, codigo in enumerate(codigos_normalizados)
+        }
+        placeholders_cod_faces = ", ".join(
+            f":cod_face_{indice}" for indice in range(len(codigos_normalizados))
+        )
+
+        if placeholders_cod_faces:
+            cod_faces_existentes = db.session.execute(
+                text(f"""
+                    SELECT DISTINCT UPPER(LTRIM(RTRIM(CodFace))) AS CodFace
+                    FROM [Integracao].[Silver].[DimFacesPaineis]
+                    WHERE UPPER(LTRIM(RTRIM(CodFace))) IN ({placeholders_cod_faces})
+                """),
+                parametros_cod_faces,
+            ).scalars().all()
+        else:
+            cod_faces_existentes = []
+
+        if cod_faces_existentes:
+            db.session.rollback()
+            lista_existentes = ", ".join(sorted(str(item) for item in cod_faces_existentes))
+            return _cadastro_painel_renderizar(
+                [f"Os seguintes códigos de face já estão cadastrados: {lista_existentes}."],
+                status_code=409,
+            )
+
+        url_imagem = None
+        if imagem_processada is not None:
+            pasta_configurada = str(
+                current_app.config.get("PAINEIS_UPLOAD_DIR") or ""
+            ).strip()
+            if pasta_configurada:
+                pasta_upload = Path(pasta_configurada).expanduser()
+            else:
+                if not current_app.static_folder:
+                    raise RuntimeError("A pasta static da aplicação não está configurada.")
+                pasta_upload = Path(current_app.static_folder) / "uploads" / "paineis"
+
+            pasta_upload.mkdir(parents=True, exist_ok=True)
+
+            nome_base = secure_filename(
+                f"painel_{cod_ponto}_{imagem_cod_face}"
+            ) or f"painel_{cod_ponto}"
+            nome_arquivo = (
+                f"{nome_base}_{uuid.uuid4().hex[:12]}"
+                f"{imagem_processada['extensao']}"
+            )
+            caminho_imagem_salva = pasta_upload / nome_arquivo
+            caminho_imagem_salva.write_bytes(imagem_processada["bytes"])
+
+            prefixo_url = str(
+                current_app.config.get(
+                    "PAINEIS_UPLOAD_URL_PREFIX",
+                    "/static/uploads/paineis",
+                )
+                or "/static/uploads/paineis"
+            ).strip().rstrip("/")
+            if not prefixo_url.lower().startswith(("http://", "https://", "/")):
+                prefixo_url = f"/{prefixo_url}"
+            url_imagem = f"{prefixo_url}/{nome_arquivo}"
+
+            if len(url_imagem) > 600:
+                raise RuntimeError("A URL gerada para a imagem excedeu o limite permitido.")
+
+        id_painel = db.session.execute(
+            text("""
+                INSERT INTO [Integracao].[Silver].[DimPaineisEuromidia] (
+                    DataAtualizacao,
+                    CodPonto,
+                    QuantidadeFaces,
+                    Tipo,
+                    Cidade,
+                    UF,
+                    Logradouro,
+                    Sentido,
+                    Bairro,
+                    Referencia,
+                    Numero,
+                    CEP,
+                    Latitude,
+                    Longitude,
+                    FormatoLxA,
+                    FormatoLonaAcabadaLxAm,
+                    AreaTotalm,
+                    BitIluminado,
+                    Restricoes,
+                    TipoSolo,
+                    DataInstalacao,
+                    DataRetirada,
+                    Exibidora,
+                    BitProprio,
+                    BitAtivo,
+                    BitAluguel,
+                    BitEnergia,
+                    BitInternet,
+                    IDProduto,
+                    IDDimPublicoAlvo,
+                    QuantidadeEmpresasRegiao,
+                    QuantidadeSegmentosRegiao,
+                    ClasseSegmentoPredominante
+                )
+                OUTPUT INSERTED.IDDimPaineisEuromidia
+                VALUES (
+                    GETDATE(),
+                    :cod_ponto,
+                    :quantidade_faces,
+                    :tipo,
+                    :cidade,
+                    :uf,
+                    :logradouro,
+                    :sentido,
+                    :bairro,
+                    :referencia,
+                    :numero,
+                    :cep,
+                    :latitude,
+                    :longitude,
+                    :formato_lxa,
+                    :formato_lona,
+                    :area_total,
+                    :bit_iluminado,
+                    :restricoes,
+                    :tipo_solo,
+                    :data_instalacao,
+                    :data_retirada,
+                    :exibidora,
+                    :bit_proprio,
+                    :bit_ativo,
+                    :bit_aluguel,
+                    :bit_energia,
+                    :bit_internet,
+                    :id_produto,
+                    :id_dim_publico_alvo,
+                    :quantidade_empresas_regiao,
+                    :quantidade_segmentos_regiao,
+                    :classe_segmento_predominante
+                )
+            """),
+            parametros_painel,
+        ).scalar_one()
+
+        ids_faces_por_codigo = {}
+        sql_inserir_face = text("""
+            INSERT INTO [Integracao].[Silver].[DimFacesPaineis] (
+                CodPonto,
+                Face,
+                CodFace,
+                Tipo,
+                IDDimPaineisEuromidia
+            )
+            OUTPUT INSERTED.IDDimFacesPaineis
+            VALUES (
+                :cod_ponto,
+                :face,
+                :cod_face,
+                :tipo,
+                :id_painel
+            )
+        """)
+
+        for item_face in faces:
+            id_face = db.session.execute(
+                sql_inserir_face,
+                {
+                    "cod_ponto": cod_ponto,
+                    "face": item_face["face"],
+                    "cod_face": item_face["cod_face"],
+                    "tipo": tipo,
+                    "id_painel": int(id_painel),
+                },
+            ).scalar_one()
+            ids_faces_por_codigo[item_face["cod_face"]] = int(id_face)
+
+        if imagem_processada is not None:
+            id_face_imagem = ids_faces_por_codigo[imagem_cod_face]
+            db.session.execute(
+                text("""
+                    INSERT INTO [Integracao].[Silver].[DimImagemPainel] (
+                        IDDimFacesPaineis,
+                        UrlImagem,
+                        NumeroImagem,
+                        DataAtualizacao,
+                        BitAtivo,
+                        CodFace,
+                        CodPonto,
+                        BitImagemOrcamento
+                    )
+                    VALUES (
+                        :id_face,
+                        :url_imagem,
+                        1,
+                        GETDATE(),
+                        1,
+                        :cod_face,
+                        :cod_ponto,
+                        :bit_imagem_orcamento
+                    )
+                """),
+                {
+                    "id_face": id_face_imagem,
+                    "url_imagem": url_imagem,
+                    "cod_face": imagem_cod_face,
+                    "cod_ponto": cod_ponto,
+                    "bit_imagem_orcamento": (
+                        1 if request.form.get("bit_imagem_orcamento") == "1" else 0
+                    ),
+                },
+            )
+
+        db.session.commit()
+
+    except Exception:
+        db.session.rollback()
+        if caminho_imagem_salva is not None:
+            try:
+                caminho_imagem_salva.unlink(missing_ok=True)
+            except Exception:
+                current_app.logger.warning(
+                    "Não foi possível remover a imagem após rollback: %s",
+                    caminho_imagem_salva,
+                    exc_info=True,
+                )
+
+        current_app.logger.exception(
+            "Falha ao cadastrar painel, faces e imagem. CodPonto=%s",
+            cod_ponto,
+        )
+        return _cadastro_painel_renderizar(
+            ["Não foi possível cadastrar o painel. Nenhum dado foi gravado."],
+            status_code=500,
+        )
+
+    flash(
+        f"Painel {cod_ponto} cadastrado com {quantidade_faces} face(s) com sucesso.",
+        "success",
+    )
+    return redirect(url_for("Paineis.lista_paineis", q=str(cod_ponto)))
