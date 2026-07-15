@@ -1594,6 +1594,7 @@ CAPACIDADE_DIGITAL_FIXA = 16
 
 ID_PERFIL_VENDEDOR_PADRAO = 3
 ID_PERFIL_ADMIN_PADRAO = 1
+ID_PERFIL_CONTROLE_PADRAO = 4
 ID_PERFIL_COORDENADOR_PADRAO = 5
 
 
@@ -1662,6 +1663,28 @@ def _usuario_logado_eh_perfil_coordenador() -> bool:
         return False
 
 
+def _usuario_logado_eh_perfil_controle() -> bool:
+    """Eu identifico Controle pelo ID 4 e por fallback pelo nome do perfil."""
+    try:
+        if int(getattr(current_user, "IDDimPerfilUsuario", 0) or 0) == ID_PERFIL_CONTROLE_PADRAO:
+            return True
+    except Exception:
+        pass
+
+    try:
+        perfil = getattr(current_user, "perfil", None)
+        candidatos = [
+            getattr(current_user, "NomePerfil", None),
+            getattr(current_user, "Perfil", None),
+            getattr(current_user, "DescricaoPerfil", None),
+            getattr(perfil, "NomePerfil", None) if perfil is not None else None,
+            getattr(perfil, "Descricao", None) if perfil is not None else None,
+        ]
+        return any(_normalizar_nome_perfil_paineis(valor) == "controle" for valor in candidatos)
+    except Exception:
+        return False
+
+
 def _usuario_logado_tem_acesso_operacional_total_paineis() -> bool:
     """Admin e Coordenador enxergam os filtros e ações operacionais completas."""
     return _usuario_logado_eh_perfil_admin() or _usuario_logado_eh_perfil_coordenador()
@@ -1709,6 +1732,30 @@ def _id_usuario_logado_carteira() -> int:
         return int(getattr(current_user, "IDDimUsuarios", 0) or 0)
     except Exception:
         return 0
+
+
+def _usuario_logado_pode_ver_marca_reserva(id_usuario_criador) -> bool:
+    """Aplica a regra de confidencialidade da marca exibida nas reservas da grade.
+
+    A marca pode ser vista por ADMIN, COORDENADOR e CONTROLE ou pelo próprio
+    usuário que criou a reserva. Identificador ausente ou inválido é tratado de
+    forma restritiva: somente os três perfis operacionais continuam autorizados.
+    """
+    if (
+        _usuario_logado_eh_perfil_admin()
+        or _usuario_logado_eh_perfil_coordenador()
+        or _usuario_logado_eh_perfil_controle()
+    ):
+        return True
+
+    id_usuario_logado = _id_usuario_logado_carteira()
+
+    try:
+        id_criador = int(id_usuario_criador or 0)
+    except Exception:
+        id_criador = 0
+
+    return bool(id_usuario_logado > 0 and id_criador > 0 and id_usuario_logado == id_criador)
 
 
 def _resolver_id_vendedor_logado_carteira() -> int:
@@ -5836,6 +5883,7 @@ def grade_painel(codponto: int):
                 ,CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 105), 120)
                 ,NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), oc.[ExpiraEm]))), '')
              ) AS ExpiraEm
+            ,TRY_CONVERT(int, oc.[CriadoPorIDUsuario]) AS IDUsuarioCriadorReserva
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
         WHERE (
                 oc.[CodPonto] = :codponto
@@ -5883,7 +5931,8 @@ def grade_painel(codponto: int):
         filtro_cliente_low = filtro_cliente.lower()
         rows_reservas_raw = [
             rr for rr in (rows_reservas_raw or [])
-            if filtro_cliente_low in str(rr[3] or "").lower()
+            if _usuario_logado_pode_ver_marca_reserva(rr[22] if len(rr) > 22 else None)
+            and filtro_cliente_low in str(rr[3] or "").lower()
         ]
 
     # Mesma regra do dropdown para reservas: considera período, CodPonto, CodFace
@@ -6007,6 +6056,15 @@ def grade_painel(codponto: int):
         _bit_preferencia_item_origem_res = rr[19] if len(rr) > 19 else 0
         _tipo_reserva_res = rr[20] if len(rr) > 20 else None
         _expira_em_res = rr[21] if len(rr) > 21 else None
+        _id_usuario_criador_res = rr[22] if len(rr) > 22 else None
+
+        # A marca é removida ainda no backend. Assim ela não chega ao texto da
+        # barra, ao tooltip, aos atributos data-* nem ao HTML entregue ao navegador.
+        _marca_visivel_res = (
+            _marca
+            if _usuario_logado_pode_ver_marca_reserva(_id_usuario_criador_res)
+            else ""
+        )
 
         try:
             tipo_reserva_int = int(_tipo_reserva_res) if _tipo_reserva_res is not None else None
@@ -6054,7 +6112,7 @@ def grade_painel(codponto: int):
                 id_item_reserva,
                 _id_ctr,
                 _cf,
-                _marca,
+                _marca_visivel_res,
                 _vend,
                 _di,
                 _df,
@@ -9822,6 +9880,7 @@ def grade_painel_multi():
                 ,CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 105), 120)
                 ,NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), oc.[ExpiraEm]))), '')
              ) AS ExpiraEm
+                    ,TRY_CONVERT(int, oc.[CriadoPorIDUsuario]) AS IDUsuarioCriadorReserva
                 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
                 WHERE (
                         oc.[CodPonto] = :codponto
@@ -9880,8 +9939,12 @@ def grade_painel_multi():
 
                 marca_res = rr_res[3] if len(rr_res) > 3 else ""
                 vendedor_res = rr_res[4] if len(rr_res) > 4 else ""
+                id_usuario_criador_res = rr_res[16] if len(rr_res) > 16 else None
+                pode_ver_marca_res = _usuario_logado_pode_ver_marca_reserva(id_usuario_criador_res)
 
                 if filtro_cliente:
+                    if not pode_ver_marca_res:
+                        continue
                     texto_cliente_res = _normalizar_texto(marca_res).upper()
                     if filtro_cliente.upper() not in texto_cliente_res:
                         continue
@@ -9928,7 +9991,7 @@ def grade_painel_multi():
                         id_item_reserva,
                         rr_res[1] if len(rr_res) > 1 else None,
                         cf_res,
-                        marca_res,
+                        marca_res if pode_ver_marca_res else "",
                         vendedor_res,
                         rr_res[5] if len(rr_res) > 5 else None,
                         rr_res[6] if len(rr_res) > 6 else None,
