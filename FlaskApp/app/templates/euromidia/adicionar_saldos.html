@@ -1,0 +1,755 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Adicionar Saldo Produtos{% endblock %}
+
+{% block content %}
+<style>
+  .balance-page{
+    --balance-blue:#002884;
+    --balance-blue-2:#0340a7;
+    --balance-yellow:#ffb300;
+    --balance-text:#0f172a;
+    --balance-muted:#64748b;
+    --balance-border:#dfe5ee;
+    --balance-soft:#f6f8fc;
+    width:100%;
+    max-width:none;
+    padding:2px 0 28px;
+  }
+
+  .balance-page *,
+  .balance-page *::before,
+  .balance-page *::after{
+    box-sizing:border-box;
+  }
+
+  .balance-header{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:18px;
+    margin-bottom:18px;
+  }
+
+  .balance-header h1{
+    margin:0;
+    color:var(--balance-blue);
+    font-size:clamp(25px,2vw,34px);
+    line-height:1.12;
+    letter-spacing:-.03em;
+  }
+
+  .balance-header p{
+    max-width:760px;
+    margin:7px 0 0;
+    color:var(--balance-muted);
+    font-size:14px;
+    line-height:1.45;
+  }
+
+  .balance-button{
+    min-height:42px;
+    padding:9px 14px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    border:1px solid rgba(0,40,132,.2);
+    border-radius:10px;
+    background:#fff;
+    color:var(--balance-blue);
+    text-decoration:none;
+    font-size:13px;
+    font-weight:850;
+    cursor:pointer;
+  }
+
+  .balance-button:hover{
+    border-color:rgba(0,40,132,.38);
+    background:#eef3ff;
+  }
+
+  .balance-button-primary{
+    border-color:var(--balance-yellow);
+    background:var(--balance-yellow);
+    color:#14213d;
+  }
+
+  .balance-button-primary:hover{
+    border-color:#f2aa00;
+    background:#f2aa00;
+  }
+
+  .balance-button:disabled{
+    opacity:.58;
+    cursor:not-allowed;
+  }
+
+  .balance-button svg{
+    width:17px;
+    height:17px;
+    flex:0 0 auto;
+  }
+
+  .balance-card{
+    overflow:hidden;
+    border:1px solid var(--balance-border);
+    border-radius:16px;
+    background:#fff;
+    box-shadow:0 8px 28px rgba(15,23,42,.065);
+  }
+
+  .balance-card-header{
+    padding:17px 19px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:15px;
+    border-bottom:1px solid var(--balance-border);
+    background:linear-gradient(135deg,#fff 0%,#f7f9ff 100%);
+  }
+
+  .balance-card-header h2{
+    margin:0;
+    color:var(--balance-text);
+    font-size:17px;
+  }
+
+  .balance-card-header p{
+    margin:5px 0 0;
+    color:var(--balance-muted);
+    font-size:12px;
+  }
+
+  .balance-lines{
+    padding:14px;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    background:var(--balance-soft);
+  }
+
+  .balance-row{
+    overflow:hidden;
+    border:1px solid var(--balance-border);
+    border-radius:13px;
+    background:#fff;
+    box-shadow:0 3px 12px rgba(15,23,42,.035);
+  }
+
+  .balance-row.has-error{
+    border-color:#ef4444;
+    box-shadow:0 0 0 3px rgba(239,68,68,.09);
+  }
+
+  .balance-row-head{
+    min-height:43px;
+    padding:8px 12px 8px 15px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    border-bottom:1px solid #edf1f6;
+    background:#fbfcff;
+  }
+
+  .balance-row-title{
+    display:flex;
+    align-items:center;
+    gap:9px;
+    color:#334155;
+    font-size:12px;
+    font-weight:900;
+  }
+
+  .balance-row-number{
+    min-width:25px;
+    height:25px;
+    padding:0 7px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:999px;
+    background:var(--balance-blue);
+    color:#fff;
+    font-size:11px;
+  }
+
+  .balance-remove{
+    width:34px;
+    height:34px;
+    padding:0;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border:1px solid #fecaca;
+    border-radius:9px;
+    background:#fff;
+    color:#b91c1c;
+    cursor:pointer;
+  }
+
+  .balance-remove:hover{
+    background:#fef2f2;
+  }
+
+  .balance-remove:disabled{
+    opacity:.35;
+    cursor:not-allowed;
+  }
+
+  .balance-remove svg{
+    width:17px;
+    height:17px;
+  }
+
+  .balance-grid{
+    padding:15px;
+    display:grid;
+    grid-template-columns:repeat(12,minmax(0,1fr));
+    gap:13px;
+  }
+
+  .balance-field{
+    min-width:0;
+  }
+
+  .balance-field-id{grid-column:span 2;}
+  .balance-field-product{grid-column:span 4;}
+  .balance-field-quantity{grid-column:span 2;}
+  .balance-field-operation{grid-column:span 2;}
+  .balance-field-stock{grid-column:span 2;}
+  .balance-field-point,
+  .balance-field-batch,
+  .balance-field-serial{grid-column:span 4;}
+
+  .balance-field[hidden]{
+    display:none !important;
+  }
+
+  .balance-field label{
+    margin:0 0 6px;
+    display:block;
+    color:#52637a;
+    font-size:11px;
+    font-weight:850;
+  }
+
+  .balance-required{
+    color:#dc2626;
+  }
+
+  .balance-field input,
+  .balance-field select{
+    width:100%;
+    min-height:43px;
+    margin:0;
+    border:1px solid var(--balance-border);
+    border-radius:10px;
+    background:#fff;
+    color:var(--balance-text);
+    font-size:13px;
+  }
+
+  .balance-field input:focus,
+  .balance-field select:focus{
+    border-color:var(--balance-blue-2);
+    box-shadow:0 0 0 3px rgba(3,64,167,.11);
+  }
+
+  .balance-field input[readonly]{
+    background:#f8fafc;
+    color:#475569;
+  }
+
+  .balance-field-hint{
+    min-height:15px;
+    margin-top:5px;
+    color:var(--balance-muted);
+    font-size:10px;
+    line-height:1.35;
+  }
+
+  .balance-field-hint.error{
+    color:#b91c1c;
+    font-weight:750;
+  }
+
+  .balance-message{
+    margin:14px 14px 0;
+    padding:11px 13px;
+    border:1px solid #fecaca;
+    border-radius:10px;
+    background:#fef2f2;
+    color:#991b1b;
+    font-size:12px;
+    font-weight:750;
+  }
+
+  .balance-message[hidden]{
+    display:none;
+  }
+
+  .balance-footer{
+    padding:15px 17px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    border-top:1px solid var(--balance-border);
+    background:#fff;
+  }
+
+  .balance-footer-actions{
+    display:flex;
+    justify-content:flex-end;
+    gap:9px;
+    flex-wrap:wrap;
+  }
+
+  .balance-help{
+    margin:0;
+    color:var(--balance-muted);
+    font-size:11px;
+    line-height:1.4;
+  }
+
+  @media(max-width:1100px){
+    .balance-field-id{grid-column:span 3;}
+    .balance-field-product{grid-column:span 6;}
+    .balance-field-quantity{grid-column:span 3;}
+    .balance-field-operation,
+    .balance-field-stock{grid-column:span 6;}
+    .balance-field-point{grid-column:span 12;}
+    .balance-field-batch,
+    .balance-field-serial{grid-column:span 6;}
+  }
+
+  @media(max-width:700px){
+    .balance-header{
+      align-items:flex-start;
+      flex-direction:column;
+    }
+
+    .balance-header .balance-button{
+      width:100%;
+    }
+
+    .balance-card-header{
+      align-items:flex-start;
+      flex-direction:column;
+    }
+
+    .balance-card-header .balance-button{
+      width:100%;
+    }
+
+    .balance-lines{
+      padding:10px;
+    }
+
+    .balance-grid{
+      grid-template-columns:1fr;
+      padding:13px;
+    }
+
+    .balance-field-id,
+    .balance-field-product,
+    .balance-field-quantity,
+    .balance-field-operation,
+    .balance-field-stock,
+    .balance-field-point,
+    .balance-field-batch,
+    .balance-field-serial{
+      grid-column:1;
+    }
+
+    .balance-footer{
+      align-items:stretch;
+      flex-direction:column;
+    }
+
+    .balance-footer-actions,
+    .balance-footer-actions .balance-button{
+      width:100%;
+    }
+  }
+</style>
+
+<div class="balance-page">
+  <header class="balance-header">
+    <div>
+      <h1>Adicionar Saldo Produtos</h1>
+      <p>Registre entradas ou saídas, selecione o estoque e informe lote ou número de série quando forem aplicáveis ao produto.</p>
+    </div>
+
+    <a href="{{ url_for('euro.lista_produtos') }}" class="balance-button">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M19 12H5M11 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Voltar ao catálogo
+    </a>
+  </header>
+
+  <section class="balance-card">
+    <form id="formSaldos" method="POST" action="{{ url_for('euro.adicionar_saldos') }}" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="balance-card-header">
+        <div>
+          <h2>Operações de estoque</h2>
+          <p>Você pode enviar vários produtos na mesma confirmação.</p>
+        </div>
+
+        <button type="button" class="balance-button" id="addBalanceRowTop">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          Nova linha
+        </button>
+      </div>
+
+      <div id="balanceMessage" class="balance-message" role="alert" aria-live="polite" hidden></div>
+
+      <div id="balanceLines" class="balance-lines"></div>
+
+      <div class="balance-footer">
+        <p class="balance-help"><span class="balance-required">*</span> Campos obrigatórios. Lote e número de série são opcionais.</p>
+
+        <div class="balance-footer-actions">
+          <button type="button" class="balance-button" id="addBalanceRowBottom">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Adicionar linha
+          </button>
+
+          <button type="submit" class="balance-button balance-button-primary" id="submitBalances">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M5 12l4 4L19 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Confirmar operações
+          </button>
+        </div>
+      </div>
+    </form>
+  </section>
+</div>
+
+<template id="balanceRowTemplate">
+  <article class="balance-row">
+    <div class="balance-row-head">
+      <div class="balance-row-title">
+        <span class="balance-row-number">1</span>
+        <span>Produto</span>
+      </div>
+
+      <button type="button" class="balance-remove" data-action="remove-row" title="Remover esta linha" aria-label="Remover esta linha">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="balance-grid">
+      <div class="balance-field balance-field-id">
+        <label>ID do item <span class="balance-required">*</span></label>
+        <input type="number" min="1" step="1" inputmode="numeric" data-field="id_item" placeholder="Ex.: 17" autocomplete="off">
+        <div class="balance-field-hint" data-role="product-status"></div>
+      </div>
+
+      <div class="balance-field balance-field-product">
+        <label>Produto</label>
+        <input type="text" data-field="nome_produto" placeholder="Preenchido automaticamente" readonly>
+        <div class="balance-field-hint">O nome será consultado pelo ID do item.</div>
+      </div>
+
+      <div class="balance-field balance-field-quantity">
+        <label>Quantidade <span class="balance-required">*</span></label>
+        <input type="number" min="1" step="1" inputmode="numeric" data-field="quantidade" value="1">
+      </div>
+
+      <div class="balance-field balance-field-operation">
+        <label>Operação <span class="balance-required">*</span></label>
+        <select data-field="operacao">
+          <option value="adicionar">Entrada</option>
+          <option value="remover">Saída</option>
+        </select>
+      </div>
+
+      <div class="balance-field balance-field-stock">
+        <label>Estoque <span class="balance-required">*</span></label>
+        <select data-field="nome_estoque">
+          <option value="">Selecione</option>
+          <option value="EstoqueEuro">Estoque Euromídia</option>
+          <option value="EstoqueEuroMatriz">Estoque Euro Matriz</option>
+          <option value="EstoqueContainer">Estoque Container</option>
+          <option value="EstoqueMatriz">Estoque Matriz</option>
+          <option value="EstoqueShempo">Estoque Shempo</option>
+          <option value="EstoqueManutencaoInterna">Manutenção Interna</option>
+          <option value="EstoqueManutencaoExterna">Manutenção Externa</option>
+        </select>
+      </div>
+
+      <div class="balance-field balance-field-point" data-role="point-field" hidden>
+        <label>Ponto de estoque <span class="balance-required">*</span></label>
+        <select data-field="cod_ponto"></select>
+        <div class="balance-field-hint">Obrigatório para os estoques Euromídia, Euro Matriz e Shempo.</div>
+      </div>
+
+      <div class="balance-field balance-field-batch">
+        <label>Número do lote</label>
+        <input type="text" data-field="numero_lote" placeholder="Opcional" autocomplete="off">
+      </div>
+
+      <div class="balance-field balance-field-serial">
+        <label>Número de série</label>
+        <input type="text" data-field="numero_serie" placeholder="Opcional" autocomplete="off">
+      </div>
+    </div>
+  </article>
+</template>
+
+<script>
+  (function(){
+    "use strict";
+
+    const pontosEuro = {{ pontos_euro|default([], true)|tojson }};
+    const pontosShempo = {{ pontos_shempo|default([], true)|tojson }};
+    const produtoUrlTemplate = "{{ url_for('euro.get_nome_produto', item_id=987654321) }}";
+
+    const form = document.getElementById("formSaldos");
+    const linesContainer = document.getElementById("balanceLines");
+    const rowTemplate = document.getElementById("balanceRowTemplate");
+    const message = document.getElementById("balanceMessage");
+    const submitButton = document.getElementById("submitBalances");
+    const addButtons = [
+      document.getElementById("addBalanceRowTop"),
+      document.getElementById("addBalanceRowBottom")
+    ];
+
+    function field(row, name){
+      return row.querySelector('[data-field="' + name + '"]');
+    }
+
+    function showMessage(text){
+      message.textContent = text;
+      message.hidden = false;
+    }
+
+    function hideMessage(){
+      message.textContent = "";
+      message.hidden = true;
+    }
+
+    function updateRows(){
+      const rows = Array.from(linesContainer.querySelectorAll(".balance-row"));
+
+      rows.forEach(function(row, index){
+        row.querySelector(".balance-row-number").textContent = String(index + 1);
+        const removeButton = row.querySelector('[data-action="remove-row"]');
+        removeButton.disabled = rows.length === 1;
+      });
+    }
+
+    function addOption(select, value, label){
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      select.appendChild(option);
+    }
+
+    function updatePointOptions(row){
+      const stock = field(row, "nome_estoque").value;
+      const pointField = row.querySelector('[data-role="point-field"]');
+      const pointSelect = field(row, "cod_ponto");
+
+      pointSelect.innerHTML = "";
+      pointField.hidden = true;
+
+      if (stock === "EstoqueEuro" || stock === "EstoqueEuroMatriz"){
+        pointField.hidden = false;
+        addOption(pointSelect, "", "Selecione um ponto");
+
+        pontosEuro.forEach(function(item){
+          const value = String(item.IDProprietario) + "|" + String(item.CodPonto);
+          const parts = [
+            item.NomeEstoque || "Estoque Euromídia",
+            "Ponto " + item.CodPonto,
+            item.Logradouro || ""
+          ].filter(Boolean);
+          addOption(pointSelect, value, parts.join(" · "));
+        });
+      } else if (stock === "EstoqueShempo"){
+        pointField.hidden = false;
+        addOption(pointSelect, "", "Selecione um ponto");
+
+        pontosShempo.forEach(function(item){
+          const value = String(item.ID) + "|" + String(item.CodPonto);
+          const parts = [
+            "Estoque Shempo",
+            "Ponto " + item.CodPonto,
+            item.Logradouro || ""
+          ].filter(Boolean);
+          addOption(pointSelect, value, parts.join(" · "));
+        });
+      }
+    }
+
+    function addRow(){
+      const fragment = rowTemplate.content.cloneNode(true);
+      linesContainer.appendChild(fragment);
+      updateRows();
+
+      const rows = linesContainer.querySelectorAll(".balance-row");
+      const newRow = rows[rows.length - 1];
+      field(newRow, "id_item").focus();
+    }
+
+    async function fetchProduct(input){
+      const row = input.closest(".balance-row");
+      const productInput = field(row, "nome_produto");
+      const status = row.querySelector('[data-role="product-status"]');
+      const idItem = String(input.value || "").trim();
+
+      productInput.value = "";
+      status.textContent = "";
+      status.classList.remove("error");
+
+      if (!idItem){
+        return;
+      }
+
+      productInput.value = "Consultando...";
+
+      try{
+        const url = produtoUrlTemplate.replace("987654321", encodeURIComponent(idItem));
+        const response = await fetch(url, {
+          method:"GET",
+          credentials:"same-origin",
+          headers:{"Accept":"application/json"}
+        });
+
+        if (!response.ok){
+          throw new Error("Falha na consulta");
+        }
+
+        const data = await response.json();
+        productInput.value = data.nome || "";
+
+        if (!data.nome){
+          status.textContent = "Produto não encontrado.";
+          status.classList.add("error");
+          return;
+        }
+
+        status.textContent = data.controla_lote ? "Produto com controle de lote." : "Produto localizado.";
+      } catch(error){
+        productInput.value = "";
+        status.textContent = "Não foi possível consultar o produto.";
+        status.classList.add("error");
+      }
+    }
+
+    addButtons.forEach(function(button){
+      button.addEventListener("click", addRow);
+    });
+
+    linesContainer.addEventListener("click", function(event){
+      const removeButton = event.target.closest('[data-action="remove-row"]');
+      if (!removeButton || removeButton.disabled){
+        return;
+      }
+
+      removeButton.closest(".balance-row").remove();
+      hideMessage();
+      updateRows();
+    });
+
+    linesContainer.addEventListener("change", function(event){
+      if (event.target.matches('[data-field="nome_estoque"]')){
+        updatePointOptions(event.target.closest(".balance-row"));
+      }
+    });
+
+    linesContainer.addEventListener("focusout", function(event){
+      if (event.target.matches('[data-field="id_item"]')){
+        fetchProduct(event.target);
+      }
+    });
+
+    form.addEventListener("submit", function(event){
+      hideMessage();
+      form.querySelectorAll('input[name="lines[]"]').forEach(function(input){
+        input.remove();
+      });
+
+      const rows = Array.from(linesContainer.querySelectorAll(".balance-row"));
+      const operations = [];
+      let firstInvalid = null;
+
+      rows.forEach(function(row){
+        row.classList.remove("has-error");
+
+        const idItem = String(field(row, "id_item").value || "").trim();
+        const productName = String(field(row, "nome_produto").value || "").trim();
+        const quantity = parseInt(field(row, "quantidade").value, 10);
+        const operation = field(row, "operacao").value;
+        const stock = field(row, "nome_estoque").value;
+        const pointField = row.querySelector('[data-role="point-field"]');
+        const point = pointField.hidden ? "" : field(row, "cod_ponto").value;
+        const batch = String(field(row, "numero_lote").value || "").trim();
+        const serial = String(field(row, "numero_serie").value || "").trim();
+
+        const invalid = (
+          !idItem ||
+          !Number.isInteger(quantity) ||
+          quantity <= 0 ||
+          !operation ||
+          !stock ||
+          (!pointField.hidden && !point)
+        );
+
+        if (invalid){
+          row.classList.add("has-error");
+          firstInvalid = firstInvalid || row;
+          return;
+        }
+
+        operations.push({
+          id_item:idItem,
+          nome_produto:productName,
+          quantidade:quantity,
+          operacao:operation,
+          nome_estoque:stock,
+          cod_ponto:point,
+          numero_lote:batch,
+          numero_serie:serial
+        });
+      });
+
+      if (firstInvalid || operations.length === 0){
+        event.preventDefault();
+        showMessage("Preencha os campos obrigatórios destacados antes de confirmar.");
+        if (firstInvalid){
+          firstInvalid.scrollIntoView({behavior:"smooth", block:"center"});
+        }
+        return;
+      }
+
+      operations.forEach(function(operation){
+        const hidden = document.createElement("input");
+        hidden.type = "hidden";
+        hidden.name = "lines[]";
+        hidden.value = JSON.stringify(operation);
+        form.appendChild(hidden);
+      });
+
+      submitButton.disabled = true;
+      submitButton.textContent = "Processando...";
+    });
+
+    addRow();
+  })();
+</script>
+{% endblock content %}

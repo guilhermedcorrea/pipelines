@@ -1231,6 +1231,11 @@ input:disabled, select:disabled, textarea:disabled{
                     </a>
                   {% endif %}
 
+                  <a href="{{ url_for('euro.adicionar_saldos') }}"
+                     class="{% if request.endpoint == 'euro.adicionar_saldos' %}menu-link-current{% endif %}">
+                    Adicionar Saldo Produtos
+                  </a>
+
                 </div>
               </div>
             {% endif %}
