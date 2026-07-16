@@ -1,39 +1,67 @@
 {% extends "euromidia/base_euromidia.html" %}
-{% block title %}Estoque Euromidia - {{ product.NomeProduto }} ({{ total_euromidia }}){% endblock %}
+
+{% block title %}Estoque Euromídia — {{ product.NomeProduto }}{% endblock %}
 
 {% block content %}
-<h2>Estoque Euromidia - {{ product.NomeProduto }} ({{ total_euromidia }})</h2>
-<table class="table table-bordered">
-  <thead>
-    <tr>
-      <th>ID Estoque</th>
-      <th>ID Item</th>
-      <th>Nome Item</th>
-      <th>Saldo</th>
-      <th>CodPonto</th>
-      <th>Logradouro</th>
-      <th>Faces</th>
-    </tr>
-  </thead>
-  <tbody>
+{% include "shempo/_estoque_styles.html" %}
+
+<div class="stock-page">
+  <div class="stock-page-header">
+    <div>
+      <h1>Estoque Euromídia</h1>
+      <p>{{ product.NomeProduto }} · Item {{ product.IDItem }}</p>
+    </div>
+    <div class="stock-actions">
+      <a href="{{ url_for('euro.ver_estoques', item_id=product.IDItem) }}" class="stock-button">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M19 12H5M11 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Voltar aos estoques
+      </a>
+    </div>
+  </div>
+
+  <section class="stock-detail-card">
+    <div class="stock-detail-header">
+      <div>
+        <h2>Posições por ponto</h2>
+        <p>Endereço, faces e saldo disponível em cada localização.</p>
+      </div>
+      <span class="stock-total-badge">{{ total_euromidia }}</span>
+    </div>
+
     {% if details %}
-      {% for row in details %}
-      <tr>
-        <td>{{ row.IDEstoque }}</td>
-        <td>{{ row.IDItem }}</td>
-        <td>{{ row.NomeProduto }}</td>
-        <td>{{ row.Saldo }}</td>
-        <td>{{ row.CodPonto }}</td>
-        <td>{{ row.Logradouro }}</td>
-        <td>{{ row.Faces }}</td>
-      </tr>
-      {% endfor %}
+      <div class="stock-table-wrap mobile-cards">
+        <table class="stock-table">
+          <thead>
+            <tr>
+              <th>ID Estoque</th>
+              <th>ID Item</th>
+              <th>Produto</th>
+              <th>Saldo</th>
+              <th>CodPonto</th>
+              <th>Logradouro</th>
+              <th>Faces</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in details %}
+              <tr>
+                <td data-label="ID Estoque">{{ row.IDEstoque }}</td>
+                <td data-label="ID Item">{{ row.IDItem }}</td>
+                <td data-label="Produto">{{ row.NomeProduto }}</td>
+                <td data-label="Saldo"><span class="stock-value">{{ row.Saldo }}</span></td>
+                <td data-label="CodPonto">{{ row.CodPonto or '-' }}</td>
+                <td data-label="Logradouro">{{ row.Logradouro or '-' }}</td>
+                <td data-label="Faces">{{ row.Faces or '-' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     {% else %}
-      <tr>
-        <td colspan="5">Nenhum registro encontrado.</td>
-      </tr>
+      <div class="stock-empty">Nenhum registro encontrado no Estoque Euromídia.</div>
     {% endif %}
-  </tbody>
-</table>
-<a href="{{ url_for('euro.ver_estoques', item_id=product.IDItem) }}" class="btn btn-secondary mt-3">Voltar</a>
-{% endblock %}
+  </section>
+</div>
+{% endblock content %}

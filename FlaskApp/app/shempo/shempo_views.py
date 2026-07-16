@@ -333,12 +333,25 @@ def get_item(item_id):
 
 
 
+def _normalizar_nome_arquivo_imagem(valor):
+    """Extrai somente o nome do arquivo, aceitando caminhos Windows ou Linux."""
+    if valor is None:
+        return ''
+
+    caminho = str(valor).strip().replace('\\', '/')
+    return os.path.basename(caminho.rstrip('/'))
+
+
+
 
 
 @euro.route('/imagensprodutos/<path:filename>')
 @login_required
 def imagem_produto(filename):
-   
+    filename = _normalizar_nome_arquivo_imagem(filename)
+    if not filename:
+        abort(404)
+
     pasta = os.path.join(current_app.root_path, 'imagensprodutos')
     return send_from_directory(pasta, filename)
 
@@ -474,8 +487,9 @@ def lista_produtos():
     ).all()
     image_urls = {}
     for iid, caminho in imagens:
-        arquivo = Path(caminho).name
-        image_urls[iid] = url_for('euro.imagem_produto', filename=arquivo)
+        arquivo = _normalizar_nome_arquivo_imagem(caminho)
+        if arquivo:
+            image_urls[iid] = url_for('euro.imagem_produto', filename=arquivo)
     for iid in item_ids:
         image_urls.setdefault(iid, None)
 
@@ -567,6 +581,10 @@ def componentes_pdf(pmv_id):
 @euro.route('/imagensprodutos/<filename>')
 @login_required
 def imagensprodutos(filename):
+    filename = _normalizar_nome_arquivo_imagem(filename)
+    if not filename:
+        abort(404)
+
     return send_from_directory(current_app.config['UPLOAD_FOLDER'], filename)
 
 
@@ -631,7 +649,11 @@ def item_detail(item_id):
     images = []
     used_ordens = set()
     for img in im_objs:
-        filename = img.NomeArquivo
+        filename = _normalizar_nome_arquivo_imagem(
+            img.NomeArquivo or img.CaminhoArquivo
+        )
+        if not filename:
+            continue
         url = url_for('euro.imagensprodutos', filename=filename)
         images.append({
             'url': url,
@@ -784,7 +806,14 @@ def item_detail(item_id):
                   )
                   .all()
     )
-    image_urls = {iid: url_for('euro.imagensprodutos', filename=fn) for iid, fn in im_rows}
+    image_urls = {
+        iid: url_for(
+            'euro.imagensprodutos',
+            filename=_normalizar_nome_arquivo_imagem(fn),
+        )
+        for iid, fn in im_rows
+        if _normalizar_nome_arquivo_imagem(fn)
+    }
     for iid in component_item_ids:
         image_urls.setdefault(iid, None)
 
@@ -1462,6 +1491,7 @@ def pecas_componentes():
 
 @euro.route('/estoque_manut_externa_detail/<int:item_id>')
 @login_required
+@requer_acesso_catalogo_produtos
 def estoque_manut_externa_detail(item_id):
     product = db.session.query(Produto).filter_by(IDItem=item_id).first()
 
@@ -1489,6 +1519,7 @@ def estoque_manut_externa_detail(item_id):
 
 @euro.route('/estoque_manut_interna_detail/<int:item_id>')
 @login_required
+@requer_acesso_catalogo_produtos
 def estoque_manut_interna_detail(item_id):
     product = db.session.query(Produto).filter_by(IDItem=item_id).first()
 
@@ -1521,6 +1552,7 @@ def estoque_manut_interna_detail(item_id):
 
 @euro.route('/estoque_container_detail/<int:item_id>')
 @login_required
+@requer_acesso_catalogo_produtos
 def estoque_container_detail(item_id):
     product = db.session.query(Produto).filter_by(IDItem=item_id).first()
 
@@ -1553,6 +1585,7 @@ def estoque_container_detail(item_id):
 
 @euro.route('/ver_estoques/<int:item_id>')
 @login_required
+@requer_acesso_catalogo_produtos
 def ver_estoques(item_id):
     product = db.session.query(
         Produto.IDItem,
@@ -1560,6 +1593,26 @@ def ver_estoques(item_id):
         Produto.NomeProduto,
         Produto.BitAtivo
     ).filter_by(IDItem=item_id).first()
+
+    if product is None:
+        abort(404)
+
+    imagem = (
+        db.session.query(ImagensProdutos)
+        .filter(ImagensProdutos.IDItem == item_id)
+        .order_by(ImagensProdutos.Ordem)
+        .first()
+    )
+    image_url = None
+    if imagem is not None:
+        arquivo_imagem = _normalizar_nome_arquivo_imagem(
+            imagem.NomeArquivo or imagem.CaminhoArquivo
+        )
+        if arquivo_imagem:
+            image_url = url_for(
+                'euro.imagem_produto',
+                filename=arquivo_imagem,
+            )
 
    
     estoque_matriz = db.session.query(EstoqueMatriz).filter_by(IDItem=item_id).all()
@@ -1583,6 +1636,7 @@ def ver_estoques(item_id):
         'shempo/ver_estoques.html',
         item_id=item_id,
         product=product,
+        image_url=image_url,
         estoque_matriz=estoque_matriz,
         total_matriz=total_matriz,
         estoque_euromidia=estoque_euromidia,
@@ -1606,6 +1660,7 @@ def ver_estoques(item_id):
 
 @euro.route('/movimentar_estoque/<int:item_id>', methods=['GET', 'POST'])
 @login_required
+@requer_acesso_catalogo_produtos
 def movimentar_estoque(item_id):
     tipo_ids = {
         'EstoqueMatriz': 1,
@@ -1950,6 +2005,7 @@ def movimentar_estoque(item_id):
 
 @euro.route('/estoque_euromidia_detail/<int:item_id>')
 @login_required
+@requer_acesso_catalogo_produtos
 def estoque_euromidia_detail(item_id):
     product = db.session.query(Produto).filter_by(IDItem=item_id).first()
 
@@ -1993,6 +2049,7 @@ def estoque_euromidia_detail(item_id):
 
 @euro.route('/estoque_shempo_detail/<int:item_id>')
 @login_required
+@requer_acesso_catalogo_produtos
 def estoque_shempo_detail(item_id):
     product = db.session.query(Produto).filter_by(IDItem=item_id).first()
 
