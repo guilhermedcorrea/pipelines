@@ -1,0 +1,101 @@
+{% extends 'base.html' %}
+{% block title %}Estoque Completo{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+  <h2 class="mb-2">Estoque Completo</h2>
+
+  <form method="get" action="{{ url_for('euro.ver_estoques_completo') }}" class="mb-2">
+    <div class="row g-2">
+      <div class="col-md-6">
+        <div class="input-group">
+          <input type="text"
+                 name="search"
+                 class="form-control"
+                 placeholder="Pesquisar por ID, Referência ou Nome"
+                 value="{{ search }}">
+          <button type="submit" class="btn btn-primary">Pesquisar</button>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <select name="fonte" class="form-select" onchange="this.form.submit()">
+          <option value="">— Todas Fontes —</option>
+          {% for f in fontes_list %}
+            <option value="{{ f }}" {% if f==fonte %}selected{% endif %}>{{ f }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+      <thead>
+        <tr>
+          <th>ID Estoque</th>
+          <th>ID Item</th>
+          <th>Referência</th>
+          <th>Nome Produto</th>
+          <th>Fonte</th>
+          <th>CodPonto</th>
+          <th>Logradouro</th>
+          <th>Saldo</th>
+          <th>Estoque Mínimo</th>
+          <th>EuroID</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.IDEstoque }}</td>
+          <td>{{ r.IDItem }}</td>
+          <td>{{ r.ReferenciaExterna }}</td>
+          <td>{{ r.NomeProduto }}</td>
+          <td>{{ r.Fonte }}</td>
+          <td>{{ r.CodPonto }}</td>
+          <td>{{ r.Logradouro or '-' }}</td>
+          <td>{{ r.Saldo }}</td>
+          <td>{{ r.EstoqueMinimo or '-' }}</td>
+          <td>{{ r.EuroID or '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <nav aria-label="Navegação de página">
+    <ul class="pagination justify-content-center mt-2">
+      {% if page > 1 %}
+        <li class="page-item">
+          <a class="page-link"
+             href="{{ url_for('euro.ver_estoques_completo', page=page-1, search=search, fonte=fonte) }}">
+            Anterior
+          </a>
+        </li>
+      {% else %}
+        <li class="page-item disabled"><span class="page-link">Anterior</span></li>
+      {% endif %}
+
+      {% for p in range(1, total_pages+1) %}
+        <li class="page-item {% if p==page %}active{% endif %}">
+          <a class="page-link"
+             href="{{ url_for('euro.ver_estoques_completo', page=p, search=search, fonte=fonte) }}">
+            {{ p }}
+          </a>
+        </li>
+      {% endfor %}
+
+      {% if page < total_pages %}
+        <li class="page-item">
+          <a class="page-link"
+             href="{{ url_for('euro.ver_estoques_completo', page=page+1, search=search, fonte=fonte) }}">
+            Próxima
+          </a>
+        </li>
+      {% else %}
+        <li class="page-item disabled"><span class="page-link">Próxima</span></li>
+      {% endif %}
+    </ul>
+  </nav>
+</div>
+{% endblock %}

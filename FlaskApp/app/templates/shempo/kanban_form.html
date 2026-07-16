@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Novo Kanban</h2>
+<form method="post">
+  <div class="mb-3">
+    <label class="form-label">Nome</label>
+    <input name="nome" class="form-control" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Descrição</label>
+    <textarea name="descricao" class="form-control"></textarea>
+  </div>
+  <button class="btn btn-primary">Salvar</button>
+  <a href="{{ url_for('kanban.visualizar_kanbans') }}" class="btn btn-secondary">Cancelar</a>
+</form>
+{% endblock %}

@@ -1,0 +1,76 @@
+{# templates/integrar_contrato.html #}
+{% extends 'base.html' %}
+{% block title %}Integrar Novo Contrato{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-3">
+  <h2 class="mb-4">Integrar Novo Contrato</h2>
+
+  <form id="integrarForm" method="post" action="{{ url_for('euro.integrar_novo_contrato') }}">
+    <!-- Empresa Proprietária -->
+    <div class="mb-3">
+      <label for="empresaProprietaria" class="form-label">Selecione Empresa Proprietária</label>
+      <select class="form-select" id="empresaProprietaria" name="empresaProprietaria" required>
+        <option value="">Escolha...</option>
+        {% for comp in companies %}
+          <option value="{{ comp.id }}">{{ comp.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Contrato (campo pesquisável) -->
+    <div class="mb-3">
+      <label for="contratoInput" class="form-label">Selecione o Contrato</label>
+      <input
+        list="contratosList"
+        class="form-control"
+        id="contratoInput"
+        name="contratoInput"
+        placeholder="Digite ou selecione..."
+        required>
+      <datalist id="contratosList">
+        {% for c in contratos %}
+          <option
+            value="{{ c.NomeEmpresa }} – {{ c.ReferenciaExterna }}"
+            data-id="{{ c.IDContrato }}">
+          </option>
+        {% endfor %}
+      </datalist>
+    </div>
+
+    <!-- Exibe o código CTR-<ID> -->
+    <div class="mb-3">
+      <label for="ctrCodigo" class="form-label">Contrato Selecionado</label>
+      <input
+        type="text"
+        class="form-control"
+        id="ctrCodigo"
+        name="ctrCodigo"
+        readonly>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Salvar</button>
+  </form>
+</div>
+
+<script>
+// Ao digitar/selecionar no campo “contratoInput”, preenche o campo só-leitura com “CTR-<ID>”
+document.addEventListener('DOMContentLoaded', function(){
+  const contratoInput = document.getElementById('contratoInput');
+  const codigoOut     = document.getElementById('ctrCodigo');
+  const options       = document.querySelectorAll('#contratosList option');
+
+  contratoInput.addEventListener('input', () => {
+    const val = contratoInput.value;
+    // procura opção cujo texto seja exatamente o valor digitado
+    const match = Array.from(options).find(o => o.value === val);
+    if (match) {
+      const id = match.getAttribute('data-id');
+      codigoOut.value = `CTR-${id}`;
+    } else {
+      codigoOut.value = '';
+    }
+  });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Estoque Container - {{ product.NomeProduto }} ({{ total_container }}){% endblock %}
+
+{% block content %}
+<h2>Estoque Container - {{ product.NomeProduto }} ({{ total_container }})</h2>
+<table class="table table-bordered">
+  <thead>
+    <tr>
+      <th>ID Estoque</th>
+      <th>ID Item</th>
+      <th>Nome Produto</th>
+      <th>Saldo</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% if container %}
+      {% for c in container %}
+      <tr>
+        <td>{{ c.IDEstoque }}</td>
+        <td>{{ c.IDItem }}</td>
+        <td>{{ c.NomeProduto }}</td>
+        <td>{{ c.Saldo }}</td>
+      </tr>
+      {% endfor %}
+    {% else %}
+      <tr>
+        <td colspan="4">Nenhum registro encontrado.</td>
+      </tr>
+    {% endif %}
+  </tbody>
+</table>
+<a href="{{ url_for('euro.ver_estoques', item_id=product.IDItem) }}" class="btn btn-secondary mt-3">Voltar</a>
+{% endblock %}

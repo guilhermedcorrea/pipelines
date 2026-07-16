@@ -1,0 +1,103 @@
+{% extends 'base.html' %}
+{% block title %}Visualizar Saldo de Lotes{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+  <h2 class="mb-2">Visualizar Saldo de Lotes</h2>
+
+  <form method="get" action="{{ url_for('euro.visualizar_saldo_lotes') }}" class="mb-2">
+    <div class="row g-2">
+      <div class="col-md-6">
+        <div class="input-group">
+          <input type="text"
+                 name="search"
+                 class="form-control"
+                 placeholder="Pesquisar por Lote, Item, Referência, Nome ou Série"
+                 value="{{ search }}">
+          <button class="btn btn-primary" type="submit">Pesquisar</button>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <select name="tipo" class="form-select" onchange="this.form.submit()">
+          <option value="">— Tipo Estoque —</option>
+          {% for t in tipos_list %}
+            <option value="{{ t }}" {% if t==tipo %}selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+      <thead>
+        <tr>
+          <th>ID Lote</th>
+          <th>ID Item</th>
+          <th>Referência</th>
+          <th>Nome Produto</th>
+          <th>ID Estoque</th>
+          <th>Número Lote</th>
+          <th>Número Série</th>
+          <th>Quantidade</th>
+          <th>Data Entrada</th>
+          <th>Tipo Estoque</th>
+          <th>Cod Ponto</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.IDLote }}</td>
+          <td>{{ r.IDItem }}</td>
+          <td>{{ r.ReferenciaExterna }}</td>
+          <td>{{ r.NomeProduto }}</td>
+          <td>{{ r.IDEstoque }}</td>
+          <td>{{ r.NumeroLote }}</td>
+          <td>{{ r.NumerodeSerie }}</td>
+          <td>{{ r.Quantidade }}</td>
+          <td>{{ r.DataEntrada.strftime('%Y-%m-%d') if r.DataEntrada else '' }}</td>
+          <td>{{ r.NomeEstoque }}</td>
+          <td>{{ r.CodPonto }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <nav aria-label="Navegação de página">
+    <ul class="pagination justify-content-center mt-2">
+      {% if page > 1 %}
+        <li class="page-item">
+          <a class="page-link"
+             href="{{ url_for('euro.visualizar_saldo_lotes', page=page-1, search=search, tipo=tipo) }}">
+            Anterior
+          </a>
+        </li>
+      {% else %}
+        <li class="page-item disabled"><span class="page-link">Anterior</span></li>
+      {% endif %}
+
+      {% for p in range(1, total_pages+1) %}
+        <li class="page-item {% if p==page %}active{% endif %}">
+          <a class="page-link"
+             href="{{ url_for('euro.visualizar_saldo_lotes', page=p, search=search, tipo=tipo) }}">
+            {{ p }}
+          </a>
+        </li>
+      {% endfor %}
+
+      {% if page < total_pages %}
+        <li class="page-item">
+          <a class="page-link"
+             href="{{ url_for('euro.visualizar_saldo_lotes', page=page+1, search=search, tipo=tipo) }}">
+            Próxima
+          </a>
+        </li>
+      {% else %}
+        <li class="page-item disabled"><span class="page-link">Próxima</span></li>
+      {% endif %}
+    </ul>
+  </nav>
+</div>
+{% endblock %}

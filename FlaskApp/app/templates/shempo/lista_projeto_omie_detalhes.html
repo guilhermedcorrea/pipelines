@@ -1,0 +1,72 @@
+{# templates/lista_projeto_omie_detalhes.html #}
+{% extends 'base.html' %}
+{% block title %}Detalhes Projeto Omie #{{ projeto.IDProjetoOmie }}{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+  <h2>Projeto Omie #{{ projeto.IDProjetoOmie }}</h2>
+
+  {# cores para badge de empresa proprietária #}
+  {% set cores_emp = {
+    'Shempo-SH53': '#2f7d44',
+    'Sinamovel':   '#EC691F'
+  } %}
+  {% set cor = cores_emp.get(projeto.NomeEmpresaProprietaria, '#6c757d') %}
+
+  <dl class="row">
+    <dt class="col-sm-3">IDEmpresaProprietaria</dt>
+    <dd class="col-sm-9">{{ projeto.IDEmpresaProprietaria }}</dd>
+
+    <dt class="col-sm-3">Empresa Proprietária</dt>
+    <dd class="col-sm-9">
+      <span class="badge rounded-pill"
+            style="
+              background-color: {{ cor }};
+              color: #fff;
+              font-size: 0.9rem;
+              padding: 0.4rem 0.8rem;
+            ">
+        {{ projeto.NomeEmpresaProprietaria or '—' }}
+      </span>
+    </dd>
+
+    <dt class="col-sm-3">Código Projeto Omie</dt>
+    <dd class="col-sm-9">{{ projeto.CodigoProjetoOmie }}</dd>
+
+    <dt class="col-sm-3">Ativo?</dt>
+    <dd class="col-sm-9">
+      {% if projeto.BitAtivo %}
+        <span class="badge bg-success">Sim</span>
+      {% else %}
+        <span class="badge bg-danger">Não</span>
+      {% endif %}
+    </dd>
+
+    <dt class="col-sm-3">Data Alterado</dt>
+    <dd class="col-sm-9">
+      {{ projeto.DataAlterado.strftime('%Y-%m-%d %H:%M:%S') if projeto.DataAlterado else '—' }}
+    </dd>
+
+    <dt class="col-sm-3">Data Inclusão</dt>
+    <dd class="col-sm-9">
+      {{ projeto.DataIncluso.strftime('%Y-%m-%d %H:%M:%S') if projeto.DataIncluso else '—' }}
+    </dd>
+
+    <dt class="col-sm-3">Usuário Alt</dt>
+    <dd class="col-sm-9">{{ projeto.UserAlt or '—' }}</dd>
+
+    <dt class="col-sm-3">Usuário Inc</dt>
+    <dd class="col-sm-9">{{ projeto.UserInc or '—' }}</dd>
+
+    <dt class="col-sm-3">Nome Projeto Omie</dt>
+    <dd class="col-sm-9">{{ projeto.NomeProjetoOmie or '—' }}</dd>
+
+    <dt class="col-sm-3">ID Projeto (interno)</dt>
+    <dd class="col-sm-9">{{ projeto.IDProjeto or '—' }}</dd>
+  </dl>
+
+  <a href="{{ url_for('euro.lista_projeto_omie') }}" class="btn btn-secondary">
+    ← Voltar à lista
+  </a>
+</div>
+{% endblock %}

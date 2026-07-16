@@ -1,0 +1,222 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Ativos{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+  <h2 class="mb-2"><i class="bi bi-gear-fill"></i> Ativos</h2>
+
+  <!-- Busca -->
+  <form method="get" action="{{ url_for('euro.ativos') }}" class="mb-2">
+    <div class="input-group">
+      <input
+        type="text" name="search"
+        class="form-control"
+        placeholder="Pesquisar por ID, Nome ou Renavam"
+        value="{{ search }}"
+      >
+      <button class="btn btn-primary">Pesquisar</button>
+    </div>
+  </form>
+
+  <!-- Inserção por IDItem -->
+  <form method="post" action="{{ url_for('euro.ativos', page=page, search=search) }}" class="mb-3">
+    <div class="input-group">
+      <span class="input-group-text">Inserir Ativo por IDItem</span>
+      <input type="text" name="IDItem" class="form-control" placeholder="Digite o IDItem" required>
+      <button class="btn btn-primary">Inserir</button>
+    </div>
+  </form>
+
+  {# Templates de opções de dropdown (renderiza apenas 1 vez) #}
+  <script id="tpl-empresa-options" type="text/template">
+    <option value="">— selecione —</option>
+    {% for emp in empresas %}
+      <option value="{{ emp.EmpresaID }}">{{ emp.NomeEmpresa }}</option>
+    {% endfor %}
+  </script>
+  <script id="tpl-projeto-options" type="text/template">
+    <option value="">— selecione —</option>
+    {% for proj in projetos %}
+      <option value="{{ proj.IDProjeto }}">{{ proj.NomeProjeto }}</option>
+    {% endfor %}
+  </script>
+
+  {# 1) mapa de cores #}
+  {% set op_classes = {
+    1015: 'bg-success',
+    1016: 'bg-primary',
+    1017: 'bg-danger',
+    1018: 'bg-danger'
+  } %}
+
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+      <thead>
+        <tr>
+          <th>ID Ativo</th>
+          <th>ID Item</th>
+          <th>Referência</th>
+          <th>Chassi</th>
+          <th>Renavam</th>
+          <th>Projeto</th>
+          <th>Empresa</th>
+          <th>Empresa Propriet.</th>
+          <th>Placa Atual</th>
+          <th>Nome Ativo</th>
+          <th>Operação</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ativo in ativos %}
+        {% set pmv = pmv_map.get(ativo.IDItem) %}
+        <tr
+          style="cursor: pointer;"
+          ondblclick="location.href='{{ url_for('euro.ativos_detalhes', ativo_id=ativo.IDAtivo) }}'"
+        >
+          <td>{{ ativo.IDAtivo }}</td>
+          <td>{{ ativo.IDItem }}</td>
+          <td>{{ ativo.ReferenciaExterna }}</td>
+          <td>{{ ativo.Chassi or '-' }}</td>
+          <td>{{ ativo.Renavam or '-' }}</td>
+
+          <!-- Projeto -->
+          <td>
+            <form method="post" action="{{ url_for('euro.ativos', page=page, search=search) }}">
+              <input type="hidden" name="IDAtivo" value="{{ ativo.IDAtivo }}">
+              <select
+                name="IDProjeto"
+                class="form-select select-projeto"
+                data-selected="{{ ativo.IDProjeto or '' }}"
+                onchange="this.form.submit()"
+              ></select>
+            </form>
+          </td>
+
+          <!-- Empresa -->
+          <td>
+            <form method="post" action="{{ url_for('euro.ativos', page=page, search=search) }}">
+              <input type="hidden" name="IDAtivo" value="{{ ativo.IDAtivo }}">
+              <select
+                name="IDEmpresa"
+                class="form-select select-empresa"
+                data-selected="{{ ativo.IDEmpresa or '' }}"
+                onchange="this.form.submit()"
+              ></select>
+            </form>
+          </td>
+
+          <!-- Empresa Proprietária -->
+          <td>
+            <form method="post" action="{{ url_for('euro.ativos', page=page, search=search) }}">
+              <input type="hidden" name="IDAtivo" value="{{ ativo.IDAtivo }}">
+              <select
+                name="IDEmpresaProprietaria"
+                class="form-select select-empresa"
+                data-selected="{{ ativo.IDEmpresaProprietaria or '' }}"
+                onchange="this.form.submit()"
+              ></select>
+            </form>
+          </td>
+
+          <!-- Placa Atual -->
+          <td>
+            <form method="post" action="{{ url_for('euro.ativos', page=page, search=search) }}">
+              <input type="hidden" name="IDAtivo" value="{{ ativo.IDAtivo }}">
+              <input
+                type="text"
+                name="PlacaAtual"
+                class="form-control"
+                value="{{ ativo.PlacaAtual or '' }}"
+                onkeydown="if(event.key==='Enter') this.form.submit()"
+              >
+            </form>
+          </td>
+
+          <!-- Nome Ativo -->
+          <td>
+            {% if ativo.IDItem %}
+              {% if pmv %}
+                <a
+                  href="{{ url_for('euro.item_detail', item_id=ativo.IDItem, pmv_id=pmv) }}"
+                  onclick="event.stopPropagation()"
+                >
+                  {{ ativo.NomeAtivo or '-' }}
+                </a>
+              {% else %}
+                <a
+                  href="{{ url_for('euro.item_detail', item_id=ativo.IDItem) }}"
+                  onclick="event.stopPropagation()"
+                >
+                  {{ ativo.NomeAtivo or '-' }}
+                </a>
+              {% endif %}
+            {% else %}
+              <span class="text-muted">
+                {{ ativo.NomeAtivo or '-' }} <em>(sem item)</em>
+              </span>
+            {% endif %}
+          </td>
+
+          <!-- Exibe o NomeOperacao -->
+          <td>
+            {% set classe = op_classes.get(ativo.IDOperacao, 'bg-secondary') %}
+            <span class="badge rounded-pill {{ classe }} fs-5 px-3 py-2">
+              {{ operacoes_map.get(ativo.IDOperacao, '-') }}
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+    <!-- Paginação númerica -->
+  <nav aria-label="Navegação de página" class="mt-3">
+    <ul class="pagination justify-content-center">
+      {% if page > 1 %}
+        <li class="page-item">
+          <a class="page-link" href="{{ url_for('euro.ativos', page=page-1, search=search) }}">« Anterior</a>
+        </li>
+      {% else %}
+        <li class="page-item disabled"><span class="page-link">« Anterior</span></li>
+      {% endif %}
+
+      {% for p in range(1, total_pages+1) %}
+        {% if p == page %}
+          <li class="page-item active"><span class="page-link">{{ p }}</span></li>
+        {% else %}
+          <li class="page-item"><a class="page-link" href="{{ url_for('euro.ativos', page=p, search=search) }}">{{ p }}</a></li>
+        {% endif %}
+      {% endfor %}
+
+      {% if page < total_pages %}
+        <li class="page-item">
+          <a class="page-link" href="{{ url_for('euro.ativos', page=page+1, search=search) }}">Próximo »</a>
+        </li>
+      {% else %}
+        <li class="page-item disabled"><span class="page-link">Próximo »</span></li>
+      {% endif %}
+    </ul>
+  </nav>
+</div>
+
+<!-- Script de clonagem de dropdowns -->
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const tplEmp = document.getElementById('tpl-empresa-options').innerHTML;
+    const tplProj = document.getElementById('tpl-projeto-options').innerHTML;
+
+    document.querySelectorAll('select.select-empresa').forEach(sel => {
+      sel.innerHTML = tplEmp;
+      const selected = sel.dataset.selected;
+      if (selected) sel.value = selected;
+    });
+
+    document.querySelectorAll('select.select-projeto').forEach(sel => {
+      sel.innerHTML = tplProj;
+      const selected = sel.dataset.selected;
+      if (selected) sel.value = selected;
+    });
+  });
+</script>
+{% endblock %}

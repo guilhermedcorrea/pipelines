@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}Visualizar Firmware{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+  <h2 class="mb-3">Versões de Firmware</h2>
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+      <thead>
+        <tr>
+          <th>FirmwareID</th>
+          <th>ID Item</th>
+          <th>Nome Produto</th>
+          <th>Cod Ponto</th>
+          <th>PmvID</th>
+          <th>Firmware</th>
+          <th>ID Estoque</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in rows %}
+        <tr>
+          <td>{{ f.FirmewireID }}</td>
+          <td>{{ f.IDItem }}</td>
+          <td>{{ f.NomeProduto }}</td>
+          <td>{{ f.CodPonto }}</td>
+          <td>{{ f.PmvID }}</td>
+          <td>{{ f.Firmware }}</td>
+          <td>{{ f.IDEstoque }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

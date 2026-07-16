@@ -1,0 +1,86 @@
+{# templates/painel_grade.html #}
+{% extends "base2.html" %}
+{% block title %}Painel {{ painel.Nome }}{% endblock %}
+{% block content %}
+
+{# Mapas PT-BR para meses e dias da semana (sem depender de locale do servidor) #}
+{% set meses_pt = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'] %}
+{% set dias_sem_pt = ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'] %}
+
+<h3>
+  Painel {{ painel.Nome }} — {{ meses_pt[mes-1]|capitalize }} de {{ ano }}
+</h3>
+
+<form class="row g-2 mb-3">
+  <div class="col-auto">
+    <input name="ym" type="month" class="form-control" value="{{ "%04d-%02d"|format(ano,mes) }}">
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-primary">Ir</button>
+  </div>
+</form>
+
+<div class="table-responsive">
+  <table id="grade-painel" class="table table-bordered align-middle">
+    <thead class="table-light">
+      <tr>
+        <th style="width:220px">Data</th>
+        {% for i in range(1,17) %}<th class="text-center">{{ i }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for d, cols in grade.items()|sort %}
+      <tr>
+        <td>
+          {# Formata data como dd/mm/aaaa - DiaSemana(PT-BR) #}
+          {{ d.strftime("%d/%m/%Y") }} - {{ dias_sem_pt[d.weekday()] }}
+        </td>
+        {# cada cols[j] é None ou (nome_empresa, empresa_id) #}
+        {% for cell in cols %}
+          <td class="text-center">
+            {% if cell %}
+              {% set nome = cell[0] %}
+              {% set empid = cell[1] %}
+              <span class="empresa-link"
+                    data-empid="{{ empid }}"
+                    title="Dê dois cliques para abrir o perfil da empresa"
+                    style="cursor: pointer; text-decoration: underline;">
+                {{ nome }}
+              </span>
+            {% else %}
+              <!-- vazio -->
+            {% endif %}
+          </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var table = document.getElementById('grade-painel');
+  if (!table) return;
+  var tbody = table.tBodies && table.tBodies[0];
+  if (!tbody) return;
+
+  // Delegação de duplo-clique: funciona em qualquer célula com .empresa-link
+  tbody.addEventListener('dblclick', function (ev) {
+    var target = ev.target.closest('.empresa-link');
+    if (!target || !tbody.contains(target)) return;
+
+    var empid = (target.getAttribute('data-empid') || '').trim();
+    if (!empid) return;
+
+    // Gera URL a partir do endpoint do blueprint 'euro'
+    var base = "{{ url_for('admin_bp.visualizar_empresa', EmpresaID=0) }}"; // e.g. /admin/shempo/v1/visualizar_empresa/0
+    var url  = base.replace(/\/0$/, '/' + empid);
+    window.location.assign(url);
+  }, false);
+});
+</script>
+{% endblock %}

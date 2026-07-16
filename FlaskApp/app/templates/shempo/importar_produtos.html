@@ -1,0 +1,87 @@
+{# templates/importar_produtos.html #}
+{% extends 'base.html' %}
+{% block title %}Importar Produtos{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-3">
+  <h2 class="mb-3">Importar Produtos via CSV</h2>
+
+  {% if not produtos %}
+    <form method="POST" enctype="multipart/form-data"
+          action="{{ url_for('euro.importar_produtos') }}"
+          class="border p-3 rounded bg-light">
+      <div class="mb-3">
+        <label for="file" class="form-label">Selecione o arquivo CSV:</label>
+        <input class="form-control" type="file" id="file" name="file" accept=".csv" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Carregar Arquivo</button>
+    </form>
+  {% else %}
+    <h5 class="mb-3 text-success">Pré-visualização de Importação</h5>
+    <form method="POST" action="{{ url_for('euro.importar_produtos') }}">
+      <input type="hidden" name="confirmar" value="1">
+      <table class="table table-bordered table-striped align-middle">
+        <thead class="table-dark">
+          <tr>
+            <th>RefExt</th><th>CatID</th><th>FamID</th><th>Nome</th><th>Técnico</th>
+            <th>Modelo</th><th>Desc</th><th>Chassi</th><th>Renavam</th><th>Ativo</th>
+            <th>Depto</th><th>PMV</th><th>BitPMV</th><th>PrazoReceb.</th>
+            <th>CtrlLote</th><th>CtrlSérie</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in produtos %}
+            <tr class="{% if p.missing %}table-danger{% endif %}">
+              <td>{{ p.ReferenciaExterna }}</td>
+              <td>{{ p.IDCategoriaProduto or '' }}</td>
+              <td>{{ p.FamiliaID or '' }}</td>
+              <td>{{ p.NomeProduto }}</td>
+              <td>{{ p.NomeTecnico or '' }}</td>
+              <td>{{ p.Modelo or '' }}</td>
+              <td>{{ p.Descricao or '' }}</td>
+              <td>{{ p.Chassi or '' }}</td>
+              <td>{{ p.Renavam or '' }}</td>
+              <td>{{ 1 if p.BitAtivo else 0 }}</td>
+              <td>{{ p.IDDepartamento or '' }}</td>
+              <td>{{ p.PmvID or '' }}</td>
+              <td>{{ 1 if p.BitPMV else 0 }}</td>
+              <td>{{ p.PrazoMedioRecebimento }}</td>
+              <td>{{ 1 if p.ControlaLote else 0 }}</td>
+              <td>{{ 1 if p.ControlaNumerodeSerie else 0 }}</td>
+            </tr>
+            <input type="hidden" name="produtos[]" value="{{ p|tojson }}">
+          {% endfor %}
+        </tbody>
+      </table>
+
+      {% if produtos|selectattr('missing')|list %}
+        <div class="alert alert-danger">
+          <strong>Campos obrigatórios faltando:</strong><br>
+          {% for p in produtos %}
+            {% if p.missing %}
+              {% for f in p.missing %}
+                Linha {{ p.linha }}: {{ f }}<br>
+              {% endfor %}
+            {% endif %}
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <div class="d-flex justify-content-end mt-3">
+        <a href="{{ url_for('euro.importar_produtos') }}" class="btn btn-secondary me-2">Cancelar</a>
+        {% if not produtos|selectattr('missing')|list %}
+          <button type="submit" class="btn btn-success">Confirmar Importação</button>
+        {% endif %}
+      </div>
+    </form>
+
+    <hr>
+    <h5>Formato de CSV esperado (delimitador “;”):</h5>
+    <pre class="bg-white p-2 border rounded">
+ReferenciaExterna;IDCategoriaProduto;FamiliaID;NomeProduto;NomeTecnico;Modelo;Descricao;
+Chassi;Renavam;BitAtivo;IDDepartamento;PmvID;BitPMV;PrazoMedioRecebimento;ControlaLote;ControlaNumerodeSerie
+123;10;5;Produto X;Téc. X;Mod X;Descrição exemplo;ABC123;REN123;1;2;3;0;5;1;0
+    </pre>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,95 @@
+{# templates/nota_debito_detalhes.html #}
+{% extends 'base.html' %}
+{% block title %}Nota Débito #{{ nota.IDNotaDebito }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+
+  <div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">Nota Débito #{{ nota.IDNotaDebito }}</h5>
+      {# badge grande de status #}
+      {% set s = nome_status %}
+      {% if s in ['Ativo','Criado'] %}
+        <span class="badge bg-success mb-2" style="font-size:2rem; padding:1.5rem 2rem;">{{ s }}</span>
+      {% elif s in ['Cancelado','Atrasado'] %}
+        <span class="badge bg-danger mb-2" style="font-size:2rem; padding:1.5rem 2rem;">{{ s }}</span>
+      {% elif s == 'Concluído' %}
+        <span class="badge bg-primary mb-2" style="font-size:2rem; padding:1.5rem 2rem;">{{ s }}</span>
+      {% elif s == 'Reservado' %}
+        <span class="badge mb-2" style="background:gold;color:black;font-size:2rem; padding:1.5rem 2rem;">{{ s }}</span>
+      {% elif s == 'Produzindo' %}
+        <span class="badge bg-warning text-dark mb-2" style="font-size:2rem; padding:1.5rem 2rem;">{{ s }}</span>
+      {% else %}
+        <span class="badge bg-secondary mb-2" style="font-size:2rem; padding:1.5rem 2rem;">{{ s }}</span>
+      {% endif %}
+    </div>
+
+    <div class="card-body">
+      {# select de situação #}
+      <form method="post" class="mb-4 d-inline-block">
+        <label for="status_id" class="me-2"><strong>Situação:</strong></label>
+        <select name="status_id" id="status_id"
+                class="form-select w-auto d-inline-block"
+                onchange="this.form.submit()">
+          <option value="">-- selecione --</option>
+          {% for st in status_list %}
+            <option value="{{ st.IDStatusPedido }}"
+              {% if st.IDStatusPedido == nota.IDStatusPedido %}selected{% endif %}>
+              {{ st.NomeStatusPedido }}
+            </option>
+          {% endfor %}
+        </select>
+      </form>
+
+      <hr>
+
+      <p><strong>Cliente:</strong> {{ nota.cliente.NomeEmpresa }} – CNPJ: {{ nota.cliente.CNPJ }}</p>
+      <p><strong>Vendedora:</strong> {{ nota.vendedora.NomeEmpresa }} – CNPJ: {{ nota.vendedora.CNPJ }}</p>
+      <p><strong>Projeto:</strong>
+        {% if nota.projeto %}
+          {{ nota.projeto.NomeProjeto }} — {{ nota.projeto.CidadeProjeto }}/{{ nota.projeto.UF }}
+        {% else %}
+          –
+        {% endif %}
+      </p>
+      <p><strong>Data da Nota:</strong> {{ nota.DataNotaDebito.strftime('%Y-%m-%d') }}</p>
+      <p><strong>Valor Total:</strong> R$ {{ '{:,.2f}'.format(nota.Valor) }}</p>
+
+      <hr>
+
+      <h4>Itens da Nota</h4>
+      <div class="table-responsive">
+        <table class="table table-bordered align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>ID Item</th>
+              <th>Produto</th>
+              <th>Qtd</th>
+              <th>Valor Unit.</th>
+              <th>Valor Total</th>
+              <th>Lote</th>
+              <th>Série</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for it in nota.itens %}
+            <tr>
+              <td>{{ it.IDItem }}</td>
+              <td>{{ it.NomeProduto }}</td>
+              <td>{{ it.Quantidade }}</td>
+              <td>R$ {{ '{:,.2f}'.format(it.ValorUnitario) }}</td>
+              <td>R$ {{ '{:,.2f}'.format(it.ValorTotal) }}</td>
+              <td>{{ it.NumeroLote or '-' }}</td>
+              <td>{{ it.NumerodeSerie or '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <a href="{{ url_for('euro.notas_debito') }}" class="btn btn-secondary mt-3">Voltar</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

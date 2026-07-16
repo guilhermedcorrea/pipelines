@@ -1,0 +1,16 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Famílias Cadastradas{% endblock %}
+{% block content %}
+<h2>Famílias Cadastradas</h2>
+<ul class="list-group">
+  {% for familia in familias %}
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+      <a href="{{ url_for('euro.familia_por_id', familia_id=familia.FamiliaID) }}">
+        {{ familia.NomeFamilia }}
+      </a>
+      <span class="badge bg-success">Ativo</span>
+    </li>
+  {% endfor %}
+</ul>
+<a href="{{ url_for('euro.index') }}" class="btn btn-secondary mt-3">Voltar</a>
+{% endblock %}

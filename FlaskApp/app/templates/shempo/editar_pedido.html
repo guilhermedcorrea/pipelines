@@ -1,0 +1,439 @@
+{# templates/editar_pedido.html #}
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Editar Pedido #{{ pedido.IDPedido }}{% endblock %}
+
+{% block content %}
+{# verifica se estamos no endpoint de edição #}
+{% set is_edicao = request.endpoint == 'euro.editar_pedido' %}
+
+{# helper simples para formatar moeda com 2 casas e vírgula #}
+{% macro money2(v) -%}
+  {{ ('%.2f' % ((v or 0)|float)).replace('.', ',') }}
+{%- endmacro %}
+
+<div class="container-fluid mt-5 p-2">
+  <h2 class="mb-3">Editar Pedido #{{ pedido.IDPedido }}</h2>
+
+  <!-- Dados do Pedido -->
+  <div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">Dados do Pedido</h5>
+      <div class="d-flex flex-column align-items-center">
+        {# Badge de status #}
+        {% set s = nome_status %}
+        {% if s in ['Ativo','Criado'] %}
+          <span class="badge bg-success mb-2" style="font-size:2rem; padding:1.5rem 2rem;">
+            {{ s }}
+          </span>
+        {% elif s in ['Cancelado','Atrasado'] %}
+          <span class="badge bg-danger mb-2" style="font-size:2rem; padding:1.5rem 2rem;">
+            {{ s }}
+          </span>
+        {% elif s == 'Concluído' %}
+          <span class="badge bg-primary mb-2" style="font-size:2rem; padding:1.5rem 2rem;">
+            {{ s }}
+          </span>
+        {% elif s == 'Reservado' %}
+          <span class="badge mb-2" style="background:gold;color:black;font-size:2rem; padding:1.5rem 2rem;">
+            {{ s }}
+          </span>
+        {% elif s == 'Produzindo' %}
+          <span class="badge bg-warning text-dark mb-2" style="font-size:2rem; padding:1.5rem 2rem;">
+            {{ s }}
+          </span>
+        {% else %}
+          <span class="badge bg-secondary mb-2" style="font-size:2rem; padding:1.5rem 2rem;">
+            {{ s }}
+          </span>
+        {% endif %}
+
+        {# Botão “Formulário Retirada” #}
+        <a href="{{ url_for('euro.formulario_retirada', pedido_id=pedido.IDPedido) }}"
+           class="btn btn-light"
+           style="background:#f0f0f0; color:#000; border:1px solid #ccc;">
+          <i class="bi bi-card-list" style="font-size:1.5rem;"></i><br>
+          Formulário<br>Retirada
+        </a>
+
+        {# NOVO: Botão global “Desmembrar Pedido” (abre modal via AJAX) #}
+        {% if is_edicao %}
+        <button type="button"
+                class="btn btn-warning mt-2 js-open-desmembrar-pedido"
+                data-modal-url="{{ url_for('euro.desmembrar_modal', pedido_id=pedido.IDPedido) }}">
+          <i class="bi bi-diagram-3"></i><br>
+          Desmembrar<br>Pedido
+        </button>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card-body">
+      <p><strong>IDPedido:</strong> {{ pedido.IDPedido }}</p>
+      <p><strong>ReferenciaPedido:</strong> {{ pedido.ReferenciaPedido or '-' }}</p>
+      <p><strong>OPInicial:</strong> {{ pedido.OPInicial or '-' }}</p>
+      <p><strong>Projeto:</strong> {{ projeto.NomeProjeto if projeto else '-' }}</p>
+
+      {# >>> ADIÇÃO SOLICITADA: DataAgendado e IDPedidoPai <<< #}
+      <p><strong>Data Agendado:</strong>
+        {{ pedido.DataAgendado.strftime('%Y-%m-%d %H:%M') if pedido.DataAgendado else '-' }}
+      </p>
+      <p><strong>Pedido Pai:</strong>
+        {% if pedido.IDPedidoPai %}
+          <a href="{{ url_for('euro.editar_pedido', pedido_id=pedido.IDPedidoPai) }}">#{{ pedido.IDPedidoPai }}</a>
+        {% else %}-{% endif %}
+      </p>
+      {# >>> FIM DA ADIÇÃO <<< #}
+
+      <hr>
+
+      <h6>Compradora</h6>
+      <p><strong>Empresa:</strong> {{ compradora_empresa.NomeEmpresa if compradora_empresa else '-' }}</p>
+      <p><strong>Referência Externa:</strong> {{ compradora_empresa.ReferenciaExternaEmpresa if compradora_empresa else '-' }}</p>
+      <p><strong>Local:</strong> {{ compradora_empresa.CidadeEmpresa or '-' }}, {{ compradora_empresa.UF or '-' }}</p>
+      <hr>
+
+      <h6>Vendedora</h6>
+      <p><strong>Empresa:</strong> {{ vendedora_empresa.NomeEmpresa if vendedora_empresa else '-' }}</p>
+      <p><strong>Referência Externa:</strong> {{ vendedora_empresa.ReferenciaExternaEmpresa if vendedora_empresa else '-' }}</p>
+      <p><strong>Local:</strong> {{ vendedora_empresa.CidadeEmpresa or '-' }}, {{ vendedora_empresa.UF or '-' }}</p>
+      <hr>
+
+      <p><strong>DataPedido:</strong> {{ pedido.DataPedido.strftime('%Y-%m-%d') if pedido.DataPedido else '-' }}</p>
+      <p><strong>OSAuvo:</strong> {{ pedido.OSAuvo or '-' }}</p>
+      <p><strong>TipoPedido:</strong> {{ pedido.TipoPedido or '-' }}</p>
+      <p><strong>Técnico:</strong> {{ funcionario.NomeFuncionario if funcionario else '-' }}</p>
+
+      {# select de situação – exibido apenas em edição #}
+      {% if is_edicao %}
+      <form method="post" class="mt-3">
+        <label for="status_id"><strong>Situação:</strong></label>
+        <select name="status_id" id="status_id"
+                class="form-select w-auto d-inline-block ms-2"
+                onchange="
+                  if(this.value=='3'){
+                    if(confirm(
+                      'Você está prestes a cancelar este pedido.\n'
+                      + 'Isso devolverá todos os saldos aos estoques e é irreversível.\n'
+                      + 'Deseja continuar?'
+                    )){
+                      this.form.submit();
+                    } else {
+                      this.value='{{ pedido.IDStatusPedido or '' }}';
+                    }
+                  }
+                  else if(this.value=='9'){
+                    if(confirm(
+                      'Você está prestes a Criar um Novo Ativo.\n'
+                      + 'Tem certeza que deseja prosseguir?'
+                    )){
+                      this.form.submit();
+                    } else {
+                      this.value='{{ pedido.IDStatusPedido or '' }}';
+                    }
+                  }
+                  else if(this.value){
+                    this.form.submit();
+                  }
+                ">
+          <option value="">-- selecione --</option>
+
+          {# evita erro quando status_list não vem do endpoint de visualização #}
+          {% if status_list is defined %}
+            {% for st in status_list %}
+              <option value="{{ st.IDStatusPedido }}"
+                {% if st.IDStatusPedido == pedido.IDStatusPedido %}selected{% endif %}>
+                {{ st.NomeStatusPedido }}
+              </option>
+            {% endfor %}
+          {% endif %}
+        </select>
+      </form>
+      {% endif %}
+
+      {# Observações #}
+      <div class="mt-4">
+        <h6>Observações</h6>
+        {% if observacoes %}
+          <div class="mb-3" style="max-height:200px; overflow-y:auto; border:1px solid #ccc; padding:1rem;">
+            {% for o in observacoes %}
+              <div class="mb-2">
+                <small class="text-muted">{{ o.usuario }} – {{ o.data.strftime('%d/%m/%Y') }}</small>
+                <p class="mb-1">{{ o.texto }}</p>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if is_edicao %}
+          <form method="post">
+            <div class="mb-3">
+              <textarea name="nova_observacao" class="form-control" rows="3"
+                        placeholder="Escreva uma nova observação..."></textarea>
+            </div>
+            <button type="submit" class="btn btn-secondary btn-sm">Adicionar Observação</button>
+          </form>
+        {% endif %}
+      </div>
+
+      {# Anexos #}
+      <div class="mt-4">
+        <h6>Anexos</h6>
+        {% if anexos %}
+          <ul class="list-group mb-3">
+            {% for a in anexos %}
+              <li class="list-group-item d-flex justify-content-between align-items-center">
+                <a href="{{ url_for('euro.serve_anexo', subpath=a.CaminhoArquivo) }}"
+                   target="_blank">{{ a.NomeArquivo }}</a>
+                <small class="text-muted">{{ a.DataUpload.strftime('%d/%m/%Y') }}</small>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if is_edicao %}
+          <form method="post" enctype="multipart/form-data">
+            <div class="mb-3">
+              <input type="file" name="anexo" class="form-control-file" />
+            </div>
+            <button type="submit" class="btn btn-secondary btn-sm">Enviar Anexo</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# =================== BLOCO: PEDIDOS DESCENDENTES (MANTIDA A TABELA) =================== #}
+  {% if filhos_info and filhos_info|length > 0 %}
+    <div class="card mb-4">
+      <div class="card-header">
+        <h5>Pedidos Descendentes</h5>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-bordered table-hover align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th scope="col">
+                  <span class="text-decoration-dotted"
+                        data-bs-toggle="tooltip"
+                        data-bs-placement="top"
+                        data-bs-container="body"
+                        tabindex="0"
+                        title="NomeItem: Nome do item | Qtd: Quantidade de todos os itens dentro de cada pedido filho">
+                    IDPedido (Filho)
+                    <i class="bi bi-info-circle ms-1"></i>
+                  </span>
+                </th>
+                <th>Status</th>
+                <th>Cliente</th> 
+                <th>Data Agendado</th>
+                <th>Total do Pedido Filho</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for f in filhos_info %}
+                <tr>
+                  <td>{{ f.id }}</td>
+                  <td>{{ f.status_nome }} ({{ f.status_id or '-' }})</td>
+                  <td>{{ f.vendedora_nome or '-' }}</td> 
+                  <td>
+                    {% if f.data_agendado %}
+                      {{ f.data_agendado.strftime('%Y-%m-%d %H:%M') }}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td>R$ {{ money2(f.total) }}</td>
+                  <td>
+                    <a class="btn btn-sm btn-primary"
+                       href="{{ url_for('euro.editar_pedido', pedido_id=f.id) }}">
+                      Abrir
+                    </a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div> <!-- .table-responsive -->
+
+        {# Totais dos filhos (apenas essa linha aqui, conforme pedido) #}
+        {% set total_filhos = filhos_info | sum(attribute='total') %}
+        <div class="p-3 border-top text-end">
+          <div class="mb-1">
+            <strong>Total Pedidos Filhos:</strong>
+            R$ {{ money2(total_filhos) }}
+          </div>
+        </div>
+      </div> <!-- .card-body -->
+    </div> <!-- .card -->
+  {% endif %}
+  {# ================= FIM DO BLOCO: PEDIDOS DESCENDENTES ======================= #}
+
+  <!-- Itens do Pedido -->
+  <div class="card mb-4">
+    <div class="card-header"><h5>Itens do Pedido</h5></div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-bordered table-hover align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>IDItem</th>
+              <th>Foto</th>
+              <th>Nome Produto</th>
+              <th>Quantidade</th>
+              <th>V. Unitário</th>
+              <th>V. Total</th>
+              <th>Lote</th>
+              <th>Série</th>
+              <th>Tipo Estoque</th>
+              <th>CodPonto</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item_id, dados in dados_por_item.items() %}
+              {% set pitem   = dados.pitem %}
+              {% set produto = dados.produto %}
+              {% set lote    = dados.lotes[0] if dados.lotes else None %}
+              {% set serie   = dados.series[0] if dados.series else None %}
+
+              {# prepara valores monetários #}
+              {% set _vunit = (pitem.ValorUnitario or 0) %}
+              {% set _vtot  = (pitem.ValorTotal if pitem.ValorTotal is not none
+                               else ((pitem.Quantidade or 0) * (pitem.ValorUnitario or 0))) %}
+
+              <tr>
+                <td>{{ pitem.IDItem }}</td>
+                <td style="width:60px;">
+                  {% if image_urls[item_id] %}
+                    <img
+                      src="{{ image_urls[item_id] }}"
+                      width="40" height="40"
+                      loading="lazy"
+                      onerror="this.onerror=null;
+                        this.src='https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif';"
+                    >
+                  {% else %}
+                    <img
+                      src="https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif"
+                      width="40" height="40"
+                    >
+                  {% endif %}
+                </td>
+                <td style="white-space:pre-wrap;">{{ produto.NomeProduto if produto else '-' }}</td>
+                <td>{{ pitem.Quantidade }}</td>
+                <td>{{ money2(_vunit) }}</td>
+                <td>{{ money2(_vtot) }}</td>
+                <td>{{ lote.NumeroLote if lote else '-' }}</td>
+                <td>{{ serie.NumeroSerie if serie else '-' }}</td>
+                <td>{{ tipo_est_map.get(pitem.IDTipoEstoque,'-') }}</td>
+                <td>{{ serie.CodPonto if serie else (pitem.CodPonto or '-') }}</td>
+                <td style="white-space:nowrap;">
+
+                  {# Botão “Remover Item” (já existia) #}
+                  <form method="post"
+                        action="{{ url_for('euro.remover_item_pedido',
+                                           pedido_id=pedido.IDPedido,
+                                           pedido_item_id=pitem.IDPedidoIten) }}"
+                        style="display:inline;">
+                    <button class="btn btn-danger btn-sm me-2">Remover Item</button>
+                  </form>
+
+                  {# (REMOVIDO) botão 'Desmembrar' por item — agora o desmembramento é global #}
+
+                  {# Botão “Movimentar Estoque” (Reserva Técnico) – já existia #}
+                  {% if is_edicao and pedido.TipoPedido == 'Reserva Técnico' %}
+                  <a href="{{ url_for('euro.movimentar_estoque_pedido',
+                                      pedido_id=pedido.IDPedido,
+                                      pedido_item_id=pitem.IDPedidoIten) }}"
+                     class="btn btn-primary btn-sm me-2">
+                    <i class="bi bi-arrow-left-right"></i>
+                    Movimentar Estoque
+                  </a>
+                  {% endif %}
+
+                  {# ← “Devolução” – somente em edição ← #}
+                  {% if is_edicao %}
+                  <form method="post"
+                        action="{{ url_for('euro.devolver_item',
+                                           pedido_id=pedido.IDPedido,
+                                           pedido_item_id=pitem.IDPedidoIten) }}"
+                        style="display:inline;"
+                        onsubmit="return confirm('Confirma devolução deste item?');">
+                    <button class="btn btn-info btn-sm">Devolução</button>
+                  </form>
+                  {% endif %}
+                  {# Fim de “Devolução” #}
+
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div> {# fecha .table-responsive #}
+
+      {# ---- TOTAIS POSICIONADOS (Valor Total e depois Pai + Filhos) ---- #}
+      {% set total_filhos_itens = (filhos_info | sum(attribute='total')) if (filhos_info and filhos_info|length > 0) else 0 %}
+      <div class="p-3 border-top text-end">
+        <div class="fs-5 mb-1">
+          <strong>Valor Total:</strong>
+          R$ {{ money2(total_pedido) }}
+        </div>
+        <div class="fs-6">
+          <strong>Total Pedido Pai + Filhos:</strong>
+          R$ {{ money2((total_pedido or 0) + (total_filhos_itens or 0)) }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <a href="{{ url_for('euro.ver_pedidos') }}" class="btn btn-secondary">Voltar</a>
+</div>
+
+{# container onde o HTML do modal global será injetado #}
+<div id="modal-root"></div>
+
+<script>
+  // Abre o modal global de desmembrar pedido via AJAX
+  document.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('.js-open-desmembrar-pedido');
+    if (!btn) return;
+
+    const url = btn.getAttribute('data-modal-url');
+    if (!url) return;
+
+    try {
+      const resp = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      if (!resp.ok) throw new Error('Erro ao carregar modal');
+      const html = await resp.text();
+
+      const root = document.getElementById('modal-root');
+      root.innerHTML = html;
+
+      // Bootstrap 5 modal
+      const modalEl = root.querySelector('.modal');
+      if (window.bootstrap && bootstrap.Modal) {
+        const m = new bootstrap.Modal(modalEl, { backdrop: 'static' });
+        m.show();
+      } else {
+        // fallback simples
+        modalEl.style.display = 'block';
+      }
+    } catch (e) {
+      alert('Não foi possível abrir o modal de desmembrar pedido.');
+      console.error(e);
+    }
+  });
+
+  // Inicializa tooltips do Bootstrap 5 após o DOM estar pronto
+  document.addEventListener('DOMContentLoaded', function () {
+    if (window.bootstrap && bootstrap.Tooltip) {
+      var tooltipTriggerList = Array.prototype.slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+      tooltipTriggerList.forEach(function (el) {
+        new bootstrap.Tooltip(el); // data-bs-container="body" evita clipping
+      });
+    } else {
+      console.warn('Bootstrap.Tooltip não encontrado. Confirme se bootstrap.bundle.min.js está disponível no base_euromidia.html');
+    }
+  });
+</script>
+{% endblock %}

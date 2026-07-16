@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Meus Kanbans</h2>
+
+<a href="{{ url_for('kanban.criar_kanban') }}" class="btn btn-success mb-3">
+  ＋ Novo Kanban
+</a>
+
+<table class="table table-hover align-middle" id="tbl-kanban">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Nome</th>
+      <th>Criado em</th>
+      <th>Fases</th>
+      <th class="text-end">Ações</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for k in boards %}
+    <tr data-id="{{ k.IDKanban }}">
+      <td>{{ k.IDKanban }}</td>
+      <td class="nome-kanban">{{ k.NomeKanban }}</td>
+      <td>{{ k.DataCriacao.strftime('%d/%m/%Y') }}</td>
+      <td>
+        <button class="btn btn-sm btn-outline-primary btn-add-fase"
+                data-id="{{ k.IDKanban }}"
+                data-nome="{{ k.NomeKanban }}"
+                data-ordem="{{ k.fases|length + 1 }}">
+          ＋ Fase
+        </button>
+      </td>
+      <td class="text-end">
+        <form method="post"
+              action="{{ url_for('kanban.excluir_kanban', id_kanban=k.IDKanban) }}"
+              style="display:inline"
+              onsubmit="return confirm('Excluir \"{{ k.NomeKanban }}\" e TODOS os dados vinculados?');">
+          <button class="btn btn-sm btn-danger" title="Excluir">
+            &times;
+          </button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<!-- MODAL NOVA FASE -->
+<div id="modal-fase" class="modal-overlay" hidden>
+  <div class="modal-box" style="width: 400px;">
+    <form method="post" id="form-fase">
+      <input type="hidden" name="id_kanban" id="fase-idkanban">
+      <h5 id="fase-title">Nova fase</h5>
+
+      <div class="mb-2">
+        <label>Nome da fase</label>
+        <input type="text" name="nome_fase" required class="form-control" />
+      </div>
+
+      <div class="mb-2">
+        <label>Ordem</label>
+        <input type="number" name="ordem" min="1" value="1" class="form-control" />
+      </div>
+
+      <div class="mb-3">
+        <label>Cor</label>
+        <input type="color" name="cor" value="#00c851" class="form-control form-control-color" />
+      </div>
+
+      <div class="d-flex justify-content-between">
+        <button type="button" class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+  // Duplo clique abre o kanban
+  document.querySelector('#tbl-kanban').addEventListener('dblclick', e => {
+    const tr = e.target.closest('tr[data-id]');
+    if (!tr) return;
+    window.location = `/kanban/${tr.dataset.id}`;
+  });
+
+  // Abrir o modal da fase
+  document.querySelectorAll('.btn-add-fase').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const modal = document.getElementById('modal-fase');
+      modal.hidden = false;
+      document.getElementById('fase-idkanban').value = btn.dataset.id;
+      document.querySelector('#fase-title').textContent = `Nova fase para: ${btn.dataset.nome}`;
+      modal.querySelector('[name=ordem]').value = btn.dataset.ordem;
+    });
+  });
+
+  // Fechar modal
+  function fecharModal() {
+    document.getElementById('modal-fase').hidden = true;
+  }
+
+  // Submit via fetch
+  document.getElementById('form-fase').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const idKanban = this.id_kanban.value;
+    const data = new FormData(this);
+    const url = `/kanban/${idKanban}/fases`;
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        body: data
+      });
+
+      if (res.redirected) {
+        window.location.href = res.url;
+      } else {
+        alert('Erro ao adicionar fase.');
+      }
+    } catch (err) {
+      alert('Erro ao salvar fase.');
+    }
+  });
+</script>
+
+<style>
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+}
+
+.modal-overlay[hidden] {
+  display: none;
+}
+
+.modal-box {
+  background: #fff;
+  padding: 1rem;
+  border-radius: 8px;
+  width: 500px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+</style>
+{% endblock %}

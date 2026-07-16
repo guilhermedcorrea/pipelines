@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+{% block title %}Importação de Pedidos{% endblock %}
+
+{% block content %}
+<div class="container my-5">
+  <h2 class="mb-4">Importação de Pedidos via CSV</h2>
+
+  {% if not preview %}
+  <!-- upload -->
+  <form method="POST" enctype="multipart/form-data"
+        action="{{ url_for('euro.importacao_pedidos') }}"
+        class="border p-4 rounded bg-light">
+    <div class="mb-3">
+      <label for="file" class="form-label">Selecione o arquivo CSV</label>
+      <input class="form-control" type="file" id="file" name="file"
+             accept=".csv" required>
+    </div>
+    <button class="btn btn-primary">Carregar e Pré-visualizar</button>
+  </form>
+  {% else %}
+  <!-- preview -->
+  <h5 class="text-info mb-3">Pré-visualização de Importação</h5>
+  <form method="POST" action="{{ url_for('euro.importacao_pedidos') }}">
+    <input type="hidden" name="confirmar" value="1">
+    <table class="table table-striped table-bordered align-middle">
+      <thead class="table-dark">
+        <tr>
+          <th>IDItem</th><th>Produto</th><th>Quantidade</th><th>Referência</th>
+          <th>TipoPedido</th><th>OSAuvo</th><th>Funcionário</th>
+          <th>Empresa</th><th>Compradora</th><th>Vendedora</th>
+          <th>Projeto</th><th>OP Inicial</th><th>ValorUnitário</th>
+          <th>NumeroLote</th><th>NumerodeSerie</th><th>DataPedido</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in preview %}
+        <tr class="
+          {% if not row.ProdutoValido %}table-danger{% endif %}
+          {% if row.IDFuncionario and not row.NomeFuncionario %}table-warning{% endif %}
+          {% if row.IDEmpresa and not row.NomeEmpresa %}table-warning{% endif %}
+          {% if row.IDEmpresaCompradora and not row.NomeEmpresaCompradora %}table-warning{% endif %}
+          {% if row.IDEmpresaVendedora and not row.NomeEmpresaVendedora %}table-warning{% endif %}
+          {% if row.IDProjeto and not row.NomeProjeto %}table-warning{% endif %}
+        ">
+          <td>{{ row.IDItem }}</td>
+          <td>
+            {% if not row.ProdutoValido %}
+              <a href="{{ url_for('euro.criar_componente') }}?item_id={{ row.IDItem }}">
+                Produto {{ row.IDItem }} não existe. Clique para cadastrar
+              </a>
+            {% else %}
+              {{ row.NomeProduto }}
+            {% endif %}
+          </td>
+          <td>{{ row.Quantidade }}</td>
+          <td>{{ row.ReferenciaPedido or '—' }}</td>
+          <td>{{ row.TipoPedido or '—' }}</td>
+          <td>{{ row.OSAuvo or '—' }}</td>
+          <td>
+            {% if row.IDFuncionario and not row.NomeFuncionario %}
+              <span class="text-danger">Funcionário {{ row.IDFuncionario }} não existe</span>
+            {% else %}
+              {{ row.NomeFuncionario or '—' }}
+            {% endif %}
+          </td>
+          <td>
+            {% if row.IDEmpresa and not row.NomeEmpresa %}
+              <span class="text-danger">Empresa {{ row.IDEmpresa }} não existe</span>
+            {% else %}
+              {{ row.NomeEmpresa or '—' }}
+            {% endif %}
+          </td>
+          <td>
+            {% if row.IDEmpresaCompradora and not row.NomeEmpresaCompradora %}
+              <span class="text-danger">Compradora {{ row.IDEmpresaCompradora }} não existe</span>
+            {% else %}
+              {{ row.NomeEmpresaCompradora or '—' }}
+            {% endif %}
+          </td>
+          <td>
+            {% if row.IDEmpresaVendedora and not row.NomeEmpresaVendedora %}
+              <span class="text-danger">Vendedora {{ row.IDEmpresaVendedora }} não existe</span>
+            {% else %}
+              {{ row.NomeEmpresaVendedora or '—' }}
+            {% endif %}
+          </td>
+          <td>
+            {% if row.IDProjeto and not row.NomeProjeto %}
+              <span class="text-danger">Projeto {{ row.IDProjeto }} não existe</span>
+            {% else %}
+              {{ row.NomeProjeto or '—' }}
+            {% endif %}
+          </td>
+          <td>{{ row.OPInicial or '—' }}</td>
+          <td>{{ row.ValorUnitario or '—' }}</td>
+          <td>{{ row.NumeroLote or '—' }}</td>
+          <td>{{ row.NumerodeSerie or '—' }}</td>
+          <td>{{ row.DataPedido or '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="d-flex justify-content-end mt-3">
+      <a href="{{ url_for('euro.importacao_pedidos') }}" class="btn btn-secondary me-2">Cancelar</a>
+      <button type="submit" class="btn btn-success">Confirmar Importação</button>
+    </div>
+  </form>
+  {% endif %}
+
+  <hr>
+  <h6>Formato do CSV esperado:</h6>
+  <pre class="bg-white p-2 border rounded">
+ReferenciaPedido,TipoPedido,OSAuvo,IDFuncionario,IDEmpresa,IDEmpresaVendedora,
+IDEmpresaCompradora,IDProjeto,OPInicial,IDItem,Quantidade,ValorUnitario,
+NumeroLote,NumerodeSerie,DataPedido
+  </pre>
+</div>
+{% endblock %}

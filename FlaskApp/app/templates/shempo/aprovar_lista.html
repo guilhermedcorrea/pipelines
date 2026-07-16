@@ -1,0 +1,45 @@
+{# ------------------------------------------------------------------------ #
+  templates/aprovar_lista.html – lista de medições pendentes (AJUSTADO)
+# ------------------------------------------------------------------------ #}
+{% extends 'base.html' %}
+
+{% block title %}Aprovar Medições{% endblock %}
+
+{% block content %}
+<h4 class="mt-3">Medições pendentes de aprovação</h4>
+
+<div class="table-responsive">
+  <table id="grid" class="table table-sm table-hover">
+    <thead class="table-light">
+      <tr>
+        <th>Nº Medição</th>
+        <th>Projeto</th>
+        <th>Empresa</th>
+        <th>Data Emissão</th>
+        <th>Usuário</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in pendentes %}
+        <tr data-num="{{ p.NumeroMedicao }}">
+          <td>{{ p.NumeroMedicao }}</td>
+          <td>{{ p.NomeProjeto }}</td>
+          <td>{{ p.NomeEmpresa }}</td>
+          <td>{{ p.DataEmissao.strftime('%d/%m/%Y') if p.DataEmissao else '' }}</td>
+          <td>{{ p.NomeUsuario }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+/* duplo-clique -> detalhe */
+document.querySelectorAll('#grid tbody tr').forEach(tr=>{
+  tr.addEventListener('dblclick',()=>{
+    const n = tr.dataset.num;
+    window.location = "{{ url_for('euro.detalhe_aprovacao', num_med=0) }}".replace('/0','/'+n);
+  });
+});
+</script>
+{% endblock %}

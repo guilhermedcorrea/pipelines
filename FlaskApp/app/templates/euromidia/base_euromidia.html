@@ -1004,7 +1004,7 @@ input:disabled, select:disabled, textarea:disabled{
 
   <div class="topbar">
     <div class="brand">
-      <a href="http://189.45.251.100:5000/paineis/?cidade_exibicao=&amp;tipo=PAINEL+DIGITAL&amp;exibidora=&amp;tipo_documento=&amp;vendedor=&amp;marca_exibida=&amp;status=todos&amp;q=&amp;formato=&amp;ponto_ativo_ui=1&amp;bi_semana=&amp;dt_ini=2026-06-01&amp;dt_fim=2026-06-12&amp;per_page=20&amp;altxlarg=&amp;iluminado=&amp;area_min=&amp;area_max=&amp;ponto_ativo=1" aria-label="Voltar para lista de painéis" title="Voltar para lista de painéis">
+      <a href="{{ home_usuario_url|default(url_for('Paineis.lista_paineis'), true) }}" aria-label="Ir para a tela inicial" title="Ir para a tela inicial">
         <img src="https://euromidia.com.br/wp-content/uploads/2025/06/euro-195x45-1.webp" alt="Euromídia">
       </a>
       <div class="subtitle">
@@ -1037,6 +1037,22 @@ input:disabled, select:disabled, textarea:disabled{
         {% set menu_paineis_performance = (pode_acessar_menu_paineis('performance_paineis') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_carteiras = (pode_acessar_menu_paineis('carteiras') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_empresas = (pode_acessar_menu_paineis('empresas') if pode_acessar_menu_paineis is defined else True) %}
+        {#
+          Catálogo Produtos: regra empresarial independente do perfil.
+          Só aparece para IDEmpresaProprietaria = 1 ou BitFullEmpresas = 1.
+          A mesma regra também é aplicada no endpoint Python para impedir acesso direto.
+        #}
+        {% set menu_paineis_catalogo_produtos = (
+          pode_acessar_menu_paineis('catalogo_produtos')
+          if pode_acessar_menu_paineis is defined
+          else (
+            current_user.is_authenticated
+            and (
+              (current_user.IDEmpresaProprietaria|default(0, true)|int) == 1
+              or (current_user.BitFullEmpresas|default(0, true)|int) == 1
+            )
+          )
+        ) %}
         {% set menu_paineis_lista_ocupacao = False %}
         {% set menu_paineis_preferencia_reservas = False %}
         {% set menu_paineis_reserva_ocupacao = (current_user.is_authenticated and (current_user.IDEmpresaProprietaria|default(0, true)|int) == 3) %}
@@ -1104,6 +1120,30 @@ input:disabled, select:disabled, textarea:disabled{
           {% set menu_paineis_historico_atendimento = menu_paineis_atendimento %}
           {% set menu_paineis_health_check = False %}
         {% endif %}
+        {#
+          Revalidação final do ACL depois dos ajustes por perfil.
+          É necessária porque um Admin/Coordenador da IDEmpresaProprietaria = 1
+          também não pode enxergar Estoques, Check-in, Atendimento ou Financeiro.
+          O ACL Python consulta a Silver.DimUsuarios e tem prioridade sobre o perfil.
+        #}
+        {% if pode_acessar_menu_paineis is defined %}
+          {% set menu_paineis_disponibilidades = menu_paineis_disponibilidades and pode_acessar_menu_paineis('disponibilidades') %}
+          {% set menu_paineis_reserva_ocupacao = menu_paineis_reserva_ocupacao and pode_acessar_menu_paineis('reserva_ocupacao') %}
+          {% set menu_paineis_vencimentos_campanhas = menu_paineis_vencimentos_campanhas and pode_acessar_menu_paineis('vencimentos_campanhas_euromidia') %}
+
+          {% set menu_paineis_checkin_novo = menu_paineis_checkin_novo and pode_acessar_menu_paineis('checkin_novo') %}
+          {% set menu_paineis_lista_checkins = menu_paineis_lista_checkins and pode_acessar_menu_paineis('lista_checkins') %}
+
+          {% set menu_paineis_atendimento = menu_paineis_atendimento and pode_acessar_menu_paineis('atendimento') %}
+          {% set menu_paineis_health_check = menu_paineis_health_check and pode_acessar_menu_paineis('health_check_comercial') %}
+          {% set menu_paineis_historico_atendimento = menu_paineis_historico_atendimento and pode_acessar_menu_paineis('historico_atendimento') %}
+
+          {% set menu_paineis_contratos = menu_paineis_contratos and pode_acessar_menu_paineis('contratos') %}
+          {% set menu_paineis_mov_fin = menu_paineis_mov_fin and pode_acessar_menu_paineis('movimentacao_financeira') %}
+          {% set menu_paineis_inadimplentes = menu_paineis_inadimplentes and pode_acessar_menu_paineis('inadimplentes') %}
+          {% set menu_paineis_aprovacao_contratos = menu_paineis_aprovacao_contratos and pode_acessar_menu_paineis('aprovacao_contratos') %}
+        {% endif %}
+
         {% set menu_admin = (
           current_user.is_authenticated
           and (not usuario_eh_vendedor_menu)
@@ -1136,6 +1176,7 @@ input:disabled, select:disabled, textarea:disabled{
           or menu_paineis_performance
           or (menu_paineis_carteiras and not (usuario_logado_eh_vendedor_paineis | default(False)))
           or menu_paineis_empresas
+          or menu_paineis_catalogo_produtos
           or menu_paineis_checkin_novo
           or menu_paineis_lista_checkins
           or menu_paineis_health_check
@@ -1154,7 +1195,7 @@ input:disabled, select:disabled, textarea:disabled{
         {% if exibir_menu_paineis %}
         <div class="menu-item" data-menu="paineis">
           <button type="button"
-                  class="menu-btn {% if request.path.startswith('/paineis') or request.path.startswith('/estoques') or request.path.startswith('/kanban') or request.endpoint == 'admin.vencimentos_campanhas_euromidia' %}active{% endif %}">
+                  class="menu-btn {% if request.path.startswith('/paineis') or request.path.startswith('/estoques') or request.path.startswith('/kanban') or request.path.startswith('/admin/shempo/v1') or request.endpoint == 'admin.vencimentos_campanhas_euromidia' %}active{% endif %}">
             Painéis <span style="opacity:.9;">▾</span>
           </button>
 
@@ -1194,7 +1235,7 @@ input:disabled, select:disabled, textarea:disabled{
               </div>
             {% endif %}
 
-            {% if menu_paineis_empresas or menu_paineis_checkin_novo or menu_paineis_lista_checkins %}
+            {% if menu_paineis_empresas or menu_paineis_catalogo_produtos or menu_paineis_checkin_novo or menu_paineis_lista_checkins %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Cadastros</span>
@@ -1208,6 +1249,13 @@ input:disabled, select:disabled, textarea:disabled{
                     <a href="{{ url_for('Paineis.clientes_lista') }}"
                        class="{% if request.path == url_for('Paineis.clientes_lista') %}menu-link-current{% endif %}">
                       Empresas
+                    </a>
+                  {% endif %}
+
+                  {% if menu_paineis_catalogo_produtos %}
+                    <a href="{{ url_for('euro.lista_produtos') }}"
+                       class="{% if request.endpoint == 'euro.lista_produtos' %}menu-link-current{% endif %}">
+                      Catálogo Produtos
                     </a>
                   {% endif %}
 

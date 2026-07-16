@@ -1,0 +1,171 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Cadastrar Novo Componente{% endblock %}
+
+{% block content %}
+<h2>Cadastrar Novo Componente</h2>
+<form method="POST" action="{{ url_for('euro.criar_componente') }}">
+
+  <div class="mb-3">
+    <label for="nome_produto" class="form-label">Nome do Item</label>
+    <input type="text" class="form-control" id="nome_produto" name="nome_produto" required>
+  </div>
+  <div class="mb-3">
+    <label for="referencia_externa" class="form-label">Referência Externa</label>
+    <input type="text" class="form-control" id="referencia_externa" name="referencia_externa" required>
+    <div class="form-text">Este campo não permite adicionar Referência Externa que já exista.</div>
+  </div>
+  <div class="mb-3 form-check">
+    <input type="checkbox" class="form-check-input" id="bit_ativo" name="bit_ativo" value="1">
+    <label class="form-check-label" for="bit_ativo">Ativo (BitAtivo)</label>
+  </div>
+  <div class="mb-3 form-check">
+    <input type="checkbox" class="form-check-input" id="classifica_ativo" name="classifica_ativo" value="1">
+    <label class="form-check-label" for="classifica_ativo">Esse Componente é um Ativo?</label>
+  </div>
+  <div class="mb-3">
+    <label for="chassi" class="form-label">Chassi</label>
+    <input type="text" class="form-control" id="chassi" name="chassi">
+  </div>
+  <div class="mb-3">
+    <label for="renavam" class="form-label">Renavam</label>
+    <input type="text" class="form-control" id="renavam" name="renavam">
+  </div>
+  <div class="mb-3 form-check">
+    <input type="checkbox" class="form-check-input" id="bit_pmv" name="bit_pmv" value="1">
+    <label class="form-check-label" for="bit_pmv">Esse Componente é um PMV?</label>
+  </div>
+  
+  
+  <div class="mb-3">
+    <label for="id_departamento" class="form-label">Departamento</label>
+    <select class="form-select" id="id_departamento" name="id_departamento" required>
+      <option value="">Selecione um Departamento</option>
+      {% for dept in departamentos %}
+      <option value="{{ dept.IDDepartamento }}">{{ dept.NomeDepartamento }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="mb-3">
+    <label for="familia_id" class="form-label">Família</label>
+    <select class="form-select" id="familia_id" name="familia_id" required>
+      <option value="">Selecione uma Família</option>
+      {% for fam in familias %}
+      <option value="{{ fam.FamiliaID }}">{{ fam.NomeFamilia }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="mb-3">
+    <label for="id_categoria" class="form-label">Categoria</label>
+    <select class="form-select" id="id_categoria" name="id_categoria" required>
+      <option value="">Selecione uma Categoria</option>
+      {% for cat in categorias %}
+      <option value="{{ cat.IDCategoria }}">{{ cat.NomeCategoria }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  
+  <hr>
+
+  <h4>Compatibilidade Componentes</h4>
+  <div id="compatibilidade-list">
+    <div class="row g-2 mb-3">
+      <div class="col-md-10">
+        <select class="form-select" name="pmv_compat" required>
+          <option value="">Selecione um PMV</option>
+          {% for pmv in pmvs %}
+          <option value="{{ pmv.PmvID }}">{{ pmv.NomePMV }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <button type="button" class="btn btn-danger" onclick="removerCompatibilidade(this)">Remover</button>
+      </div>
+    </div>
+    <button type="button" class="btn btn-sm btn-success" onclick="adicionarCompatibilidade()">Informar Mais compatibilidade</button>
+  </div>
+  
+  <hr>
+
+  <h4>Saldo Inicial</h4>
+  <div class="row">
+    <div class="col-md-6 mb-3">
+      <label for="saldo_entrada" class="form-label">Adicionar Saldo</label>
+      <input type="number" class="form-control" id="saldo_entrada" name="saldo_entrada" placeholder="Quantidade para adicionar">
+    </div>
+    <div class="col-md-6 mb-3">
+      <label for="saldo_saida" class="form-label">Remover Saldo</label>
+      <input type="number" class="form-control" id="saldo_saida" name="saldo_saida" placeholder="Quantidade para remover">
+    </div>
+  </div>
+  
+  <hr>
+
+  <h4>Características</h4>
+  <div id="caracteristicas-list">
+    <div class="row g-2 mb-3">
+      <div class="col-md-5">
+        <input type="text" name="nova_caracteristica" placeholder="Característica" class="form-control">
+      </div>
+      <div class="col-md-5">
+        <input type="text" name="novo_valor" placeholder="Valor" class="form-control">
+      </div>
+      <div class="col-md-2">
+        <button type="button" class="btn btn-danger" onclick="removerCaracteristica(this)">Remover</button>
+      </div>
+    </div>
+    <button type="button" class="btn btn-sm btn-success" onclick="adicionarCaracteristica()">Adicionar Nova Característica</button>
+  </div>
+  
+  <hr>
+
+  <button type="submit" class="btn btn-primary">Criar Cadastro</button>
+</form>
+
+<script>
+function adicionarCaracteristica() {
+  const container = document.getElementById('caracteristicas-list');
+  const div = document.createElement('div');
+  div.className = 'row g-2 mb-3';
+  div.innerHTML = `
+    <div class="col-md-5">
+      <input type="text" name="nova_caracteristica" placeholder="Característica" class="form-control">
+    </div>
+    <div class="col-md-5">
+      <input type="text" name="novo_valor" placeholder="Valor" class="form-control">
+    </div>
+    <div class="col-md-2">
+      <button type="button" class="btn btn-danger" onclick="removerCaracteristica(this)">Remover</button>
+    </div>
+  `;
+  container.insertBefore(div, container.lastElementChild);
+}
+
+function removerCaracteristica(btn) {
+  btn.parentElement.parentElement.remove();
+}
+
+function adicionarCompatibilidade() {
+  const container = document.getElementById('compatibilidade-list');
+  const div = document.createElement('div');
+  div.className = 'row g-2 mb-3';
+  div.innerHTML = `
+    <div class="col-md-10">
+      <select class="form-select" name="pmv_compat">
+        <option value="">Selecione um PMV</option>
+        {% for pmv in pmvs %}
+        <option value="{{ pmv.PmvID }}">{{ pmv.NomePMV }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <button type="button" class="btn btn-danger" onclick="removerCompatibilidade(this)">Remover</button>
+    </div>
+  `;
+  container.insertBefore(div, container.lastElementChild);
+}
+
+function removerCompatibilidade(btn) {
+  btn.parentElement.parentElement.remove();
+}
+</script>
+{% endblock %}

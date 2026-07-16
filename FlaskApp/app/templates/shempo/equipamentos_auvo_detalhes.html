@@ -1,0 +1,286 @@
+{# templates/equipamentos_auvo_detalhes.html #}
+{% extends 'base.html' %}
+{% block title %}
+  EquipamentoAuvo #{{ equipamento.IDEquipamentoAuvo }}
+  – {{ equipamento.NomeEquipamento or '—' }}
+{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+  <h2>
+    EquipamentoAuvo #{{ equipamento.IDEquipamentoAuvo }}
+    <br><small class="text-muted">{{ equipamento.NomeEquipamento or '' }}</small>
+  </h2>
+
+  <form method="post" class="row g-3">
+
+    {# ExternalID (Select2 com busca; POST continua mandando o ID) -> externalId #}
+    <div class="col-md-4">
+      <label for="ExternalID" class="form-label">ExternalID</label>
+      <select id="ExternalID"
+              name="ExternalID"
+              class="form-select"
+              style="width:100%"
+              data-url="{{ url_for('euro.get_nome_ativo', id_ativo=0) }}">
+        <option value="">— selecione —</option>
+        {% for id,label in external_opts %}
+          <option value="{{ id }}"
+            {% if equipamento.ExternalID|string == id|string %}selected{% endif %}>
+            {{ id }} | {{ label }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    {# IDAtivo (plaintext, atualizado pelo JS ao trocar ExternalID) #}
+    <div class="col-md-4">
+      <label class="form-label">IDAtivo</label>
+      <p id="IDAtivoDisplay" class="form-control-plaintext">
+        {{ equipamento.IDAtivo or '—' }}
+      </p>
+      {# hidden para enviar o IDAtivo no POST #}
+      <input type="hidden" id="IDAtivo" name="IDAtivo" value="{{ equipamento.IDAtivo or '' }}">
+    </div>
+
+    {# NomeEquipamento (EDITÁVEL) -> name #}
+    <div class="col-md-4">
+      <label for="NomeEquipamento" class="form-label">NomeEquipamento</label>
+      <input type="text"
+             id="NomeEquipamento"
+             name="NomeEquipamento"
+             class="form-control"
+             value="{{ equipamento.NomeEquipamento or '' }}">
+    </div>
+
+    {# AssociatedCustomerID (somente exibição) #}
+    <div class="col-md-4">
+      <label class="form-label">AssociatedCustomerID</label>
+      <p class="form-control-plaintext">
+        {{ equipamento.AssociatedCustomerID or '—' }}
+      </p>
+    </div>
+
+
+
+<div class="col-md-4">
+  <label for="AssociatedCustomerID" class="form-label">Associar Cliente</label>
+  <select id="AssociatedCustomerID"
+          name="AssociatedCustomerID"
+          class="form-select"
+          style="width:100%">
+    <option value="">— selecione —</option>
+    {% for val,label in user_opts %}
+      <option value="{{ val }}"
+        {% if assoc_customer_id_current is not none and val == assoc_customer_id_current %}selected{% endif %}>
+        {{ label }}
+      </option>
+    {% endfor %}
+  </select>
+  <div class="form-text">
+    Mostrando: <code>EmpresaID|AuvoID|Descricao</code>. O valor enviado é o <strong>AuvoID</strong>.
+  </div>
+</div>
+
+
+
+
+
+    {# ParentEquipamentID (plaintext) #}
+    <div class="col-md-4">
+      <label class="form-label">ParentEquipamentID</label>
+      <p class="form-control-plaintext">
+        {{ equipamento.ParentEquipamentID or '—' }}
+      </p>
+    </div>
+
+    {# Categoria (editável local) #}
+    <div class="col-md-4">
+      <label for="Categoria" class="form-label">Categoria</label>
+      <input type="text"
+             id="Categoria"
+             name="Categoria"
+             class="form-control"
+             value="{{ equipamento.Categoria or '' }}">
+    </div>
+
+    {# Identificador (plaintext) #}
+    <div class="col-md-4">
+      <label class="form-label">Identificador</label>
+      <p class="form-control-plaintext">
+        {{ equipamento.Identificador or '—' }}
+      </p>
+    </div>
+
+    {# ImagemUrl (plaintext) #}
+    <div class="col-12">
+      <label class="form-label">ImagemUrl</label>
+      <p class="form-control-plaintext text-truncate">
+        {{ equipamento.ImagemUrl or '—' }}
+      </p>
+    </div>
+
+    {# DataCriação (plaintext) #}
+    <div class="col-md-3">
+      <label class="form-label">DataCriação</label>
+      <p class="form-control-plaintext">
+        {{ equipamento.DataCriacao and equipamento.DataCriacao.strftime('%Y-%m-%d') }}
+      </p>
+    </div>
+
+    {# DataExpirado (editável local; só grava no SQL após Auvo OK) #}
+    <div class="col-md-3">
+      <label for="DataExpirado" class="form-label">DataExpirado</label>
+      <input type="date"
+             id="DataExpirado"
+             name="DataExpirado"
+             class="form-control"
+             value="{{ equipamento.DataExpirado and equipamento.DataExpirado.strftime('%Y-%m-%d') }}">
+    </div>
+
+    {# Toggle BitAtivo -> active #}
+    <div class="col-md-3 d-flex align-items-end">
+      <div class="form-check form-switch">
+        <input class="form-check-input"
+               type="checkbox"
+               id="BitAtivo"
+               name="BitAtivo"
+               {% if equipamento.BitAtivo %}checked{% endif %}>
+        <label class="form-check-label" for="BitAtivo">
+          Equipamento Ativo
+        </label>
+      </div>
+    </div>
+
+    {# Descrição (editável) -> description #}
+    <div class="col-12">
+      <label for="Descricao" class="form-label">Descrição</label>
+      <textarea id="Descricao"
+                name="Descricao"
+                class="form-control"
+                rows="3">{{ equipamento.Descricao or '' }}</textarea>
+    </div>
+
+    {# Botões #}
+    <div class="col-12">
+      <button type="submit" class="btn btn-primary">Salvar</button>
+      <a href="{{ url_for('euro.lista_equipamentos_auvo') }}"
+         class="btn btn-secondary">← Voltar</a>
+    </div>
+
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{# ——— Select2 (se já estiver no base.html, pode remover estes includes) ——— #}
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  const selectExt   = document.getElementById('ExternalID');
+  const inpNome     = document.getElementById('NomeEquipamento');
+  const pIdAtivo    = document.getElementById('IDAtivoDisplay');
+  const hidIdAtivo  = document.getElementById('IDAtivo');      // hidden para POST
+  const urlTpl      = selectExt.dataset.url;
+
+  function updateFields(){
+    const id = selectExt.value;
+
+    // Atualiza display e hidden imediatamente
+    pIdAtivo.textContent = id || '—';
+    hidIdAtivo.value     = id || '';
+
+    if (!id) return;
+
+    // Busca NomeAtivo no backend e **sempre** aplica no NomeEquipamento
+    const url = urlTpl.replace(/\/0$/, `/${id}`);
+    fetch(url, { headers:{ 'X-Requested-With':'XMLHttpRequest' } })
+      .then(r => r.json())
+      .then(data => {
+        const nomeAtivo = (data.NomeAtivo ?? data.nome ?? '').toString();
+        const idAtivo   = (data.IDAtivo   ?? data.id   ?? id);
+
+        // Sempre sobrescreve ao trocar o ExternalID
+        inpNome.value = nomeAtivo;
+        inpNome.dataset.autofilled = '1';
+
+        pIdAtivo.textContent = idAtivo || '—';
+        hidIdAtivo.value     = idAtivo || '';
+      })
+      .catch(() => {
+        // mantém valores atuais em caso de erro
+      });
+  }
+
+  // Se o usuário digitar manualmente depois, apenas marca a flag (não bloqueia futuras trocas)
+  inpNome.addEventListener('input', () => { inpNome.dataset.autofilled = '0'; });
+
+  // Listener padrão do <select>
+  selectExt.addEventListener('change', updateFields);
+
+  // Inicializa com o estado atual (antes do Select2 para popular IDAtivo/Nome)
+  updateFields();
+});
+</script>
+
+<script>
+  // Init Select2 (busca digitando) – mantém os valores idênticos para o POST
+  (function($){
+    function initSelect2Safe($el, placeholder){
+      try {
+        if ($el.hasClass('select2-hidden-accessible')) {
+          $el.select2('destroy');
+        }
+      } catch(e) {}
+      $el.select2({
+        width: '100%',
+        placeholder: placeholder,
+        allowClear: true
+      });
+    }
+
+    $(function(){
+      const $ext = $('#ExternalID');
+      const $usr = $('#AssociatedUserID');
+
+      initSelect2Safe($ext, 'Digite para buscar…');
+      initSelect2Safe($usr, 'Digite para buscar…');
+
+      // Garante que a nossa lógica rode também quando o Select2 dispara eventos
+      $ext.on('select2:select select2:clear', function(){
+        // dispara o evento change do elemento nativo para o handler já existente
+        this.dispatchEvent(new Event('change', { bubbles:true }));
+      });
+    });
+  })(jQuery);
+
+    (function($){
+    function initSelect2Safe($el, placeholder){
+      try {
+        if ($el.hasClass('select2-hidden-accessible')) {
+          $el.select2('destroy');
+        }
+      } catch(e) {}
+      $el.select2({
+        width: '100%',
+        placeholder: placeholder,
+        allowClear: true
+      });
+    }
+
+    $(function(){
+      const $cust = $('#AssociatedCustomerID');
+
+      // Inicializa com busca digitável
+      initSelect2Safe($cust, 'Digite para buscar…');
+
+      // Garante que a opção marcada no HTML permaneça selecionada no Select2
+      if ($cust.find('option:selected').length) {
+        $cust.trigger('change.select2');
+      }
+    });
+  })(jQuery);
+</script>
+{% endblock %}

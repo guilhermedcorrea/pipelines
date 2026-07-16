@@ -1,0 +1,100 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Ver Estoques do Item {{ item_id }}{% endblock %}
+
+{% block content %}
+  <h2>Estoques do Item {{ item_id }}</h2>
+
+  {% if product %}
+    <!-- Nome e imagem -->
+    <h3 class="mb-2">{{ product.NomeProduto }}</h3>
+    <div class="mb-4 text-center">
+      <img src="{{ url_for('static', filename='imagens/' + product.IDItem|string + '-1.jpg') }}"
+           alt="Imagem do produto"
+           width="200" height="200"
+           style="object-fit:contain; max-width:200px; max-height:200px;"
+           loading="lazy"
+           onerror="this.onerror=null;this.src='https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif';">
+    </div>
+
+    <h3>Dados do Produto</h3>
+    <table class="table table-bordered mb-4">
+      <tr><th>ID Item</th><th>Referência</th><th>Ativo</th></tr>
+      <tr>
+        <td>{{ product.IDItem }}</td>
+        <td>{{ product.ReferenciaExterna }}</td>
+        <td>{{ 'Sim' if product.BitAtivo else 'Não' }}</td>
+      </tr>
+    </table>
+  {% else %}
+    <p>Produto não encontrado.</p>
+  {% endif %}
+
+  <!-- Estoques -->
+  <h3>Estoque Matriz ({{ total_matriz }})</h3>
+  {% if estoque_matriz %}
+    <table class="table table-striped">
+      <thead><tr><th>ID Estoque</th><th>CodPonto</th><th>Saldo</th></tr></thead>
+      <tbody>
+        {% for est in estoque_matriz %}
+        <tr>
+          <td>{{ est.IDEstoque }}</td>
+          <td>{{ est.CodPonto }}</td>
+          <td>{{ est.Saldo }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Nenhum registro em Estoque Matriz.</p>
+  {% endif %}
+
+  <hr>
+  <h3><a href="{{ url_for('euro.estoque_euromidia_detail', item_id=item_id) }}">Estoque Euromidia ({{ total_euromidia }})</a></h3>
+
+  <hr>
+  <h3>Estoque Euro Matriz ({{ total_euromatriz }})</h3>
+  {% if estoque_euromatriz %}
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>ID Estoque</th>
+          <th>EuroID</th>
+          <th>CodPonto</th>
+          <th>Quantidade</th>
+          <th>Número Lote</th>
+          <th>Firmware</th>
+          <th>Estoque Mínimo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for est in estoque_euromatriz %}
+        <tr>
+          <td>{{ est.IDEstoque }}</td>
+          <td>{{ est.EuroID }}</td>
+          <td>{{ est.CodPonto }}</td>
+          <td>{{ est.Quantidade }}</td>
+          <td>{{ est.NumeroLote or '-' }}</td>
+          <td>{{ est.Firmware or '-' }}</td>
+          <td>{{ est.EstoqueMinimo if est.EstoqueMinimo is not none else '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>Nenhum registro em Estoque Euro Matriz.</p>
+  {% endif %}
+
+  <hr>
+  <h3><a href="{{ url_for('euro.estoque_shempo_detail', item_id=item_id) }}">Estoque Shempo ({{ total_shempo }})</a></h3>
+  <hr>
+  <h3><a href="{{ url_for('euro.estoque_manut_externa_detail', item_id=item_id) }}">Estoque Manutenção Externa ({{ total_externa }})</a></h3>
+  <hr>
+  <h3><a href="{{ url_for('euro.estoque_manut_interna_detail', item_id=item_id) }}">Estoque Manutenção Interna ({{ total_interna }})</a></h3>
+  <hr>
+  <h3><a href="{{ url_for('euro.estoque_container_detail', item_id=item_id) }}">Estoque Container ({{ total_container }})</a></h3>
+
+  <div class="d-flex justify-content-between mt-4">
+    <a href="{{ url_for('euro.index') }}" class="btn btn-secondary">Voltar</a>
+    <a href="{{ url_for('euro.movimentar_estoque', item_id=item_id) }}" class="btn btn-primary">Movimentar Estoque</a>
+  </div>
+{% endblock %}

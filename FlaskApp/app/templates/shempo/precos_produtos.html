@@ -1,0 +1,186 @@
+{% extends 'base.html' %}
+{% block title %}Preços de Produtos{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+  <h2 class="mb-3">Preços de Produtos</h2>
+
+  <!-- Busca -->
+  <form method="get" action="{{ url_for('euro.precos_produtos') }}" class="mb-3">
+    <div class="input-group">
+      <input type="text" name="search" class="form-control"
+             placeholder="Pesquisar por IDPreço ou IDItem"
+             value="{{ search }}">
+      <button class="btn btn-primary">Pesquisar</button>
+    </div>
+  </form>
+
+  <!-- Formulário de Inserção -->
+  <form method="post" class="row g-2 mb-4">
+    <div class="col-md-2">
+      <label class="form-label">IDItem</label>
+      <input type="number" id="inp-iditem" name="IDItem"
+             class="form-control" required>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Referência Externa</label>
+      <input type="text" id="inp-referencia" name="ReferenciaExterna"
+             class="form-control">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Nome do Produto</label>
+      <input type="text" id="inp-nomeproduto"
+             class="form-control" readonly>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Tabela Preço</label>
+      <select name="IDTabelaPreco" class="form-select" required>
+        <option value="">— selecione —</option>
+        {% for t in tabelas %}
+        <option value="{{ t.IDTabelaPreco }}">
+          {{ t.NomeTabelaPReco }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-1">
+      <label class="form-label">TipoItem</label>
+      <input type="text" name="TipoItem" class="form-control">
+    </div>
+    <div class="col-md-1">
+      <label class="form-label">Unidade</label>
+      <input type="text" name="Unidade" class="form-control">
+    </div>
+    <div class="col-md-1">
+      <label class="form-label">Estado</label>
+      <input type="text" name="EstadoItem" class="form-control">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Fim Vigência</label>
+      <input type="date" name="FimVigencia" class="form-control">
+    </div>
+    <div class="col-md-1">
+      <label class="form-label">Custo</label>
+      <input type="number" step="0.01" name="Custo" class="form-control">
+    </div>
+    <div class="col-md-1">
+      <label class="form-label">Valor</label>
+      <input type="number" step="0.01" name="ValorItem" class="form-control">
+    </div>
+    <div class="col-md-1 align-self-end">
+      <button type="submit" class="btn btn-success w-100">
+        Adicionar
+      </button>
+    </div>
+  </form>
+
+  <!-- Tabela de Preços Ativos -->
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+      <thead>
+        <tr>
+          <th>IDPreco</th>
+          <th>IDItem</th>
+          <th>Referência</th>
+          <th>Produto</th>
+          <th>Tabela</th>
+          <th>Estado</th>
+          <th>Início</th>
+          <th>Fim</th>
+          <th>Custo</th>
+          <th>Valor</th>
+          <th>Excluir</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in precos %}
+        <tr data-id="{{ p.IDPreco }}">
+          <td>{{ p.IDPreco }}</td>
+          <td>{{ p.IDItem }}</td>
+          <td>{{ p.ReferenciaExterna }}</td>
+          <td>{{ p.NomeProduto }}</td>
+          <td>{{ p.NomeTabelaPReco }}</td>
+          <td>{{ p.EstadoItem }}</td>
+          <td>{{ p.InicioVigencia.strftime('%Y-%m-%d') }}</td>
+          <td>{{ p.FimVigencia.strftime('%Y-%m-%d') if p.FimVigencia else '-' }}</td>
+          <td>{{ '{:,.2f}'.format(p.Custo or 0) }}</td>
+          <td>{{ '{:,.2f}'.format(p.ValorItem) }}</td>
+          <td class="text-center">
+            <i class="bi bi-x-circle-fill text-danger delete-preco" style="cursor:pointer"></i>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Paginação -->
+  <nav aria-label="Navegação de página">
+    <ul class="pagination justify-content-center mt-3">
+      <li class="page-item {% if page == 1 %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.precos_produtos', page=page-1, search=search) }}">
+          Anterior
+        </a>
+      </li>
+      {% for pnum in range(1, total_pages+1) %}
+      <li class="page-item {% if pnum == page %}active{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.precos_produtos', page=pnum, search=search) }}">
+          {{ pnum }}
+        </a>
+      </li>
+      {% endfor %}
+      <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.precos_produtos', page=page+1, search=search) }}">
+          Próxima
+        </a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+<script>
+// Lookup ao sair de IDItem
+document.getElementById('inp-iditem').addEventListener('blur', async function(){
+  const id = this.value;
+  if(!id) return;
+  const res = await fetch(`/get_nome_produto/${id}`);
+  const js  = await res.json();
+  document.getElementById('inp-nomeproduto').value    = js.nome || '';
+  document.getElementById('inp-referencia').value     = js.referencia_externa || '';
+});
+
+// Lookup ao sair de Referência Externa
+document.getElementById('inp-referencia').addEventListener('blur', async function(){
+  const ref = this.value.trim();
+  if(!ref) return;
+  const res = await fetch(`/get_produto_por_ref/${ref}`);
+  const js  = await res.json();
+  if(js.IDItem){
+    document.getElementById('inp-iditem').value        = js.IDItem;
+    document.getElementById('inp-nomeproduto').value   = js.nome;
+  }
+});
+
+// Deletar via AJAX
+document.querySelectorAll('.delete-preco').forEach(icon => {
+  icon.addEventListener('click', async () => {
+    const tr = icon.closest('tr');
+    const id = tr.dataset.id;
+    if(!confirm('Confirma exclusão deste preço?')) return;
+    const res = await fetch(`/precos_produtos/delete/${id}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'}
+    });
+    const js = await res.json();
+    if(js.success){
+      tr.remove();
+    } else {
+      alert('Erro ao excluir');
+    }
+  });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,668 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Detalhes do Item - {{ item.NomeProduto }}{% endblock %}
+
+{% block content %}
+<h2>Detalhes do Item - {{ item.NomeProduto }}</h2>
+<div style="display: flex; justify-content: flex-end;">
+  {% if ativo_badge %}
+    <a href="{{ ativo_badge.url }}"
+       class="badge"
+       style="
+         background: #FFD700;
+         color: #000;
+         font-size: 2.5rem;
+         padding: 1.2rem 2.4rem;
+         border-radius: 0.5rem;
+       ">
+      Ativo – {{ ativo_badge.IDAtivo }}
+    </a>
+  {% endif %}
+</div>
+
+
+{% if from_compat and firmware_selo %}
+<div class="alert alert-info">
+  <strong>Firmware:</strong> {{ firmware_selo }}
+</div>
+{% endif %}
+
+
+<div class="row mb-3">
+
+  <!-- Coluna do carrossel / imagens (8 col) -->
+  <div class="col-md-8 d-flex justify-content-center">
+    {% if images and images|length > 0 %}
+      <div style="display:inline-block; width:auto; overflow:visible;">
+        <div id="itemImagesCarousel" class="carousel slide" data-bs-ride="carousel">
+          <div class="carousel-inner" style="width:auto; overflow:visible;">
+            {% for img in images %}
+              <div class="carousel-item {% if loop.first %}active{% endif %}" style="width:auto;">
+                <img src="{{ img.url }}"
+                     class="d-block mx-auto"
+                     style="max-height: 300px;"
+                     alt="Imagem {{ loop.index }}">
+                <div class="carousel-caption d-none d-md-block">
+                  <form method="POST"
+                        action="{{ url_for('euro.remover_imagem', item_id=item.IDItem) }}"
+                        style="display:inline;">
+                    <input type="hidden" name="filename" value="{{ img.NomeArquivo }}">
+                    <button type="submit" class="btn btn-sm btn-danger">Remover</button>
+                  </form>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+          <button class="carousel-control-prev" type="button"
+                  data-bs-target="#itemImagesCarousel" data-bs-slide="prev">
+            <span class="carousel-control-prev-icon"></span>
+            <span class="visually-hidden">Anterior</span>
+          </button>
+          <button class="carousel-control-next" type="button"
+                  data-bs-target="#itemImagesCarousel" data-bs-slide="next">
+            <span class="carousel-control-next-icon"></span>
+            <span class="visually-hidden">Próximo</span>
+          </button>
+        </div>
+      </div>
+    {% else %}
+      <img src="https://via.placeholder.com/500x300?text=Sem+Imagem"
+           alt="Sem imagem cadastrada"
+           class="img-fluid rounded mx-auto d-block">
+    {% endif %}
+  </div>
+
+  <!-- Coluna do selo (4 col) alinhado ao topo da imagem -->
+  <div class="col-md-4 d-flex justify-content-center">
+    {% if firmware_selo %}
+      <span class="badge bg-success fs-5 align-self-start"
+            style="padding:1rem 1.5rem;">
+        Firmware: {{ firmware_selo }}
+      </span>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- ------------------------------------------------------------------------>
+
+<!-- Formulário de Upload de nova imagem -->
+<div class="row mb-3">
+  <div class="col-md-12">
+    {% if next_position %}
+      <form method="POST"
+            action="{{ url_for('euro.upload_imagem', item_id=item.IDItem) }}"
+            enctype="multipart/form-data">
+        <label class="form-label">
+          Anexar imagem (posição {{ next_position }} de 4)
+        </label>
+        <input class="form-control"
+               type="file"
+               name="imagem"
+               accept="image/*"
+               required>
+        <button type="submit" class="btn btn-primary mt-2">Enviar</button>
+      </form>
+    {% else %}
+      <div class="alert alert-warning">
+        Já existem 4 imagens cadastradas para este item.
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+
+
+<!-- Dados do Item -->
+<div class="row">
+  <div class="col-md-12">
+    <h4>{{ item.NomeProduto }}</h4>
+    <p>
+      <strong>Referência Externa:</strong> {{ item.ReferenciaExterna }}<br>
+      <strong>Unidade:</strong> {{ item.unidade or '-' }}<br>
+      <strong>Categoria:</strong> {{ item.NomeCategoria or '-' }}<br>
+       <strong>Modelo:</strong> {{ item.Modelo or '-' }}<br>
+     
+      <strong>Família:</strong> {{ item.NomeFamilia or '-' }}<br>
+    </p>
+    <p>  {{ item.Descricao or '—' }}</p>
+  </div>
+</div>
+
+<hr>
+
+<!-- Botão para Ver Diagrama -->
+<div class="row mb-3">
+  <div class="col-md-12 text-center">
+    <button id="verDiagramaBtn" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#diagramModal">
+      Ver Diagrama
+    </button>
+  </div>
+</div>
+
+<!-- Modal do Diagrama -->
+<div class="modal fade" id="diagramModal" tabindex="-1" aria-labelledby="diagramModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl" style="max-width: 1400px;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="diagramModalLabel">Diagrama de Componentes</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      <div class="modal-body">
+        <!-- Filtros (opcional) -->
+        <div class="row mb-3">
+          <div class="col-md-6">
+            <label for="filterCategory" class="form-label">Filtrar por Categoria</label>
+            <select class="form-select" id="filterCategory">
+              <option value="">Todos</option>
+              {% for cat in categories %}
+                <option value="{{ cat.NomeCategoria }}">{{ cat.NomeCategoria }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label for="filterDepartment" class="form-label">Filtrar por Departamento</label>
+            <select class="form-select" id="filterDepartment">
+              <option value="">Todos</option>
+              {% for dep in departments %}
+                <option value="{{ dep.NomeDepartamento }}">{{ dep.NomeDepartamento }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <!-- Container do Diagrama: aumentado a altura -->
+        <div id="diagramContainer" style="width: 100%; height: 900px; border: 1px solid #ccc;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<!-- Diagrama Técnico -->
+<div class="row mb-4">
+  <div class="col-12 d-flex justify-content-center">
+    <h5>Diagrama Técnico</h5>
+  </div>
+
+  <!-- botão que você já tem -->
+<!-- botão que dispara o modal (permanece igual) -->
+<div class="col-md-6 text-center mb-2">
+  <button class="btn btn-secondary"
+          data-bs-toggle="modal"
+          data-bs-target="#componentesModal">
+    Ver Diagrama Componentes e Peças
+  </button>
+</div>
+
+<!-- modal com estilos inline para largura/altura -->
+<div class="modal fade" id="componentesModal" tabindex="-1"
+     aria-labelledby="componentesModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl"
+       style="max-width: 90vw; width: 90vw; height: 95vh; margin: auto;">
+    <div class="modal-content"
+         style="height: 100%; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <h5 class="modal-title" id="componentesModalLabel">
+          Diagrama Componentes e Peças
+        </h5>
+        <button type="button" class="btn-close"
+                data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      <div class="modal-body p-0"
+           style="height: calc(100% - 56px); padding: 0;">
+        <iframe
+          src="{{ pdf_url }}#toolbar=1&amp;navpanes=0&amp;view=FitH"
+          style="width: 100%; height: 100%; border: none;"
+          frameborder="0">
+        </iframe>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+  <div class="col-md-6 text-center mb-2">
+    <button class="btn btn-secondary"
+            data-bs-toggle="modal"
+            data-bs-target="#eletronicoModal">
+      Ver Diagrama Eletrônico
+    </button>
+  </div>
+</div>
+
+<!-- Modal Diagrama Componentes e Peças -->
+<div class="modal fade" id="componentesModal" tabindex="-1" aria-labelledby="componentesModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="componentesModalLabel">Diagrama Componentes e Peças</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <!-- Aqui vai o conteúdo ou <img> do diagrama de componentes -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Diagrama Eletrônico -->
+<div class="modal fade" id="eletronicoModal" tabindex="-1" aria-labelledby="eletronicoModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="eletronicoModalLabel">Diagrama Eletrônico</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <!-- Aqui vai o conteúdo ou <img> do diagrama eletrônico -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Edição de Informações do Produto -->
+<h4>Editar Informações de Produto</h4>
+<form method="POST" action="{{ url_for('euro.atualizar_produto_info', item_id=item.IDItem) }}">
+  <div class="row">
+    <div class="col-md-3 mb-3">
+      <label for="category_select" class="form-label">Categorias</label>
+      <select class="form-select" id="category_select" name="category_id">
+        {% for cat in categories %}
+          <option value="{{ cat.IDCategoria }}" {% if cat.IDCategoria == item.IDCategoriaProduto %}selected{% endif %}>
+            {{ cat.NomeCategoria }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3 mb-3">
+      <label for="department_select" class="form-label">Departamentos Produtos</label>
+      <select class="form-select" id="department_select" name="department_id">
+        {% for dep in departments %}
+          <option value="{{ dep.IDDepartamento }}" {% if dep.IDDepartamento == item.IDDepartamento %}selected{% endif %}>
+            {{ dep.NomeDepartamento }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3 mb-3">
+      <label for="family_select" class="form-label">Família Produto</label>
+      <select class="form-select" id="family_select" name="family_id">
+        {% for fam in families %}
+          <option value="{{ fam.FamiliaID }}" {% if fam.FamiliaID == item.FamiliaID %}selected{% endif %}>
+            {{ fam.NomeFamilia }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3 mb-3">
+      <label for="pmv_select" class="form-label">PMV</label>
+      <select class="form-select" id="pmv_select" name="pmv_id">
+        {% for p in pmvs %}
+          <option value="{{ p.PmvID }}" {% if p.PmvID == item.PmvID %}selected{% endif %}>
+            {{ p.NomePMV }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <button type="submit" class="btn btn-primary mt-2">Salvar Informações</button>
+</form>
+
+<hr>
+
+<!-- Características -->
+<h4>Características</h4>
+<div id="caracteristicas-list">
+  <form method="POST" action="{{ url_for('euro.atualizar_caracteristicas', item_id=item.IDItem) }}">
+    {% for carac in caracteristicas %}
+      <div class="input-group mb-2">
+        <span class="input-group-text">{{ carac.Caracteristica }}:</span>
+        <input type="text" name="valor_{{ carac.IDCaracteristica }}" value="{{ carac.Valor or '' }}"
+               class="form-control" onchange="this.form.submit()">
+        <a href="{{ url_for('euro.remover_caracteristica', item_id=item.IDItem, carac_id=carac.IDCaracteristica) }}"
+           class="btn btn-danger" style="margin-left: 4px;">X</a>
+        <a href="{{ url_for('euro.marcar_filtro', item_id=item.IDItem, carac_id=carac.IDCaracteristica) }}"
+           class="btn btn-warning" style="margin-left: 4px;">Filtro</a>
+      </div>
+    {% endfor %}
+  </form>
+</div>
+
+<!-- Tabela de Componentes -->
+{% if components %}
+<div class="container my-4">
+  <h4>Componentes</h4>
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Foto</th>
+          <th>ID Item</th>
+          <th>Nome Produto</th>
+          <th>Quantidade</th>
+          <th>Lote</th>
+          <th>Série</th>
+          <th>Tipo Estoque</th>
+          <th>CodPonto</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for comp in components %}
+        <tr>
+          <td style="width:60px;">
+            {% if image_urls[comp.IDItem] %}
+              <img
+                src="{{ image_urls[comp.IDItem] }}"
+                width="40" height="40"
+                loading="lazy"
+                onerror="this.onerror=null;
+                  this.src='https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif';"
+              >
+            {% else %}
+              <img
+                src="https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif"
+                width="40" height="40"
+              >
+            {% endif %}
+          </td>
+          <td>{{ comp.IDItem }}</td>
+          <td>{{ comp.NomeProduto }}</td>
+          <td>{{ comp.Quantidade }}</td>
+          <td>{{ comp.NumeroLote or '-' }}</td>
+          <td>{{ comp.NumerodeSerie or '-' }}</td>
+          <td>
+            {{ tipo_est_map.get(comp.IDTipoEstoque, comp.IDTipoEstoque) }}
+          </td>
+          <td>{{ comp.CodPonto or '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+
+
+
+<button class="btn btn-sm btn-success mt-3" onclick="document.getElementById('nova-caracteristica').style.display='block'">
+  Nova Característica
+</button>
+<div id="nova-caracteristica" style="display:none; margin-top: 1rem;">
+  <form method="POST" action="{{ url_for('euro.nova_caracteristica', item_id=item.IDItem) }}">
+    <div class="row g-2">
+      <div class="col-md-5">
+        <input type="text" name="nova_caracteristica" placeholder="Característica" class="form-control" required>
+      </div>
+      <div class="col-md-5">
+        <input type="text" name="novo_valor" placeholder="Valor" class="form-control" required>
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-primary">Salvar</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+
+
+
+<hr>
+<a href="{{ url_for('euro.index') }}" class="btn btn-secondary">Voltar</a>
+
+<!-- Tooltip (opcional) -->
+<style>
+  #tooltip {
+    position: absolute;
+    visibility: hidden;
+    background: #f9f9f9;
+    border: 1px solid #d3d3d3;
+    padding: 8px;
+    font-size: 14px;
+    border-radius: 4px;
+    pointer-events: none;
+    z-index: 999999;
+  }
+</style>
+<div id="tooltip"></div>
+
+<!-- Script do Diagrama D3 -->
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+  document.getElementById("diagramModal").addEventListener("shown.bs.modal", function() {
+    var container = document.getElementById("diagramContainer");
+    var width = container.clientWidth;
+    var height = container.clientHeight;
+
+    // Margens para o diagrama
+    var margin = { top: 20, right: 60, bottom: 40, left: 60 };
+
+    // Remove qualquer SVG existente (ao reabrir modal)
+    d3.select(container).select("svg").remove();
+
+    // Dados do diagrama (passados pelo backend)
+    var treeData = {{ diagram_data|tojson }};
+    console.log("treeData:", treeData);
+
+    // Cria hierarquia
+    var root = d3.hierarchy(treeData, d => d.children);
+
+    // Aumenta o tamanho do nó e o espaçamento
+    var treemap = d3.tree()
+      .nodeSize([300, 250])  // Largura e altura entre nós
+      .separation((a, b) => a.parent === b.parent ? 2 : 3);
+
+    treemap(root);
+
+    // Salva coords calculadas em x0,y0
+    root.each(d => {
+      d.x0 = d.x;
+      d.y0 = d.y;
+    });
+
+    // Descobre min/max pra calcular bounding box
+    var allNodes = root.descendants();
+    var minX = d3.min(allNodes, d => d.x0);
+    var maxX = d3.max(allNodes, d => d.x0);
+    var minY = d3.min(allNodes, d => d.y0);
+    var maxY = d3.max(allNodes, d => d.y0);
+
+    // "padding" e deslocamento
+    var pad = 80;
+    var shiftX = -minX + pad;
+    var shiftY = -minY + pad;
+
+    // Largura/Altura totais do diagrama
+    var diagramWidth = (maxX - minX) + 2 * pad;
+    var diagramHeight = (maxY - minY) + 2 * pad;
+
+    // Cria SVG fixo (sem zoom global pra não mover o fundo)
+    var svg = d3.select(container).append("svg")
+      .attr("width", "100%")
+      .attr("height", "100%")
+      .attr("viewBox", [0, 0, diagramWidth + margin.left + margin.right, diagramHeight + margin.top + margin.bottom].join(" "));
+
+    // Grupo principal
+    var mainG = svg.append("g")
+      .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+    // Marker (seta) nos links
+    mainG.append("defs").append("marker")
+      .attr("id", "arrow")
+      .attr("viewBox", "0 -5 10 10")
+      .attr("refX", 15)
+      .attr("refY", 0)
+      .attr("markerWidth", 6)
+      .attr("markerHeight", 6)
+      .attr("orient", "auto")
+      .append("path")
+        .attr("d", "M0,-5L10,0L0,5")
+        .attr("fill", "#999");
+
+    // Dados dos links
+    var linksData = root.links();
+
+    // Desenha links
+    // Desenha links (sem alteração)
+// Desenha links (unaltered)
+var link = mainG.selectAll(".link")
+  .data(linksData)
+  .enter().append("path")
+    .attr("class", "link")
+    .attr("fill", "none")
+    .attr("stroke", "#999")
+    .attr("stroke-width", 3)
+    .attr("marker-end", "url(#arrow)")
+    .attr("d", linkPathCalc);
+
+// Labels dos cabos / ligação direta
+mainG.selectAll(".link-label")
+  .data(linksData)
+  .enter().append("text")
+    .attr("class", "link-label")
+    .attr("x", d => (d.source.x0 + d.target.x0) / 2 + shiftX)
+    .attr("y", d => (d.source.y0 + d.target.y0) / 2 + shiftY - 5)  // menor offset pra ficar na linha
+    .attr("text-anchor", "middle")
+    .style("font-size", "14px")   // fonte um pouco maior
+    .style("fill", "#222")
+    .text(d => {
+      // cada d.target.data.cabos é agora um array de {id, name}
+      return d.target.data.cabos
+        .map(c => c.id
+                  ? `${c.name} (${c.id})`
+                  : c.name
+        )
+        .join(" | ");
+    });
+
+
+
+    // Função de path "angular"
+    function linkPathCalc(d) {
+      var sx = d.source.x0 + shiftX;
+      var sy = d.source.y0 + shiftY;
+      var tx = d.target.x0 + shiftX;
+      var ty = d.target.y0 + shiftY;
+      return "M" + sx + "," + sy
+           + "V" + ((sy + ty) / 2)
+           + "H" + tx
+           + "V" + ty;
+    }
+    link.attr("d", linkPathCalc);
+
+    // Cria nós
+    var node = mainG.selectAll(".node")
+      .data(allNodes)
+      .enter().append("g")
+        .attr("class", d => "node" + (d.children ? " node--internal" : " node--leaf"))
+        .attr("transform", d => "translate(" + (d.x0 + shiftX) + "," + (d.y0 + shiftY) + ")")
+        .call(d3.drag()
+          .on("start", dragStart)
+          .on("drag", dragging)
+          .on("end", dragEnd)
+        );
+
+    // Texto do nó
+    var textEl = node.append("text")
+      .attr("text-anchor", "middle")
+      .style("fill", "#fff")
+      .style("font-size", "16px");
+
+    textEl.append("tspan")
+      .attr("x", 0)
+      .attr("dy", "0em")
+      .text(d => d.data.name || "Sem Nome");
+    textEl.append("tspan")
+      .attr("x", 0)
+      .attr("dy", "1.2em")
+      .text(d => d.data.category || "-");
+    textEl.append("tspan")
+      .attr("x", 0)
+      .attr("dy", "1.2em")
+      .text(d => d.data.department || "-");
+
+    textEl.append("tspan")
+      .attr("x", 0)
+      .attr("dy", "1.2em")
+      .text(d => d.data.reference || "");
+
+    // Retângulo de fundo do nó
+    node.each(function(d) {
+      var bbox = d3.select(this).select("text").node().getBBox();
+      d3.select(this).insert("rect", "text")
+        .attr("width", bbox.width + 30)
+        .attr("height", bbox.height + 50)
+        .attr("x", -(bbox.width / 2 + 15))
+        .attr("y", -(bbox.height / 2 + 15))
+        .attr("fill", d.data.bitPrincipal ? "#ff5733" : "#3498db");
+    });
+
+    // Cria um retângulo de fundo bem grande para sobrar espaço
+    var bigRectWidth = diagramWidth + margin.left + margin.right + 1000;
+    var bigRectHeight = diagramHeight + margin.top + margin.bottom + 800;
+
+    mainG.append("rect")
+      .attr("x", -200)
+      .attr("y", -200)
+      .attr("width", bigRectWidth)
+      .attr("height", bigRectHeight)
+      .attr("fill", "none")
+      .attr("stroke", "#aaa")
+      .attr("stroke-width", 3)
+      .lower();
+
+    // Drag: evitando "pulo" ao iniciar
+    function dragStart(event, d) {
+      d3.select(this).raise().classed("active", true);
+      // Guardamos a diferença entre o mouse e a posição atual do nó
+      d.offsetX = event.x - (d.x0 + shiftX);
+      d.offsetY = event.y - (d.y0 + shiftY);
+    }
+
+    function dragging(event, d) {
+      // Novas coords = posição do mouse - offset
+      var newX = event.x - d.offsetX;
+      var newY = event.y - d.offsetY;
+
+      // Atualiza x0,y0 do nó
+      d.x0 = newX - shiftX;
+      d.y0 = newY - shiftY;
+
+      // Move o <g> do nó
+      d3.select(this).attr("transform", "translate(" + newX + "," + newY + ")");
+
+      // Atualiza links conectados a esse nó
+      updateLinksOneNode(d);
+    }
+
+    function dragEnd(event, d) {
+      d3.select(this).classed("active", false);
+    }
+
+    // Atualiza só os links ligados ao nó
+    function updateLinksOneNode(d) {
+      if (d.parent) {
+        link.filter(l => l.source === d.parent && l.target === d)
+            .attr("d", linkPathCalc);
+      }
+      if (d.children) {
+        d.children.forEach(ch => {
+          link.filter(l => l.source === d && l.target === ch)
+              .attr("d", linkPathCalc);
+        });
+      }
+    }
+  });
+</script>
+{% endblock %}

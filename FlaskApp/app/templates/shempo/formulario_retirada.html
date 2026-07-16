@@ -1,0 +1,85 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Formulário de Retirada de Peças – Pedido #{{ pedido.IDPedido }}{% endblock %}
+
+{% block content %}
+  <style>
+    /* Apenas para este formulário */
+    body { font-family: Arial, sans-serif; }
+    .retirada-container { margin: 2rem; }
+    .retirada-container h1,
+    .retirada-container h2 { margin-bottom: 0.5rem; }
+    .retirada-container p { margin: 0.3rem 0; }
+    .retirada-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    .retirada-table th,
+    .retirada-table td { border: 1px solid #333; padding: 0.5rem; text-align: left; }
+    .assinatura { margin-top: 3rem; }
+    .assinatura div { display: inline-block; width: 45%; }
+    @media print {
+      #print-btn { display: none; }
+    }
+  </style>
+
+  <div class="retirada-container">
+    <button id="print-btn" class="btn btn-sm btn-secondary mb-3" onclick="window.print()">
+      Imprimir Formulário
+    </button>
+
+    <h1>Formulário de Retirada de Peças</h1>
+
+    <p><strong>Pedido #:</strong> {{ pedido.IDPedido }}</p>
+
+    {# Campos adicionais apenas quando TipoPedido == "Pedido Venda" #}
+    {% if tipo_pedido == 'Pedido Venda' %}
+      <p><strong>Empresa:</strong> {{ empresa_nome if empresa_nome else '-' }}</p>
+      <p><strong>Projeto:</strong> {{ projeto_nome if projeto_nome else '-' }}</p>
+    {% endif %}
+
+    <p><strong>Data de Retirada:</strong> {{ data_retirada.strftime('%d/%m/%Y') }}</p>
+
+    <p><strong>Responsável pela Retirada:</strong>
+      {# quando for Pedido Venda, usamos func.NomeFuncionario do join (passado como responsavel_nome) #}
+      {{ responsavel_nome if responsavel_nome else (funcionario.NomeFuncionario if funcionario else '-') }}
+    </p>
+
+    {# --- NOVO: Observação do pedido (só aparece se houver texto) --- #}
+    {% if observacao_retirada %}
+      <p style="white-space:pre-wrap;"><strong>Observação:</strong> {{ observacao_retirada }}</p>
+    {% endif %}
+
+    <h2>Peças Retiradas</h2>
+    <table class="retirada-table">
+      <thead>
+        <tr>
+          <th>IDItem</th>
+          <th>Nome do Produto</th>
+          <th>Quantidade</th>
+          <th>Número Série</th>
+          <th>Número Lote</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for it in dados_itens %}
+        <tr>
+          <td>{{ it.IDItem }}</td>
+          <td>{{ it.NomeProduto }}</td>
+          <td>{{ it.Quantidade }}</td>
+          <td>{{ it.NumeroSerie if it.NumeroSerie else '' }}</td>
+          <td>{{ it.NumeroLote if it.NumeroLote else '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="assinatura">
+      <div>
+        <p><strong>Responsável Técnico:</strong></p>
+        <p>_______________________________________</p>
+      </div>
+      <div>
+        <p><strong>Assinatura:</strong></p>
+        <p>__________________________</p>
+      </div>
+    </div>
+  </div>
+{% endblock %}

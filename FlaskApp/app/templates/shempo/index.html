@@ -1,0 +1,1357 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Lista de Itens | Euromídia{% endblock %}
+
+{% block content %}
+  {# Preserva os filtros e a pesquisa ao navegar entre as páginas. #}
+  {% set qa = request.args.to_dict() %}
+  {% set _ = qa.pop('page', None) %}
+
+  <style>
+    /*
+      Estilos isolados deste template.
+      O prefixo #shempoProductList impede conflito com o base_euromidia.html.
+    */
+    #shempoProductList {
+      --sh-blue: var(--euro-blue, #002884);
+      --sh-blue-strong: #001f68;
+      --sh-blue-light: #edf3ff;
+      --sh-yellow: var(--euro-yellow, #ffb300);
+      --sh-yellow-soft: #fff6d8;
+      --sh-green: #15803d;
+      --sh-green-soft: #eaf8ef;
+      --sh-red: #b91c1c;
+      --sh-red-soft: #fef0f0;
+      --sh-text: #172033;
+      --sh-muted: #667085;
+      --sh-border: #dfe5ee;
+      --sh-surface: #ffffff;
+      --sh-surface-soft: #f7f9fc;
+      --sh-shadow: 0 8px 26px rgba(15, 35, 75, 0.08);
+      width: 100%;
+      color: var(--sh-text);
+    }
+
+    #shempoProductList *,
+    #shempoProductList *::before,
+    #shempoProductList *::after {
+      box-sizing: border-box;
+    }
+
+    #shempoProductList a {
+      color: inherit;
+    }
+
+    #shempoProductList .sh-page {
+      display: grid;
+      gap: 16px;
+      width: 100%;
+    }
+
+    #shempoProductList .sh-hero {
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 24px 26px;
+      border-radius: 18px;
+      color: #fff;
+      background:
+        radial-gradient(circle at 92% 18%, rgba(255, 179, 0, 0.28), transparent 26%),
+        linear-gradient(125deg, var(--sh-blue-strong), var(--sh-blue));
+      box-shadow: 0 12px 30px rgba(0, 40, 132, 0.2);
+    }
+
+    #shempoProductList .sh-hero-copy {
+      min-width: 0;
+    }
+
+    #shempoProductList .sh-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 7px;
+      color: rgba(255, 255, 255, 0.82);
+      font-size: 12px;
+      font-weight: 850;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    #shempoProductList .sh-kicker-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--sh-yellow);
+      box-shadow: 0 0 0 4px rgba(255, 179, 0, 0.16);
+    }
+
+    #shempoProductList .sh-title {
+      margin: 0;
+      color: #fff;
+      font-size: clamp(24px, 3vw, 34px);
+      font-weight: 900;
+      line-height: 1.12;
+      letter-spacing: -0.025em;
+    }
+
+    #shempoProductList .sh-subtitle {
+      max-width: 680px;
+      margin: 8px 0 0;
+      color: rgba(255, 255, 255, 0.82);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    #shempoProductList .sh-page-counter {
+      flex: 0 0 auto;
+      min-width: 150px;
+      padding: 14px 16px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.1);
+      text-align: center;
+      backdrop-filter: blur(7px);
+    }
+
+    #shempoProductList .sh-page-counter strong {
+      display: block;
+      color: #fff;
+      font-size: 24px;
+      font-weight: 950;
+      line-height: 1;
+    }
+
+    #shempoProductList .sh-page-counter span {
+      display: block;
+      margin-top: 6px;
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    #shempoProductList .sh-panel {
+      border: 1px solid var(--sh-border);
+      border-radius: 16px;
+      background: var(--sh-surface);
+      box-shadow: var(--sh-shadow);
+    }
+
+    #shempoProductList .sh-search-panel {
+      padding: 16px;
+    }
+
+    #shempoProductList .sh-search-label {
+      display: block;
+      margin: 0 0 7px;
+      color: var(--sh-text);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    #shempoProductList .sh-search-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+    }
+
+    #shempoProductList .sh-input-wrap {
+      position: relative;
+      min-width: 0;
+    }
+
+    #shempoProductList .sh-input-icon {
+      position: absolute;
+      left: 13px;
+      top: 50%;
+      width: 18px;
+      height: 18px;
+      color: #7a8699;
+      pointer-events: none;
+      transform: translateY(-50%);
+    }
+
+    #shempoProductList .sh-search-input {
+      width: 100%;
+      height: 44px;
+      margin: 0;
+      padding: 10px 14px 10px 42px;
+      border: 1px solid #cfd7e4;
+      border-radius: 11px;
+      background: #fff;
+      color: var(--sh-text);
+      font: inherit;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    #shempoProductList .sh-search-input:focus {
+      border-color: var(--sh-blue);
+      box-shadow: 0 0 0 4px rgba(0, 40, 132, 0.11);
+    }
+
+    #shempoProductList .sh-button {
+      min-height: 42px;
+      border: 0;
+      border-radius: 10px;
+      padding: 9px 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 900;
+      line-height: 1.15;
+      text-decoration: none;
+      cursor: pointer;
+      transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    #shempoProductList .sh-button:hover {
+      filter: brightness(0.97);
+      transform: translateY(-1px);
+    }
+
+    #shempoProductList .sh-button:focus-visible,
+    #shempoProductList .sh-page-link:focus-visible,
+    #shempoProductList .sh-filter-link:focus-visible {
+      outline: 3px solid rgba(255, 179, 0, 0.5);
+      outline-offset: 2px;
+    }
+
+    #shempoProductList .sh-button svg {
+      width: 17px;
+      height: 17px;
+      flex: 0 0 auto;
+    }
+
+    #shempoProductList .sh-button-primary {
+      min-width: 124px;
+      background: var(--sh-yellow);
+      color: #15213b;
+      box-shadow: 0 5px 14px rgba(255, 179, 0, 0.2);
+    }
+
+    #shempoProductList .sh-button-blue {
+      background: var(--sh-blue);
+      color: #fff;
+    }
+
+    #shempoProductList .sh-button-soft {
+      border: 1px solid #cad6e8;
+      background: #f1f5fb;
+      color: var(--sh-blue);
+    }
+
+    #shempoProductList .sh-button-green {
+      background: var(--sh-green);
+      color: #fff;
+    }
+
+    #shempoProductList .sh-active-criteria {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    #shempoProductList .sh-criterion {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 30px;
+      padding: 6px 10px;
+      border: 1px solid #d4deec;
+      border-radius: 999px;
+      background: var(--sh-blue-light);
+      color: var(--sh-blue);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    #shempoProductList .sh-criterion strong {
+      font-weight: 950;
+    }
+
+    #shempoProductList .sh-clear-all {
+      margin-left: auto;
+      color: var(--sh-red);
+      font-size: 12px;
+      font-weight: 850;
+      text-decoration: none;
+    }
+
+    #shempoProductList .sh-clear-all:hover {
+      text-decoration: underline;
+    }
+
+    #shempoProductList .sh-mobile-filter {
+      display: none;
+    }
+
+    #shempoProductList .sh-layout {
+      display: grid;
+      grid-template-columns: minmax(230px, 270px) minmax(0, 1fr);
+      align-items: start;
+      gap: 16px;
+    }
+
+    #shempoProductList .sh-filters {
+      position: sticky;
+      top: 86px;
+      max-height: calc(100vh - 110px);
+      overflow: auto;
+      scrollbar-width: thin;
+    }
+
+    #shempoProductList .sh-filter-header {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 15px 16px;
+      border-bottom: 1px solid var(--sh-border);
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(7px);
+    }
+
+    #shempoProductList .sh-filter-title {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin: 0;
+      color: var(--sh-blue);
+      font-size: 15px;
+      font-weight: 950;
+    }
+
+    #shempoProductList .sh-filter-title svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    #shempoProductList .sh-filter-reset {
+      color: var(--sh-muted);
+      font-size: 11px;
+      font-weight: 850;
+      text-decoration: none;
+    }
+
+    #shempoProductList .sh-filter-reset:hover {
+      color: var(--sh-red);
+      text-decoration: underline;
+    }
+
+    #shempoProductList .sh-filter-body {
+      padding: 8px 12px 14px;
+    }
+
+    #shempoProductList .sh-filter-group {
+      border-bottom: 1px solid #edf0f5;
+    }
+
+    #shempoProductList .sh-filter-group:last-child {
+      border-bottom: 0;
+    }
+
+    #shempoProductList .sh-filter-group summary {
+      position: relative;
+      padding: 12px 24px 10px 4px;
+      color: #344054;
+      font-size: 12px;
+      font-weight: 900;
+      line-height: 1.35;
+      list-style: none;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    #shempoProductList .sh-filter-group summary::-webkit-details-marker {
+      display: none;
+    }
+
+    #shempoProductList .sh-filter-group summary::after {
+      content: "⌄";
+      position: absolute;
+      right: 4px;
+      top: 10px;
+      color: #8290a5;
+      font-size: 15px;
+      transition: transform 0.18s ease;
+    }
+
+    #shempoProductList .sh-filter-group[open] summary::after {
+      transform: rotate(180deg);
+    }
+
+    #shempoProductList .sh-filter-options {
+      display: grid;
+      gap: 4px;
+      padding: 0 0 10px;
+    }
+
+    #shempoProductList .sh-filter-link {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 34px;
+      padding: 7px 9px;
+      border-radius: 8px;
+      color: #4c596d;
+      font-size: 12px;
+      font-weight: 750;
+      text-decoration: none;
+      overflow-wrap: anywhere;
+    }
+
+    #shempoProductList .sh-filter-link:hover {
+      background: #f2f6fc;
+      color: var(--sh-blue);
+    }
+
+    #shempoProductList .sh-filter-link.is-active {
+      background: var(--sh-blue);
+      color: #fff;
+      font-weight: 900;
+    }
+
+    #shempoProductList .sh-filter-check {
+      width: 18px;
+      height: 18px;
+      border: 1px solid #cbd4e1;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      color: transparent;
+      font-size: 11px;
+    }
+
+    #shempoProductList .sh-filter-link.is-active .sh-filter-check {
+      border-color: rgba(255, 255, 255, 0.65);
+      background: rgba(255, 255, 255, 0.16);
+      color: #fff;
+    }
+
+    #shempoProductList .sh-empty-filter {
+      padding: 18px 8px;
+      color: var(--sh-muted);
+      font-size: 12px;
+      line-height: 1.5;
+      text-align: center;
+    }
+
+    #shempoProductList .sh-results {
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    #shempoProductList .sh-results-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--sh-border);
+      background: #fbfcfe;
+    }
+
+    #shempoProductList .sh-result-count {
+      margin: 0;
+      color: var(--sh-muted);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    #shempoProductList .sh-result-count strong {
+      color: var(--sh-text);
+      font-weight: 950;
+    }
+
+    #shempoProductList .sh-page-label {
+      padding: 5px 9px;
+      border: 1px solid #dae2ee;
+      border-radius: 999px;
+      background: #fff;
+      color: #5b687b;
+      font-size: 11px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    #shempoProductList .sh-table-scroll {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    #shempoProductList .sh-table {
+      width: 100%;
+      min-width: 940px;
+      border-collapse: separate;
+      border-spacing: 0;
+      background: #fff;
+    }
+
+    #shempoProductList .sh-table th {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--sh-border);
+      background: #f4f7fb;
+      color: #526075;
+      font-size: 10px;
+      font-weight: 950;
+      line-height: 1.25;
+      text-align: left;
+      text-transform: uppercase;
+      letter-spacing: 0.045em;
+      white-space: nowrap;
+    }
+
+    #shempoProductList .sh-table td {
+      padding: 11px 12px;
+      border-bottom: 1px solid #edf0f5;
+      color: #344054;
+      font-size: 12px;
+      line-height: 1.4;
+      vertical-align: middle;
+    }
+
+    #shempoProductList .sh-table tbody tr {
+      transition: background-color 0.15s ease;
+    }
+
+    #shempoProductList .sh-table tbody tr:hover {
+      background: #f8faff;
+    }
+
+    #shempoProductList .sh-table tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    #shempoProductList .sh-item-link {
+      color: var(--sh-blue);
+      font-weight: 900;
+      text-decoration: none;
+    }
+
+    #shempoProductList .sh-item-link:hover {
+      text-decoration: underline;
+    }
+
+    #shempoProductList .sh-reference {
+      color: #536176;
+      font-variant-numeric: tabular-nums;
+      font-weight: 800;
+    }
+
+    #shempoProductList .sh-product-cell {
+      min-width: 220px;
+    }
+
+    #shempoProductList .sh-product-name {
+      display: -webkit-box;
+      overflow: hidden;
+      color: #243047;
+      font-weight: 850;
+      text-decoration: none;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    #shempoProductList .sh-product-name:hover {
+      color: var(--sh-blue);
+      text-decoration: underline;
+    }
+
+    #shempoProductList .sh-image-box {
+      width: 48px;
+      height: 48px;
+      border: 1px solid #dde4ee;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      background: #f7f9fc;
+    }
+
+    #shempoProductList .sh-image-box img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+
+    #shempoProductList .sh-image-placeholder {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      color: #9aa6b8;
+      background: linear-gradient(135deg, #f8fafc, #eef2f7);
+    }
+
+    #shempoProductList .sh-image-placeholder svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    #shempoProductList .sh-hidden {
+      display: none !important;
+    }
+
+    #shempoProductList .sh-category {
+      display: inline-flex;
+      max-width: 170px;
+      padding: 5px 8px;
+      border: 1px solid #dde4ee;
+      border-radius: 7px;
+      background: #f7f9fc;
+      color: #536176;
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+
+    #shempoProductList .sh-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 70px;
+      padding: 5px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    #shempoProductList .sh-status::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex: 0 0 auto;
+    }
+
+    #shempoProductList .sh-status-active {
+      background: var(--sh-green-soft);
+      color: var(--sh-green);
+    }
+
+    #shempoProductList .sh-status-active::before {
+      background: #22a447;
+      box-shadow: 0 0 0 3px rgba(34, 164, 71, 0.12);
+    }
+
+    #shempoProductList .sh-status-inactive {
+      background: var(--sh-red-soft);
+      color: var(--sh-red);
+    }
+
+    #shempoProductList .sh-status-inactive::before {
+      background: #d64545;
+    }
+
+    #shempoProductList .sh-stock {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+      cursor: help;
+    }
+
+    #shempoProductList .sh-stock-icon {
+      width: 25px;
+      height: 25px;
+      border-radius: 7px;
+      display: grid;
+      place-items: center;
+      background: var(--sh-yellow-soft);
+      color: #946900;
+    }
+
+    #shempoProductList .sh-stock-icon svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    #shempoProductList .sh-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 7px;
+      min-width: 196px;
+      white-space: nowrap;
+    }
+
+    #shempoProductList .sh-actions .sh-button {
+      min-height: 34px;
+      padding: 7px 10px;
+      font-size: 11px;
+    }
+
+    #shempoProductList .sh-empty-results {
+      padding: 44px 18px !important;
+      text-align: center;
+    }
+
+    #shempoProductList .sh-empty-icon {
+      width: 52px;
+      height: 52px;
+      margin: 0 auto 12px;
+      border-radius: 15px;
+      display: grid;
+      place-items: center;
+      background: var(--sh-blue-light);
+      color: var(--sh-blue);
+    }
+
+    #shempoProductList .sh-empty-icon svg {
+      width: 25px;
+      height: 25px;
+    }
+
+    #shempoProductList .sh-empty-results strong {
+      display: block;
+      color: var(--sh-text);
+      font-size: 15px;
+    }
+
+    #shempoProductList .sh-empty-results span {
+      display: block;
+      max-width: 420px;
+      margin: 6px auto 0;
+      color: var(--sh-muted);
+      font-size: 12px;
+    }
+
+    #shempoProductList .sh-pagination-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      border-top: 1px solid var(--sh-border);
+      background: #fbfcfe;
+    }
+
+    #shempoProductList .sh-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    #shempoProductList .sh-page-link {
+      min-width: 36px;
+      height: 36px;
+      padding: 0 10px;
+      border: 1px solid #d7dfeb;
+      border-radius: 9px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff;
+      color: #536176;
+      font-size: 12px;
+      font-weight: 850;
+      line-height: 1;
+      text-decoration: none;
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    #shempoProductList a.sh-page-link:hover {
+      border-color: var(--sh-blue);
+      background: var(--sh-blue-light);
+      color: var(--sh-blue);
+    }
+
+    #shempoProductList .sh-page-link.is-current {
+      border-color: var(--sh-blue);
+      background: var(--sh-blue);
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(0, 40, 132, 0.18);
+    }
+
+    #shempoProductList .sh-page-link.is-disabled {
+      border-color: #e7ebf1;
+      background: #f4f6f9;
+      color: #a2adbd;
+      cursor: not-allowed;
+    }
+
+    #shempoProductList .sh-page-link.sh-wide {
+      min-width: 84px;
+    }
+
+    @media (max-width: 980px) {
+      #shempoProductList .sh-mobile-filter {
+        display: inline-flex;
+        width: 100%;
+      }
+
+      #shempoProductList .sh-layout {
+        grid-template-columns: 1fr;
+      }
+
+      #shempoProductList .sh-filters {
+        position: static;
+        display: none;
+        max-height: none;
+      }
+
+      #shempoProductList .sh-filters.is-open {
+        display: block;
+      }
+
+      #shempoProductList .sh-filter-header {
+        position: static;
+      }
+    }
+
+    @media (max-width: 760px) {
+      #shempoProductList .sh-hero {
+        align-items: flex-start;
+        flex-direction: column;
+        padding: 20px;
+      }
+
+      #shempoProductList .sh-page-counter {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        text-align: left;
+      }
+
+      #shempoProductList .sh-page-counter span {
+        margin-top: 0;
+      }
+
+      #shempoProductList .sh-search-row {
+        grid-template-columns: 1fr;
+      }
+
+      #shempoProductList .sh-button-primary {
+        width: 100%;
+      }
+
+      #shempoProductList .sh-clear-all {
+        width: 100%;
+        margin-left: 0;
+      }
+
+      #shempoProductList .sh-results-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      #shempoProductList .sh-table-scroll {
+        overflow: visible;
+      }
+
+      #shempoProductList .sh-table {
+        min-width: 0;
+        display: block;
+        padding: 10px;
+        background: #f5f7fb;
+      }
+
+      #shempoProductList .sh-table thead {
+        display: none;
+      }
+
+      #shempoProductList .sh-table tbody,
+      #shempoProductList .sh-table tr,
+      #shempoProductList .sh-table td {
+        display: block;
+        width: 100%;
+      }
+
+      #shempoProductList .sh-table tbody {
+        display: grid;
+        gap: 10px;
+      }
+
+      #shempoProductList .sh-table tbody tr {
+        overflow: hidden;
+        border: 1px solid var(--sh-border);
+        border-radius: 13px;
+        background: #fff;
+        box-shadow: 0 4px 12px rgba(15, 35, 75, 0.05);
+      }
+
+      #shempoProductList .sh-table td {
+        min-height: 42px;
+        padding: 9px 11px;
+        border-bottom: 1px solid #edf0f5;
+        display: grid;
+        grid-template-columns: 105px minmax(0, 1fr);
+        align-items: center;
+        gap: 10px;
+        text-align: left;
+      }
+
+      #shempoProductList .sh-table td::before {
+        content: attr(data-label);
+        color: #7a8699;
+        font-size: 9px;
+        font-weight: 950;
+        letter-spacing: 0.045em;
+        text-transform: uppercase;
+      }
+
+      #shempoProductList .sh-table td:last-child {
+        border-bottom: 0;
+      }
+
+      #shempoProductList .sh-table .sh-photo-cell {
+        display: none;
+      }
+
+      #shempoProductList .sh-product-cell {
+        min-width: 0;
+      }
+
+      #shempoProductList .sh-actions {
+        min-width: 0;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        white-space: normal;
+      }
+
+      #shempoProductList .sh-actions .sh-button {
+        flex: 1 1 120px;
+      }
+
+      #shempoProductList .sh-empty-results {
+        display: block !important;
+      }
+
+      #shempoProductList .sh-empty-results::before {
+        display: none;
+      }
+
+      #shempoProductList .sh-page-link.sh-wide {
+        min-width: 38px;
+        font-size: 0;
+      }
+
+      #shempoProductList .sh-page-link.sh-wide::before {
+        font-size: 17px;
+      }
+
+      #shempoProductList .sh-page-prev::before {
+        content: "‹";
+      }
+
+      #shempoProductList .sh-page-next::before {
+        content: "›";
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #shempoProductList *,
+      #shempoProductList *::before,
+      #shempoProductList *::after {
+        scroll-behavior: auto !important;
+        transition: none !important;
+      }
+    }
+  </style>
+
+  <section id="shempoProductList" aria-labelledby="shempoProductTitle">
+    <div class="sh-page">
+      <header class="sh-hero">
+        <div class="sh-hero-copy">
+          <div class="sh-kicker">
+            <span class="sh-kicker-dot" aria-hidden="true"></span>
+            Estoque e catálogo
+          </div>
+          <h1 class="sh-title" id="shempoProductTitle">Lista de itens</h1>
+          <p class="sh-subtitle">
+            Consulte produtos, disponibilidade, características e movimentações de estoque.
+          </p>
+        </div>
+
+        <div class="sh-page-counter" aria-label="Quantidade exibida nesta página">
+          <strong>{{ items|length }}</strong>
+          <span>itens nesta página</span>
+        </div>
+      </header>
+
+      <form
+        method="get"
+        action="{{ url_for('euro.lista_produtos') }}"
+        class="sh-panel sh-search-panel"
+        role="search"
+      >
+        <label class="sh-search-label" for="shempoProductSearch">Pesquisar no catálogo</label>
+
+        {% if fcar %}
+          <input type="hidden" name="fcar" value="{{ fcar }}">
+        {% endif %}
+        {% if fval %}
+          <input type="hidden" name="fval" value="{{ fval }}">
+        {% endif %}
+
+        <div class="sh-search-row">
+          <div class="sh-input-wrap">
+            <svg class="sh-input-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle>
+              <path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+            </svg>
+            <input
+              id="shempoProductSearch"
+              type="search"
+              name="search"
+              class="sh-search-input"
+              placeholder="Digite o ID, a referência, o nome ou o número de série"
+              value="{{ search }}"
+              autocomplete="off"
+            >
+          </div>
+
+          <button type="submit" class="sh-button sh-button-primary">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle>
+              <path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+            </svg>
+            Pesquisar
+          </button>
+        </div>
+
+        {% if search or (fcar and fval) %}
+          <div class="sh-active-criteria" aria-label="Critérios ativos">
+            {% if search %}
+              <span class="sh-criterion">
+                Pesquisa: <strong>{{ search }}</strong>
+              </span>
+            {% endif %}
+
+            {% if fcar and fval %}
+              <span class="sh-criterion">
+                {{ fcar }}: <strong>{{ fval }}</strong>
+              </span>
+            {% endif %}
+
+            <a class="sh-clear-all" href="{{ url_for('euro.lista_produtos') }}">
+              Limpar todos os critérios
+            </a>
+          </div>
+        {% endif %}
+      </form>
+
+      <button
+        type="button"
+        class="sh-button sh-button-soft sh-mobile-filter"
+        id="shempoFilterToggle"
+        aria-controls="shempoFilterPanel"
+        aria-expanded="false"
+      >
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+        </svg>
+        <span data-filter-toggle-label>Exibir filtros</span>
+      </button>
+
+      <div class="sh-layout">
+        <aside class="sh-panel sh-filters" id="shempoFilterPanel" aria-label="Filtros do catálogo">
+          <div class="sh-filter-header">
+            <h2 class="sh-filter-title">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 5h16l-6.2 7.1v5.7L10.2 20v-7.9L4 5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path>
+              </svg>
+              Filtros
+            </h2>
+            <a class="sh-filter-reset" href="{{ url_for('euro.lista_produtos', search=search) }}">
+              Limpar
+            </a>
+          </div>
+
+          <div class="sh-filter-body">
+            {% if filter_groups %}
+              {% for carac, valores in filter_groups.items() %}
+                <details class="sh-filter-group" {% if fcar == carac or loop.index <= 3 %}open{% endif %}>
+                  <summary>{{ carac }}</summary>
+                  <div class="sh-filter-options">
+                    {% for val in valores %}
+                      {% set filtro_ativo = (fcar == carac and fval == val) %}
+                      <a
+                        href="{{ url_for('euro.lista_produtos', search=search, fcar=carac, fval=val) }}"
+                        class="sh-filter-link{% if filtro_ativo %} is-active{% endif %}"
+                        {% if filtro_ativo %}aria-current="true"{% endif %}
+                      >
+                        <span>{{ val }}</span>
+                        <span class="sh-filter-check" aria-hidden="true">✓</span>
+                      </a>
+                    {% endfor %}
+                  </div>
+                </details>
+              {% endfor %}
+            {% else %}
+              <div class="sh-empty-filter">
+                Nenhum filtro foi configurado para os produtos encontrados.
+              </div>
+            {% endif %}
+          </div>
+        </aside>
+
+        <main class="sh-panel sh-results" aria-label="Resultados da pesquisa">
+          <div class="sh-results-toolbar">
+            <p class="sh-result-count">
+              Exibindo <strong>{{ items|length }}</strong>
+              {% if items|length == 1 %}item{% else %}itens{% endif %} nesta página
+            </p>
+            <span class="sh-page-label">
+              Página {{ page }} de {{ total_pages if total_pages > 0 else 1 }}
+            </span>
+          </div>
+
+          <div class="sh-table-scroll">
+            <table class="sh-table">
+              <thead>
+                <tr>
+                  <th scope="col">ID</th>
+                  <th scope="col">Referência</th>
+                  <th scope="col">Foto</th>
+                  <th scope="col">Produto</th>
+                  <th scope="col">Categoria</th>
+                  <th scope="col">Situação</th>
+                  <th scope="col">Matriz</th>
+                  <th scope="col" style="text-align:right;">Ações</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {% for item in items %}
+                  {% set imagem = image_urls.get(item.IDItem) %}
+                  {% set resumo_estoque = stock_summary.get(item.IDItem, '') %}
+                  <tr>
+                    <td data-label="ID">
+                      <a class="sh-item-link" href="{{ url_for('euro.item_detail', item_id=item.IDItem) }}">
+                        #{{ item.IDItem }}
+                      </a>
+                    </td>
+
+                    <td data-label="Referência">
+                      <span class="sh-reference">{{ item.ReferenciaExterna or '-' }}</span>
+                    </td>
+
+                    <td data-label="Foto" class="sh-photo-cell">
+                      <div class="sh-image-box">
+                        {% if imagem %}
+                          <img
+                            src="{{ imagem }}"
+                            alt="Foto de {{ item.NomeProduto }}"
+                            loading="lazy"
+                            data-product-image
+                          >
+                          <span class="sh-image-placeholder sh-hidden" data-image-fallback aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <rect x="3" y="4" width="18" height="16" rx="3" stroke="currentColor" stroke-width="1.8"></rect>
+                              <circle cx="9" cy="10" r="2" stroke="currentColor" stroke-width="1.8"></circle>
+                              <path d="m5 18 4.5-4 3 2.5 2.5-2 4 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
+                          </span>
+                        {% else %}
+                          <span class="sh-image-placeholder" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <rect x="3" y="4" width="18" height="16" rx="3" stroke="currentColor" stroke-width="1.8"></rect>
+                              <circle cx="9" cy="10" r="2" stroke="currentColor" stroke-width="1.8"></circle>
+                              <path d="m5 18 4.5-4 3 2.5 2.5-2 4 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
+                          </span>
+                        {% endif %}
+                      </div>
+                    </td>
+
+                    <td data-label="Produto" class="sh-product-cell">
+                      <a class="sh-product-name" href="{{ url_for('euro.item_detail', item_id=item.IDItem) }}">
+                        {{ item.NomeProduto or 'Produto sem nome' }}
+                      </a>
+                    </td>
+
+                    <td data-label="Categoria">
+                      <span class="sh-category">{{ item.NomeCategoria or 'Sem categoria' }}</span>
+                    </td>
+
+                    <td data-label="Situação">
+                      {% if item.BitAtivo %}
+                        <span class="sh-status sh-status-active">Ativo</span>
+                      {% else %}
+                        <span class="sh-status sh-status-inactive">Inativo</span>
+                      {% endif %}
+                    </td>
+
+                    <td data-label="Estoque matriz">
+                      <span
+                        class="sh-stock"
+                        {% if resumo_estoque %}title="{{ resumo_estoque }}"{% endif %}
+                      >
+                        <span class="sh-stock-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24" fill="none">
+                            <path d="m4 8 8-4 8 4-8 4-8-4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path>
+                            <path d="m4 8 8 4 8-4v8l-8 4-8-4V8z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path>
+                          </svg>
+                        </span>
+                        {{ item.Quantidade if item.Quantidade is not none else 0 }}
+                      </span>
+                    </td>
+
+                    <td data-label="Ações">
+                      <div class="sh-actions">
+                        <a
+                          href="{{ url_for('euro.ver_estoques', item_id=item.IDItem) }}"
+                          class="sh-button sh-button-soft"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path d="M4 7h16v12H4V7zM8 4h8v3H8V4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path>
+                            <path d="M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                          </svg>
+                          Estoques
+                        </a>
+                        <a
+                          href="{{ url_for('euro.add_to_cart', item_id=item.IDItem) }}"
+                          class="sh-button sh-button-green"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                          </svg>
+                          Adicionar
+                        </a>
+                      </div>
+                    </td>
+                  </tr>
+                {% else %}
+                  <tr>
+                    <td colspan="8" class="sh-empty-results">
+                      <span class="sh-empty-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none">
+                          <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"></circle>
+                          <path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+                        </svg>
+                      </span>
+                      <strong>Nenhum item encontrado</strong>
+                      <span>Revise o texto pesquisado ou remova os filtros para ampliar os resultados.</span>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          {% if total_pages > 0 %}
+            <nav class="sh-pagination-wrap" aria-label="Paginação dos produtos">
+              <ul class="sh-pagination">
+                <li>
+                  {% if page > 1 %}
+                    <a
+                      class="sh-page-link sh-wide sh-page-prev"
+                      href="{{ url_for('euro.lista_produtos', page=page-1, **qa) }}"
+                      rel="prev"
+                    >Anterior</a>
+                  {% else %}
+                    <span class="sh-page-link sh-wide sh-page-prev is-disabled" aria-disabled="true">Anterior</span>
+                  {% endif %}
+                </li>
+
+                {% for p in display_pages %}
+                  <li>
+                    {% if p == '...' %}
+                      <span class="sh-page-link is-disabled" aria-hidden="true">…</span>
+                    {% elif p == page %}
+                      <span class="sh-page-link is-current" aria-current="page">{{ p }}</span>
+                    {% else %}
+                      <a class="sh-page-link" href="{{ url_for('euro.lista_produtos', page=p, **qa) }}">
+                        {{ p }}
+                      </a>
+                    {% endif %}
+                  </li>
+                {% endfor %}
+
+                <li>
+                  {% if page < total_pages %}
+                    <a
+                      class="sh-page-link sh-wide sh-page-next"
+                      href="{{ url_for('euro.lista_produtos', page=page+1, **qa) }}"
+                      rel="next"
+                    >Próxima</a>
+                  {% else %}
+                    <span class="sh-page-link sh-wide sh-page-next is-disabled" aria-disabled="true">Próxima</span>
+                  {% endif %}
+                </li>
+              </ul>
+            </nav>
+          {% endif %}
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    (function () {
+      "use strict";
+
+      const root = document.getElementById("shempoProductList");
+      if (!root) return;
+
+      const filterToggle = document.getElementById("shempoFilterToggle");
+      const filterPanel = document.getElementById("shempoFilterPanel");
+      const filterToggleLabel = root.querySelector("[data-filter-toggle-label]");
+
+      if (filterToggle && filterPanel) {
+        filterToggle.addEventListener("click", function () {
+          const isOpen = filterPanel.classList.toggle("is-open");
+          filterToggle.setAttribute("aria-expanded", String(isOpen));
+          if (filterToggleLabel) {
+            filterToggleLabel.textContent = isOpen ? "Ocultar filtros" : "Exibir filtros";
+          }
+        });
+
+        const desktopQuery = window.matchMedia("(min-width: 981px)");
+        const resetMobileFilter = function (event) {
+          if (!event.matches) return;
+          filterPanel.classList.remove("is-open");
+          filterToggle.setAttribute("aria-expanded", "false");
+          if (filterToggleLabel) filterToggleLabel.textContent = "Exibir filtros";
+        };
+
+        if (typeof desktopQuery.addEventListener === "function") {
+          desktopQuery.addEventListener("change", resetMobileFilter);
+        } else if (typeof desktopQuery.addListener === "function") {
+          desktopQuery.addListener(resetMobileFilter);
+        }
+      }
+
+      root.querySelectorAll("img[data-product-image]").forEach(function (image) {
+        const showFallback = function () {
+          const fallback = image.parentElement.querySelector("[data-image-fallback]");
+          image.classList.add("sh-hidden");
+          if (fallback) fallback.classList.remove("sh-hidden");
+        };
+
+        image.addEventListener("error", showFallback, { once: true });
+
+        if (image.complete && image.naturalWidth === 0) {
+          showFallback();
+        }
+      });
+    }());
+  </script>
+{% endblock content %}

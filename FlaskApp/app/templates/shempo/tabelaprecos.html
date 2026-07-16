@@ -1,0 +1,157 @@
+{% extends 'base.html' %}
+{% block title %}Tabelas de Preço{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+  <h2 class="mb-2">Tabelas de Preço</h2>
+
+  <form method="get" action="{{ url_for('euro.listar_tabelaprecos') }}" class="mb-3">
+    <div class="input-group">
+      <input type="text" name="search" class="form-control"
+             placeholder="Pesquisar por ID ou Nome"
+             value="{{ search }}">
+      <button type="submit" class="btn btn-primary">Pesquisar</button>
+    </div>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle" id="tabela_precos">
+      <thead>
+        <tr>
+          <th style="width:50px">ID</th>
+          <th>Nome da Tabela</th>
+          <th>Ref. Tabela</th>
+          <th style="width:80px">Ativa</th>
+        </tr>
+        <!-- LINHA DE CRIAÇÃO -->
+        <tr id="new-row">
+          <td>—</td>
+          <td>
+            <input type="text" id="new-nome" class="form-control form-control-sm" placeholder="Novo nome">
+          </td>
+          <td>
+            <input type="number" id="new-ref" class="form-control form-control-sm" placeholder="0">
+          </td>
+          <td class="text-center">
+            <input type="checkbox" id="new-ativa" class="form-check-input">
+          </td>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tbl in tabelas %}
+        <tr data-id="{{ tbl.IDTabelaPreco }}">
+          <td>{{ tbl.IDTabelaPreco }}</td>
+          <td><input type="text" class="form-control form-control-sm edit-nome" value="{{ tbl.NomeTabelaPReco }}"></td>
+          <td><input type="number" class="form-control form-control-sm edit-ref"
+                     value="{{ tbl.ReferenciaTabelaPreco or '' }}"></td>
+          <td class="text-center">
+            <input type="checkbox" class="form-check-input edit-ativa"
+                   {% if tbl.BitAtivo %}checked{% endif %}>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <nav aria-label="Páginação">
+    <ul class="pagination justify-content-center mt-3">
+      <li class="page-item {% if page == 1 %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.listar_tabelaprecos', page=page-1, search=search) }}">Anterior</a>
+      </li>
+      {% for p in range(1, total_pages + 1) %}
+      <li class="page-item {% if p == page %}active{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.listar_tabelaprecos', page=p, search=search) }}">{{ p }}</a>
+      </li>
+      {% endfor %}
+      <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.listar_tabelaprecos', page=page+1, search=search) }}">Próxima</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // ========== Função de criação ==========
+  const newNome = document.querySelector('#new-nome');
+  const newRef  = document.querySelector('#new-ref');
+  const newAtv  = document.querySelector('#new-ativa');
+
+  async function criarSePronto(){
+    const nome = newNome.value.trim();
+    const ref  = newRef.value.trim();
+    // só cria quando nome e ref estiverem preenchidos
+    if(!nome || !ref) return;
+
+    try {
+      const res = await fetch(`{{ url_for('euro.criar_tabelapreco') }}`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          NomeTabelaPReco: nome,
+          ReferenciaTabelaPreco: ref,
+          TabelaAtiva: newAtv.checked
+        })
+      });
+      if(!res.ok) throw await res.json();
+      const js = await res.json();
+
+      // adiciona nova linha
+      const tbody = document.querySelector('#tabela_precos tbody');
+      const tr = document.createElement('tr');
+      tr.dataset.id = js.id;
+      tr.innerHTML = `
+        <td>${js.id}</td>
+        <td><input type="text" class="form-control form-control-sm edit-nome" value="${js.NomeTabelaPReco}"></td>
+        <td><input type="number" class="form-control form-control-sm edit-ref" value="${js.ReferenciaTabelaPreco || ''}"></td>
+        <td class="text-center">
+          <input type="checkbox" class="form-check-input edit-ativa" ${js.TabelaAtiva?'checked':''}>
+        </td>`;
+      tbody.prepend(tr);
+
+      // limpa campos e reconfigura listener na linha nova
+      newNome.value = '';
+      newRef.value  = '';
+      newAtv.checked= false;
+      attachInlineListeners(tr);
+    } catch(err){
+      alert(err.msg || 'Erro ao criar tabela de preços.');
+    }
+  }
+
+  // dispara criação quando usuário terminar de preencher
+  newNome.addEventListener('blur', criarSePronto);
+  newRef.addEventListener('change', criarSePronto);
+  newAtv.addEventListener('change', criarSePronto);
+
+  // ========== Função de edição inline ==========
+  function attachInlineListeners(row){
+    const id      = row.dataset.id;
+    const inNome  = row.querySelector('.edit-nome');
+    const inRef   = row.querySelector('.edit-ref');
+    const ckAt    = row.querySelector('.edit-ativa');
+
+    [inNome, inRef, ckAt].forEach(el => {
+      el.addEventListener('change', () => {
+        fetch(`{{ url_for('euro.atualizar_tabelapreco', id=0) }}`.replace('0', id), {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            NomeTabelaPReco: inNome.value,
+            ReferenciaTabelaPreco: inRef.value,
+            TabelaAtiva: ckAt.checked
+          })
+        });
+      });
+    });
+  }
+
+  // aplica edição nas linhas existentes
+  document.querySelectorAll('tr[data-id]').forEach(attachInlineListeners);
+});
+</script>
+{% endblock %}

@@ -1,0 +1,984 @@
+{# templates/controle_ordens_pedidos.html #}
+{% extends "base.html" %}
+
+{% block head %}
+  {{ super() }}
+  <style>
+
+
+
+/* === destaque para atraso ===================================== */
+.card-item.status-atrasado{
+  border-color:#e53935 !important;        /* vermelho vivo   */
+  box-shadow:0 0 0 2px rgba(229,57,53,.35); /* leve halo      */
+}
+
+/* etiqueta vermelha topo-a-topo apenas para atrasados */
+/* === etiqueta “Atrasado” reposicionada ========================= */
+/* === etiqueta “Atrasado” reposicionada ========================= */
+/* === etiqueta “Atrasado” – largura total logo acima da fase ========= */
+/* ─── FASE (já existente – manter) ────────────────────────────── */
+.phase-label{
+  position:absolute;
+  bottom:.6rem;
+  left:50%;
+  transform:translateX(-50%);
+  padding:.25rem .6rem;
+  font-size:.75rem;
+  font-weight:600;
+  color:#fff;
+  border-radius:4px;
+  white-space:nowrap;
+  pointer-events:none;
+}
+
+/* ─── ATRASADO – faixa logo acima da fase ─────────────────────── */
+/* —— ajuste final: faixa “Atrasado” logo acima da fase ———————— */
+.atrasado-label{
+  position:absolute;
+  bottom:calc(.6rem + 1.4rem) !important; /* 0.6 rem + altura da fase */
+  left:0 !important;
+  transform:none !important;
+  width:100% !important;
+
+  background:#e53935;
+  color:#fff;
+  text-align:center;
+  font-size:.75rem;
+  font-weight:600;
+  padding:.25rem 0;
+  border-radius:4px;
+  white-space:nowrap;
+  z-index:10;               /* acima da fase */
+}
+
+
+/* ─── NÃO mexe no conteúdo do card ────────────────────────────── */
+.card-item .card-header,
+.card-item .view-fields,
+.card-item .edit-fields{
+  margin-top:0;
+}
+
+
+/* ─── Modal Overlay ─────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 2000;
+  transition: opacity .25s;
+}
+.modal-overlay[hidden] {
+  opacity: 0; pointer-events: none;
+}
+.modal-box {
+  background: #fff;
+  border-radius: 8px;
+  width: 640px;
+  max-height: 92vh;
+  overflow: auto;
+  padding: 1rem;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+}
+/* remove a etiqueta de fase no popup */
+.modal-box .phase-label {
+  display: none;
+}
+
+
+
+
+  .card-name {
+      text-align: center;
+      font-weight: bold;
+      margin: 0.5rem 0;
+    }
+
+
+  /* Pinta o nome conforme o status já presente no data-status */
+    .card-item.status-criado     .card-name { color: #00bcd4; }
+    .card-item.status-em-producao  .card-name { color: #4caf50; }
+  .card-item.status-produzido   .card-name { color: #ff9800; }
+  .card-item.status-aprovado    .card-name { color: #9c27b0; }
+  .card-item.status-concluido   .card-name { color: #f44336; }
+
+    
+    /* Etiqueta externa da fase */
+            /* Etiqueta de fase centralizada no rodapé do card */
+        /* CARD precisa ser relativo para ancorar a etiqueta */
+    .card-item { position: relative; }
+
+    /* Rodapé mantém alinhamento normal para eventuais textos */
+    .card-footer { padding-top: .6rem; }
+
+    /* Etiqueta da fase – fixa no rodapé, centralizada */
+    .phase-label {
+    position: absolute;
+    bottom: .6rem;          /* distância da base interna do card */
+    left: 50%;              /* centro horizontal */
+    transform: translateX(-50%);
+    padding: .25rem .6rem;
+    font-size: .75rem;
+    font-weight: 600;
+    color: #fff;
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;   /* não recebe clique */
+    }
+
+    /* Cores da etiqueta */
+    .phase-criado      { background:#33b5e5; }
+    .phase-em-producao { background:#00c851; }
+    .phase-produzido   { background:#ffbb33; color:#212529; }
+    .phase-aprovado    { background:#aa66cc; }
+    .phase-concluído   { background:#6c757d; }
+
+
+
+
+
+
+    .card-item-ids {
+      margin-left: auto;
+      display: flex;
+      gap: .25rem;
+    }
+    .card-item-id {
+      background: rgba(0, 0, 0, .05);
+      border-radius: 4px;
+      padding: .2rem .4rem;
+      font-size: .8rem;
+      font-weight: 600;
+    }
+
+
+
+    /* ── Board e colunas ─────────────────────────────────── */
+  .board {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  padding: 1rem;
+}
+
+.column {
+  flex: 0 0 300px;   /* ajuste a largura aqui */
+  border-radius: 6px;
+}
+
+.column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .6rem;
+  border-bottom: 1px solid #c0d1c4;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+}
+
+.column-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.btn-add {
+  background: none;
+  border: none;
+  font-size: 1.4rem;
+  cursor: pointer;
+}
+
+.list {
+  min-height: 200px;
+  padding: .6rem;
+  background: rgba(255,255,255,0.7);
+  border-radius: 0 0 6px 6px;
+}
+
+/* faz o card preencher 100% da coluna */
+.card-item {
+  width: 100%;
+}
+
+
+
+
+    /* ── Cores dos cabeçalhos ─────────────────────────────── */
+    .column[data-fase="Criado"]      .column-header { background:#33b5e5; color:#fff; }
+    .column[data-fase="Em Produção"] .column-header { background:#00c851; color:#fff; }
+    .column[data-fase="Produzido"]   .column-header { background:#ffbb33; color:#212529; }
+    .column[data-fase="Aprovado"]    .column-header { background:#aa66cc; color:#fff; }
+    .column[data-fase="Concluído"]   .column-header { background:#6c757d; color:#fff; }
+
+    /* ── Cards ────────────────────────────────────────────── */
+    .card-item {
+      display:flex; flex-direction:column; margin:.5rem 0; padding:.6rem;
+      border:2px solid #ccc; background:#fff; border-radius:6px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.1); position:relative;
+      transition:border-color .3s;
+    }
+    .card-item.status-criado      { border-color:#33b5e5; }
+    .card-item.status-em-producao { border-color:#00c851; }
+    .card-item.status-produzido   { border-color:#ffbb33; }
+    .card-item.status-aprovado    { border-color:#aa66cc; }
+    .card-item.status-concluído   { border-color:#6c757d; }
+
+    .card-header {
+      display:flex; align-items:center; margin-bottom:.3rem;
+    }
+    .btn-delete {
+      position:absolute; top:.6rem; right:.6rem;
+      background:none; border:none; font-size:1.1rem;
+      color:#e53935; cursor:pointer; transition:color .2s;
+    }
+    .btn-delete:hover { color:#b71c1c; }
+    .badge-urgent {
+      background:#e53935; color:#fff; border-radius:4px;
+      padding:.3rem .6rem; font-size:.8rem; margin-right:.5rem;
+    }
+
+    .card-id { font-weight:bold; margin-right:.5rem; }
+    .card-item-ids { font-size:.9rem; color:#555; }
+    .card-item-id { margin-right:.3rem; }
+
+    /* ── View externa (aparece só com dados) ────────────── */
+    .view-fields { display:none; margin-top:.4rem; }
+    .card-item.has-data .view-fields { display:block; }
+    .view-fields p { margin:.2rem 0; font-size:.95rem; }
+    .view-fields hr { margin:.4rem 0; border:none; border-top:1px solid #ddd; }
+
+    /* ── Lista de itens interna ─────────────────────────── */
+    .view-fields ul {
+      margin:.5rem 0 0 1rem; list-style:disc inside;
+      font-size:.95rem;
+    }
+
+    /* ── Edição inline ──────────────────────────────────── */
+    .edit-fields {
+      display:none; flex-direction:column; margin-top:.5rem; gap:.6rem;
+      background:rgba(0,0,0,0.03); padding:.5rem; border-radius:4px;
+    }
+    .card-item.editing .edit-fields { display:flex; }
+
+    .field-group { display:flex; flex-direction:column; gap:.2rem; }
+    .field-group label { font-size:.9rem; }
+    .field-group select,
+    .field-group input {
+      padding:.3rem; border:1px solid #ccc; border-radius:4px;
+    }
+
+    .item-rows { margin-top:.5rem; }
+    .item-row {
+      display:flex; align-items:center; gap:.5rem; margin-bottom:.3rem;
+    }
+    .item-row input { width:60px; padding:.3rem; }
+    .item-row .item-name { flex:1; }
+    .btn-remove-row {
+      background:none; border:none; font-size:1.2rem;
+      color:#e53935; cursor:pointer;
+    }
+    .btn-add-item {
+      background:none; border:1px dashed #aaa;
+      padding:.3rem .6rem; border-radius:4px; cursor:pointer;
+      align-self:flex-start;
+    }
+
+    /* ── Botão Salvar ──────────────────────────────────── */
+    .btn-save {
+      padding:.4rem .8rem; margin-top:.4rem;
+      background:#00c851; color:#fff; border:none; border-radius:4px;
+      cursor:pointer;
+    }
+    .btn-save:hover { background:#009e41; }
+
+    /* ── Rodapé com badge de fase ───────────────────────── */
+    .card-footer { margin-top:auto; text-align:center; padding-top:.5rem; }
+    .badge-status {
+      border-radius:4px; padding:.3rem .6rem; font-size:.8rem;
+      font-weight:600; color:#fff; display:inline-block;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+
+<div class="search-container" style="position:relative;">
+  <input
+    type="text"
+    id="search-box"
+    class="form-control"
+    placeholder="Buscar por NomeCard, IDPedido ou IDCard…"
+    autocomplete="off"
+  />
+  <ul
+    id="search-results"
+    class="list-group"
+    style="position:absolute; top:100%; width:100%; z-index:1000;
+           max-height:200px; overflow-y:auto;"
+  ></ul>
+</div>
+
+
+
+
+
+
+<div class="board">
+  {% for fase in fases %}
+    <div class="column" data-fase="{{ fase.nome }}">
+      <div class="column-header" style="background: {{ fase.cor }}; color: #fff;">
+        <h3>{{ fase.nome }}</h3>
+        <button class="btn-add" data-fase="{{ fase.nome }}" data-id="{{ fase.id }}">＋</button>
+      </div>
+
+      <div class="list" data-fase="{{ fase.nome }}">
+        {% for card in board[fase.nome] %}
+          {# só cards que vieram do controller já com card.itens filtrados pela Operação=Produção #}
+          {% set slug = (fase.nome == 'Em Produção')
+                        and 'em-producao'
+                        or fase.nome|lower|replace(' ', '-') %}
+          {% set temDado = (card.custom_values|length > 0)
+                          or (card.itens|length > 0)
+                          or (card.anexos|length > 0)
+                          or (card.comentarios|length > 0) %}
+
+          <div class="card-item
+                      status-{{ slug }}
+                      {% if temDado %} has-data{% endif %}
+                      {% if card.is_atrasado %} status-atrasado{% endif %}"
+               data-id="{{ card.IDCard }}">
+
+            <!-- etiqueta de fase -->
+            <span class="phase-label phase-{{ slug }}">{{ fase.nome }}</span>
+
+            <!-- cabeçalho -->
+            <div class="card-header">
+              <span class="card-id">#{{ card.IDCard }}</span>
+              <div class="card-name">{{ card.Titulo }}</div>
+              <button class="btn-delete" data-id="{{ card.IDCard }}">×</button>
+            </div>
+
+            <!-- DETALHES: Cliente, Vendedor e lista de IDItem -->
+            <div class="view-fields">
+              <p><strong>Cliente:</strong> {{ empresa_map[card.IDEmpresaCompradora] or '—' }}</p>
+              <p><strong>Vendedor:</strong> {{ empresa_map[card.IDEmpresaVendedora] or '—' }}</p>
+              {% if card.itens %}
+                <p><strong>ID Item(s):</strong>
+                  {% for it in card.itens %}
+                    {{ it.IDItem }}{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                </p>
+              {% endif %}
+              <p><strong>Criado em:</strong> {{ card.DataCriacao.strftime('%Y-%m-%d') }}</p>
+              <ul>
+                {% for v in card.custom_values %}
+                  <li><strong>{{ v.referencia.NomeReferencia }}:</strong> {{ v.Valor }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+
+            <!-- edição inline (permanece idêntica à sua implementação) -->
+            <div class="edit-fields">
+              <!-- Cliente / Vendedor / Projeto -->
+              <div class="field-group">
+                <label>Cliente</label>
+                <p>{{ empresa_map[card.IDEmpresaCompradora] or '—' }}</p>
+              </div>
+              <div class="field-group">
+                <label>Vendedor</label>
+                <p>{{ empresa_map[card.IDEmpresaVendedora] or '—' }}</p>
+              </div>
+              <div class="field-group">
+                <label>Projeto</label>
+                <p>{{ projetos_map[card.IDProjeto] or '—' }}</p>
+              </div>
+
+              <!-- Itens de Produção -->
+              <div class="item-rows">
+                {% for it in card.itens %}
+                  <div class="item-row">
+                    <label>IDItem</label>
+                    <input type="number" class="item-id" value="{{ it.IDItem }}" readonly/>
+                    <label>Qtd</label>
+                    <input type="number" class="item-qty" value="{{ it.Quantidade }}" readonly/>
+                  </div>
+                {% endfor %}
+              </div>
+
+              <!-- Anexos -->
+              <div class="field-group">
+                <label>Anexos</label>
+                <div class="attachments">
+                  {% for anexo in card.anexos %}
+                    <div class="attachment-item" data-id="{{ anexo.IDAnexo }}">
+                      <a href="{{ url_for('kanban.download_anexo', anexo_id=anexo.IDAnexo) }}"
+                         target="_blank">{{ anexo.NomeArquivo }}</a>
+                      <button class="btn-delete-anexo" data-id="{{ anexo.IDAnexo }}">×</button>
+                    </div>
+                  {% endfor %}
+                </div>
+              </div>
+
+              <!-- Comentários -->
+              <div class="field-group comments">
+                <label>Comentários</label>
+                <div class="comment-list">
+                  {% for c in card.comentarios %}
+                    <div class="comment-item" data-id="{{ c.IDComentario }}">
+                      <strong>{{ usuario_map[c.IDUsuario] }} – {{ c.DataComentario.strftime('%d/%m/%Y %H:%M') }}</strong>
+                      <p>{{ c.Comentario }}</p>
+                      <button class="btn-delete-comment" data-id="{{ c.IDComentario }}">×</button>
+                    </div>
+                  {% endfor %}
+                </div>
+                <textarea class="input-comment"
+                          data-id="{{ card.IDCard }}"
+                          placeholder="Escreva um comentário…"
+                          rows="3"></textarea>
+                <button class="btn-send-comment" data-id="{{ card.IDCard }}">Enviar</button>
+              </div>
+            </div>
+            <!-- /edição inline -->
+
+            <!-- rodapé -->
+            <div class="card-footer">
+              <!-- badges, indicadores, etc. -->
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+</div>
+
+<div id="card-modal" class="modal-overlay" hidden>
+  <div class="modal-box">
+    <!-- o card será movido para cá e depois devolvido -->
+  </div>
+</div>
+
+{% endblock %}
+
+
+
+
+
+
+
+
+{% block scripts %}
+  {{ super() }}
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
+  <script>
+ const cardPrefix      = "/cards/";
+  const statusEndpoint  = "/status";
+  const concludeEndpoint= "/concluir";
+  const kanbanId        = {{ id_kanban }};
+
+  // slugify pra montar classes se precisar
+  function phaseSlug(fase) {
+    return (fase === 'Em Produção')
+      ? 'em-producao'
+      : fase.toLowerCase().replace(/\s+/g, '-');
+  }
+
+  // limpa e desenha o label de fase dentro do card-footer
+  function syncPhase(card, fase) {
+    // 1) remove QUALQUER label de fase antiga
+    card.querySelectorAll('.phase-label:not(.atrasado-label)')
+        .forEach(el => el.remove());
+
+    // 2) pega a cor do cabeçalho da coluna
+    const header = document.querySelector(
+      `.column[data-fase="${fase}"] .column-header`
+    );
+    const bg = header
+      ? getComputedStyle(header).backgroundColor
+      : '#cccccc';
+
+    // 3) cria e insere o novo label
+    const lbl = document.createElement('span');
+    lbl.classList.add('phase-label');
+    lbl.textContent = fase;
+    lbl.style.background = bg;
+    card.querySelector('.card-footer').appendChild(lbl);
+
+    // opcional: ajustar também a borda do card
+    const slug = phaseSlug(fase);
+    Array.from(card.classList).forEach(c => {
+      if (c.startsWith('status-')) card.classList.remove(c);
+    });
+    card.classList.add('status-' + slug);
+  }
+
+  // inicial: desenha todos os labels ao carregar
+  document.querySelectorAll('.card-item').forEach(card => {
+    const fase = card.closest('.column').dataset.fase;
+    syncPhase(card, fase);
+  });
+
+  // monta o drag & drop
+  document.querySelectorAll('.list').forEach(el => {
+    new Sortable(el, {
+      group: 'kanban',
+      animation: 200,
+
+      onAdd(evt) {
+        const cardEl   = evt.item;
+        const cardId   = cardEl.dataset.id;
+        const novaFase = evt.to.dataset.fase;
+
+        // Se for Concluído, chama o endpoint de concluir
+        if (novaFase === 'Concluído') {
+          return fetch(
+            `${cardPrefix}${cardId}${concludeEndpoint}?kanban=${kanbanId}`,
+            { method: 'POST' }
+          )
+          .then(r => {
+            if (r.ok) cardEl.remove();
+            else      alert('Erro ao concluir');
+          })
+          .catch(() => alert('Erro de rede ao concluir'));
+        }
+
+        // senão, só atualiza o status
+        fetch(
+          `${cardPrefix}${cardId}${statusEndpoint}?kanban=${kanbanId}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fase: novaFase })
+          }
+        )
+        .then(r => {
+          if (!r.ok) throw '';
+          syncPhase(cardEl, novaFase);
+        })
+        .catch(() => {
+          alert('Falha ao mover card');
+          // reverte no DOM
+          evt.from.insertBefore(cardEl, evt.from.children[evt.oldIndex]);
+        });
+      },
+
+      onUpdate(evt) {
+        const cardEl = evt.item;
+        const fase   = cardEl.closest('.column').dataset.fase;
+        syncPhase(cardEl, fase);
+      }
+    });
+  });
+
+
+
+
+
+    /* ─────────── Consulta de produto por ID ─────────── */
+    function fetchNome(row) {
+      const id = parseInt(row.querySelector('.item-id').value, 10);
+      if (!id) { row.querySelector('.item-name').innerText = '—'; return; }
+      fetch(produtosApi + id)
+        .then(r => r.json())
+        .then(j => row.querySelector('.item-name').innerText = j.NomeProduto || '—');
+    }
+    function bindRow(row) {
+      row.querySelector('.item-id').addEventListener('change', () => fetchNome(row));
+      row.querySelector('.btn-remove-row').addEventListener('click', () => row.remove());
+    }
+    document.querySelectorAll('.item-row').forEach(bindRow);
+
+    /* ─────────── + Item dentro da edição ─────────── */
+    document.querySelectorAll('.btn-add-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const cont = btn.previousElementSibling;
+        const row  = document.createElement('div');
+        row.className = 'item-row';
+        row.innerHTML = `
+          <input class="item-id" type="number" placeholder="IDItem"/>
+          <span class="item-name">—</span>
+          <input class="item-qty" type="number" value="1" min="1"/>
+          <button class="btn-remove-row">×</button>`;
+        cont.appendChild(row); bindRow(row);
+      });
+    });
+
+    /* ─────────── Deletar card ─────────── */
+    // ─────────── Deletar card ───────────
+    document.querySelectorAll('.btn-delete').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();                // não dispare drag-drop nem outro handler
+      const id = btn.dataset.id;         // pega o ID do card
+
+      // chama o endpoint DELETE /cards/:id
+      fetch(`/cards/${id}`, { method: 'DELETE' })
+        .then(res => {
+          if (!res.ok) throw '';
+          // remove do DOM
+          btn.closest('.card-item').remove();
+        })
+        .catch(() => {
+          alert('Erro ao excluir o card');
+        });
+    });
+  });
+
+
+    /* ─────────── Criar novo pedido ─────────── */
+    /* ─────────── Criar novo CARD ─────────── */
+// ─────────── Criar novo CARD sem prompt e sem reload ───────────
+document.querySelectorAll('.btn-add').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const idFase   = btn.dataset.id;
+    const faseNome = btn.dataset.fase;           // exemplo: "Inicio"
+    const idKanban = "{{ id_kanban }}";
+
+    // POST na rota /cards
+    const res = await fetch("/cards", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        titulo:  "Tarefa",    // nome padrão do card
+        id_fase: idFase,
+        id_kanban: idKanban
+      })
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      alert(json.error || "Erro ao criar card");
+      return;
+    }
+
+    // monta o DOM do card recém-criado
+    const slug = phaseSlug(faseNome);
+    const card = document.createElement('div');
+    card.className = `card-item status-${slug}`;
+    card.dataset.id = json.id;
+    card.innerHTML = `
+      <div class="card-header">
+        <span class="card-id">#${json.id}</span>
+        <div class="card-name">${json.titulo}</div>
+        <button class="btn-delete" data-id="${json.id}">×</button>
+      </div>
+      <div class="card-footer">
+        <span class="badge-status">${faseNome}</span>
+      </div>
+    `;
+
+    // insere na lista correta
+    const lista = document.querySelector(`.list[data-fase="${faseNome}"]`);
+    lista.appendChild(card);
+
+    // aplica o label colorido e borda correta
+    syncPhase(card, faseNome);
+
+    // vincula o botão de delete para funcionar sem recarregar
+    card.querySelector('.btn-delete')
+        .addEventListener('click', e => {
+          e.stopPropagation();
+          fetch(`/cards/${json.id}`, { method: 'DELETE' })
+            .then(r => {
+              if (r.ok) card.remove();
+              else       alert('Falha ao excluir');
+            })
+            .catch(() => alert('Erro de rede ao excluir'));
+        });
+  });
+});
+
+
+
+    /* ─────────── Abrir edição com duplo‑clique ─────────── */
+    document.querySelectorAll('.card-item').forEach(c => {
+      c.addEventListener('dblclick', () => c.classList.add('editing'));
+    });
+
+    /* ─────────── Salvar metadados + itens ─────────── */
+    document.querySelectorAll('.btn-save').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const card  = e.target.closest('.card-item');
+        const id    = card.dataset.id;
+
+        const data = {
+          IDEmpresaCompradora: card.querySelector('.select-compradora').value,
+          IDEmpresaVendedora:  card.querySelector('.select-vendedora').value,
+          IDProjeto:           card.querySelector('.select-projeto').value,
+          DataPrometido:       card.querySelector('.prazo-input').value,
+          itens: Array.from(card.querySelectorAll('.item-row'))
+                      .map(r => ({
+                        IDItem:      parseInt(r.querySelector('.item-id').value, 10),
+                        Quantidade:  parseInt(r.querySelector('.item-qty').value, 10)
+                      }))
+                      .filter(x => x.IDItem > 0)
+        };
+
+        fetch(`${pedidoPrefix}${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        })
+          .then(r => { if (!r.ok) throw ''; location.reload(); })
+          .catch(() => alert('Erro ao salvar'));
+      });
+    });
+
+    /* ─────────── Sortable (drag & drop) ─────────── */
+    document.querySelectorAll('.list').forEach(el => new Sortable(el, {
+      group: 'kanban',
+      animation: 200,
+
+      onAdd(evt) {
+  const card    = evt.item;
+  const fase    = evt.to.dataset.fase;
+  const id      = card.dataset.id;
+  const kanbanId = {{ id_kanban }};
+
+  // 1) Se for para “Concluído”, chama o endpoint de concluir
+  if (fase === 'Concluído') {
+    return fetch(
+      `${cardPrefix}${id}${concluirEndpoint}?kanban=${kanbanId}`,
+      { method: 'POST' }
+    )
+    .then(r => {
+      if (r.ok) card.remove();
+      else      alert('Erro ao concluir');
+    })
+    .catch(() => alert('Erro de rede ao concluir'));
+  }
+
+  // 2) Caso contrário, atualiza só o status
+  fetch(
+    `${cardPrefix}${id}${statusEndpoint}?kanban=${kanbanId}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fase })
+    }
+  )
+  .then(r => {
+    if (!r.ok) throw '';
+    syncPhase(card, fase);
+  })
+  .catch(() => {
+    alert('Falha ao mover card');
+    // reverte no DOM
+    evt.from.insertBefore(card, evt.from.children[evt.oldIndex]);
+  });
+},
+
+
+      onUpdate(evt) {
+        /* reordenação dentro da mesma coluna */
+        const card = evt.item;
+        const fase = card.closest('.column').dataset.fase;
+        syncPhase(card, fase);
+      }
+    }));
+
+    /* ─────────── Fecha edição clicando fora ─────────── */
+    document.addEventListener('click', e => {
+      document.querySelectorAll('.card-item.editing').forEach(card => {
+        if (!card.contains(e.target)) card.classList.remove('editing');
+      });
+    });
+
+    /* ─────────── Sincroniza etiquetas na carga inicial ─────────── */
+    document.querySelectorAll('.card-item').forEach(card => {
+      const fase = card.closest('.column').dataset.fase;
+      syncPhase(card, fase);
+    });
+
+    document.querySelectorAll('.input-upload').forEach(input => {
+  input.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const pedidoId = e.target.dataset.id;
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('IDCard', pedidoId);
+
+    try {
+      const res = await fetch('/anexos/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro ao anexar');
+
+      // insere o novo anexo na lista
+      const attachments = e.target.closest('.field-group').querySelector('.attachments');
+      const div = document.createElement('div');
+      div.classList.add('attachment-item');
+      div.dataset.id = json.IDAnexo;
+
+      div.innerHTML = `
+        <a href="${json.CaminhoArquivo}"
+           target="_blank"
+           ondblclick="window.open(this.href, '_blank')">
+          ${json.NomeArquivo}
+        </a>
+        <button class="btn-delete-anexo" data-id="${json.IDAnexo}">&times;</button>
+      `;
+      attachments.appendChild(div);
+
+      // opcional: limpar o input
+      e.target.value = '';
+
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+});
+
+// Delegação para excluir anexo
+document.addEventListener('click', async e => {
+  if (!e.target.matches('.btn-delete-anexo')) return;
+  const anexoId = e.target.dataset.id;
+  try {
+    const res = await fetch(`/anexos/${anexoId}`, { method: 'DELETE' });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Erro ao excluir');
+    e.target.closest('.attachment-item').remove();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+
+document.querySelectorAll('.btn-send-comment').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const cardId = btn.dataset.id;
+      const textarea = document.querySelector(
+        `.input-comment[data-id="${cardId}"]`
+      );
+      const texto = textarea.value.trim();
+      if (!texto) {
+        alert('Comentário vazio');
+        return;
+      }
+
+      // Ajuste a URL se você tiver url_prefix no blueprint
+      const url = '/comentarios';
+
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            IDCard: cardId,
+            comentario: texto
+          })
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error);
+
+        // Cria o elemento de comentário
+        const div = document.createElement('div');
+        div.classList.add('comment-item');
+        div.innerHTML = `
+          <strong>${json.NomeUsuario} – ${json.DataComentario.split(' ')[0]}</strong>
+          <p>${json.Comentario}</p>
+        `;
+        // Anexa na lista
+        const list = btn.closest('.comments').querySelector('.comment-list');
+        list.appendChild(div);
+
+        textarea.value = '';
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+  });
+
+  document.addEventListener('click', async e => {
+  if (!e.target.matches('.btn-delete-comment')) return;
+
+  const commentId = e.target.dataset.id;
+  // Ajuste a URL se tiver url_prefix:
+  const url = `/comentarios/${commentId}`;
+
+  if (!confirm('Deseja excluir este comentário?')) return;
+
+  try {
+    const res = await fetch(url, { method: 'DELETE' });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || 'Falha ao excluir');
+    // Remove do DOM
+    const el = document.querySelector(`.comment-item[data-id="${commentId}"]`);
+    el && el.remove();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+
+
+
+
+
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  const searchBox   = document.getElementById('search-box');
+  const resultsList = document.getElementById('search-results');
+  const container   = searchBox.parentElement;
+  let timer;
+
+  if (!searchBox || !resultsList) {
+    console.error('Não achei #search-box ou #search-results');
+    return;
+  }
+
+  // 1) Digitação → debounce + fetch de sugestões
+  searchBox.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = searchBox.value.trim();
+    if (q.length < 2) {
+      resultsList.innerHTML = '';
+      return;
+    }
+    timer = setTimeout(async () => {
+      try {
+        const res   = await fetch(`/pedidos/search?q=${encodeURIComponent(q)}`);
+        const items = await res.json();
+        resultsList.innerHTML = items.map(item => `
+          <li class="list-group-item list-group-item-action"
+              data-idpedido="${item.IDPedido}">
+            ${item.label}
+          </li>
+        `).join('');
+      } catch (err) {
+        console.error('Erro na busca de pedidos:', err);
+      }
+    }, 300);
+  });
+
+  // 2) Delegação de clique em qualquer lugar da página
+  document.addEventListener('click', e => {
+    // 2a) Clique numa sugestão…
+    const li = e.target.closest('#search-results li[data-idpedido]');
+    if (li) {
+      e.stopPropagation();
+      const id   = li.dataset.idpedido;
+      const card = document.querySelector(`.card-item[data-id="${id}"]`);
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.classList.add('editing');
+        const fld = card.querySelector('.edit-fields input, .edit-fields select, .edit-fields textarea');
+        if (fld) fld.focus();
+      }
+      resultsList.innerHTML = '';
+      searchBox.value = '';
+      return;
+    }
+
+    // 2b) Clique fora do dropdown → fecha
+    if (!container.contains(e.target)) {
+      resultsList.innerHTML = '';
+    }
+  });
+});
+  </script>
+{% endblock %}

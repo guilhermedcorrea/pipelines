@@ -1,0 +1,458 @@
+{# templates/movimentar_estoque.html #}
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Movimentar Estoque do Item {{ item.IDItem }}{% endblock %}
+
+{% block content %}
+  <h2>Movimentar Estoque do Item {{ item.IDItem }} – {{ item.NomeProduto }}</h2>
+
+  
+  <form method="POST" action="{{ url_for('euro.movimentar_estoque', item_id=item.IDItem) }}">
+
+
+
+           
+
+    
+
+
+
+
+    {# ← AQUI comece a seção Estoque de Origem #}
+    <!-- Estoque de Origem -->
+    <div class="mb-3">
+      <label for="estoque_origem" class="form-label">Estoque de Origem</label>
+      <select
+        name="estoque_origem"
+        id="estoque_origem"
+        class="form-select"
+        onchange="atualizarProprietario('origem')"
+      >
+        {% for nome, lista in origem_groups.items() %}
+          <option
+            value="{{ nome }}"
+            data-tipo="{{ lista[0].IDTipoEstoque }}"  <!-- injeta aqui o IDTipoEstoque -->
+          >
+            {{ nome }} (Qtd: {{ lista[0].Saldo }})
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    {# ← Até aqui #}
+
+    <!-- Proprietário de Origem -->
+    <div class="mb-3">
+      <label for="proprietario_origem" class="form-label">Proprietário de Origem</label>
+      <select name="proprietario_origem" id="proprietario_origem" class="form-select">
+        <!-- preenchido pelo JS -->
+      </select>
+    </div>
+
+  
+  <!-- Estoque de Destino -->
+  <div class="mb-3">
+    <label for="estoque_destino" class="form-label">Receber Estoque</label>
+    <select name="estoque_destino" id="estoque_destino" class="form-select"
+            onchange="atualizarProprietario('destino')">
+      {% for nome, lista in destino_groups.items() %}
+        <option value="{{ nome }}">{{ nome }} (Qtd: {{ lista[0].Saldo }})</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <!-- Proprietário de Destino -->
+  <div class="mb-3">
+    <label for="proprietario_destino" class="form-label">Proprietário de Destino</label>
+    <select name="proprietario_destino" id="proprietario_destino" class="form-select">
+      <!-- preenchido pelo JS -->
+    </select>
+  </div>
+
+
+
+
+
+  <!-- Quantidade a Transferir -->
+  <div class="mb-3">
+    <label for="quantidade" class="form-label">Quantidade a Transferir</label>
+    <input type="number"
+           name="quantidade"
+           id="quantidade"
+           class="form-control"
+           value="0"
+           min="0"
+           oninput="atualizarCalculos()">
+  </div>
+
+  {% if item.ControlaLote %}
+    <hr>
+    <h4>Lotes do Estoque de Origem</h4>
+    <p class="text-muted">
+      Verifique abaixo os lotes disponíveis para este estoque de origem ou do pedido.
+    </p>
+    <table class="table table-bordered" id="table_lotes_origem">
+      <thead>
+        <tr>
+          <th>Número do Lote</th>
+          <th>Quantidade</th>
+          <th>Nome do Produto</th>
+        </tr>
+      </thead>
+      <tbody id="tbody_lotes_origem">
+        <!-- Linhas inseridas pelo JS -->
+      </tbody>
+    </table>
+
+    <div class="mb-3">
+      <label for="numero_lote_escolhido" class="form-label">
+        Informe o Número do Lote
+      </label>
+
+      {% if pedido is defined %}
+        <!-- fluxo de pedido: mantém o input de texto -->
+        <input type="text"
+               name="numero_lote_escolhido"
+               id="numero_lote_escolhido"
+               class="form-control"
+               placeholder="Ex: 100">
+      {% else %}
+        <!-- fluxo genérico: select populado pelo JS -->
+        <select name="numero_lote_escolhido"
+                id="numero_lote_escolhido"
+                class="form-select">
+          <option value="" disabled selected>— escolha um lote —</option>
+        </select>
+      {% endif %}
+    </div>
+
+    {% if item.ControlaNumerodeSerie and pedido is not defined %}
+    <hr>
+  
+    <div id="serie_section" style="display:none;">
+      <h4>Séries do Lote Selecionado</h4>
+      <label class="form-label">Selecione Série(s):</label>
+  
+      <div id="serie_container" class="mb-2"></div>
+  
+      <button type="button"
+              id="add_serie_btn"
+              class="btn btn-sm btn-outline-primary">
+        + Selecionar mais
+      </button>
+    </div>
+  
+    <hr>
+    {% endif %}
+  
+
+    <hr>
+  {% endif %}
+
+
+  <!-- Saldos após transferência (informativo) -->
+  <div class="mb-3">
+    <p><strong>Disponível no Estoque de Origem após Transferência:</strong>
+       <span id="origem_restante">0</span></p>
+    <p><strong>Disponível no Estoque de Destino após Transferência:</strong>
+       <span id="destino_restante">0</span></p>
+  </div>
+
+  <!-- Tabelas de detalhe -->
+  <div class="row">
+    <div class="col-md-6">
+      <h4>Detalhes Estoque de Origem</h4>
+      <table class="table table-bordered">
+        <tr>
+          <th>ID Item</th><th>Nome Produto</th><th>FamiliaID</th>
+          <th>Referência Externa</th><th>Saldo Atual</th><th>Saldo Após Transferência</th>
+        </tr>
+        <tr>
+          <td>{{ item.IDItem }}</td><td>{{ item.NomeProduto }}</td>
+          <td>{{ item.FamiliaID or '-' }}</td><td>{{ item.ReferenciaExterna }}</td>
+          <td id="origem_atual">0</td><td id="origem_transferido">0</td>
+        </tr>
+      </table>
+    </div>
+    <div class="col-md-6">
+      <h4>Detalhes Estoque de Destino</h4>
+      <table class="table table-bordered">
+        <tr>
+          <th>ID Item</th><th>Nome Produto</th><th>FamiliaID</th>
+          <th>Referência Externa</th><th>Saldo Atual</th><th>Saldo Após Transferência</th>
+        </tr>
+        <tr>
+          <td>{{ item.IDItem }}</td><td>{{ item.NomeProduto }}</td>
+          <td>{{ item.FamiliaID or '-' }}</td><td>{{ item.ReferenciaExterna }}</td>
+          <td id="destino_atual">0</td><td id="destino_transferido">0</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">Confirmar</button>
+</form>
+
+{# Botão de voltar: se veio de um pedido, retorna ao editar_pedido; caso contrário, lista estoques #}
+<a href="{% if pedido is defined %}
+             {{ url_for('euro.editar_pedido', pedido_id=pedido.IDPedido) }}
+           {% else %}
+             {{ url_for('euro.ver_estoques', item_id=item.IDItem) }}
+           {% endif %}"
+   class="btn btn-secondary mt-3">
+  Voltar
+</a>
+
+  <script>
+    // Reconstrói em JS os grupos do servidor
+    const origemGroups = {
+      {% for nome, lista in origem_groups.items() %}
+      "{{ nome }}": [
+        {% for e in lista %}
+        {
+          IDEstoque: "{{ e.IDEstoque }}",
+          IDProprietario: "{{ e.IDProprietario }}",
+          CodPonto: "{{ e.CodPonto }}",
+          Logradouro: "{{ e.Logradouro }}",
+          Quantidade: {{ e.Saldo }},
+          NomeEstoque: "{{ e.NomeEstoque }}"
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+      ]{% if not loop.last %},{% endif %}
+      {% endfor %}
+    };
+    const destinoGroups = {
+      {% for nome, lista in destino_groups.items() %}
+      "{{ nome }}": [
+        {% for e in lista %}
+        {
+          IDEstoque: "{{ e.IDEstoque }}",
+          IDProprietario: "{{ e.IDProprietario }}",
+          CodPonto: "{{ e.CodPonto }}",
+          Logradouro: "{{ e.Logradouro }}",
+          Quantidade: {{ e.Saldo }},
+          NomeEstoque: "{{ e.NomeEstoque }}"
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+      ]{% if not loop.last %},{% endif %}
+      {% endfor %}
+    };
+
+    {% if item.ControlaLote %}
+    // ————————————————— Lotes —————————————————
+    const lotesData = {
+      {% for est_id, lotes in lotes_data.items() %}
+      "{{ est_id }}": [
+        {% for l in lotes %}
+        {
+          NumeroLote: "{{ l.NumeroLote }}",
+          Quantidade: {{ l.Quantidade }},
+          NomeProduto: "{{ l.NomeProduto|default('')|e }}"
+        }{% if not loop.last %},{% endif %}
+        {% endfor %}
+      ]{% if not loop.last %},{% endif %}
+      {% endfor %}
+    };
+    {% if pedido is defined %}
+    const pedidoLotes = [
+      {% for l in pedido_lotes_data %}
+      {
+        NumeroLote: "{{ l.NumeroLote }}",
+        Quantidade: {{ l.Quantidade }},
+        NomeProduto: "{{ l.NomeProduto|e }}"
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ];
+    {% endif %}
+
+    function populaLotes() {
+      const selProp = document.getElementById('proprietario_origem');
+      // o value é "IDEstoque|IDProprietario|CodPonto"
+      const ide = selProp.value.split('|')[0];
+      const idEstoque = parseInt(ide, 10);
+
+      // limpa tabela e select
+      document.getElementById('tbody_lotes_origem').innerHTML = '';
+      const selLote = document.getElementById('numero_lote_escolhido');
+      if (selLote) {
+        selLote.innerHTML = '<option value="" disabled selected>— escolha um lote —</option>';
+      }
+
+      // pega todos os lotes desse estoque
+      let raw = lotesData[idEstoque] || [];
+      {% if pedido is defined %}
+      if (idEstoque == {{ pedido.IDPedido }}) {
+        raw = pedidoLotes;
+      }
+      {% endif %}
+
+      // filtra apenas LOTES ÚNICOS (pelo NumeroLote)
+      const seen = new Set();
+      const data = raw.filter(l => {
+        if (seen.has(l.NumeroLote)) return false;
+        seen.add(l.NumeroLote);
+        return true;
+      });
+
+      // preenche tabela e select com esses únicos
+      data.forEach(l => {
+        // popula linha da tabela
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${l.NumeroLote}</td><td>${l.Quantidade}</td><td>${l.NomeProduto || ''}</td>`;
+        document.getElementById('tbody_lotes_origem').appendChild(tr);
+
+        // popula o dropdown de lote
+        if (selLote) {
+          selLote.insertAdjacentHTML('beforeend',
+            `<option value="${l.NumeroLote}">${l.NumeroLote} (Qtd: ${l.Quantidade})</option>`
+          );
+        }
+      });
+    }
+    {% endif %}
+
+    {% if item.ControlaNumerodeSerie and pedido is not defined %}
+    // ———————————————— Séries ————————————————
+    let fetchedSeries = [];
+    const serieSection   = document.getElementById('serie_section');
+    const serieContainer = document.getElementById('serie_container');
+    const addSerieBtn    = document.getElementById('add_serie_btn');
+
+    function hideSeries() {
+      serieSection.style.display = 'none';
+      serieContainer.innerHTML = '';
+    }
+
+    function adicionaSerieSelect(arr) {
+      const wrap = document.createElement('div');
+      wrap.className = 'd-flex align-items-center mb-2';
+      const sel = document.createElement('select');
+      sel.name = 'numero_serie_escolhido[]';
+      sel.className = 'form-select form-select-sm me-2';
+      sel.innerHTML = '<option value="">— selecione a série —</option>';
+      arr.forEach(s => sel.insertAdjacentHTML('beforeend',
+        `<option value="${s}">${s}</option>`
+      ));
+      wrap.appendChild(sel);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-sm btn-outline-danger';
+      btn.textContent = '×';
+      btn.onclick = () => wrap.remove();
+      wrap.appendChild(btn);
+      serieContainer.appendChild(wrap);
+    }
+    {% endif %}
+
+    function atualizarProprietario(tipo) {
+      const selEst  = document.getElementById(`estoque_${tipo}`);
+      const selProp = document.getElementById(`proprietario_${tipo}`);
+      const groups  = tipo === "origem" ? origemGroups : destinoGroups;
+      const nome    = selEst.value;
+      selProp.innerHTML = "";
+
+      if (groups[nome]) {
+        const seen = {};
+        groups[nome].forEach(item => {
+          if (!item.IDEstoque && !item.IDProprietario) return;
+          const key = `${item.IDEstoque || ''}|${item.IDProprietario || ''}|${item.CodPonto || ''}`;
+          if (!seen[key]) {
+            seen[key] = true;
+            const opt = document.createElement('option');
+            opt.value = key;
+            opt.textContent = `${item.NomeEstoque} | IDEstoque=${item.IDEstoque || '-'} | ${item.IDProprietario || '-'} | ${item.CodPonto || '-'} | ${item.Logradouro || '-'}`;
+            selProp.appendChild(opt);
+          }
+        });
+      }
+
+      {% if item.ControlaLote %}
+      if (tipo === 'origem') {
+        populaLotes();
+      }
+      {% endif %}
+
+      atualizarCalculos();
+    }
+
+    function atualizarCalculos() {
+      const nomeO = document.getElementById('estoque_origem').value;
+      const nomeD = document.getElementById('estoque_destino').value;
+      const qtd   = parseInt(document.getElementById('quantidade').value) || 0;
+      const oObj  = origemGroups[nomeO]?.[0]   || { Quantidade: 0 };
+      const dObj  = destinoGroups[nomeD]?.[0] || { Quantidade: 0 };
+      let oRest = oObj.Quantidade - qtd;
+      if (oRest < 0) oRest = 0;
+      const dRest = dObj.Quantidade + qtd;
+
+      document.getElementById('origem_restante').textContent     = oRest;
+      document.getElementById('destino_restante').textContent    = dRest;
+      document.getElementById('origem_atual').textContent        = oObj.Quantidade;
+      document.getElementById('origem_transferido').textContent  = oRest;
+      document.getElementById('destino_atual').textContent       = dObj.Quantidade;
+      document.getElementById('destino_transferido').textContent = dRest;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      // bind nos selects de estoque
+      document.getElementById('estoque_origem')
+              .addEventListener('change', () => atualizarProprietario('origem'));
+      document.getElementById('estoque_destino')
+              .addEventListener('change', () => atualizarProprietario('destino'));
+
+      // bind no select de Proprietário de Origem para repopular lotes
+      {% if item.ControlaLote %}
+      document.getElementById('proprietario_origem')
+              .addEventListener('change', populaLotes);
+      {% endif %}
+
+      // inicialização
+      atualizarProprietario('origem');
+      {% if item.ControlaLote %}
+      populaLotes();
+      {% endif %}
+      atualizarProprietario('destino');
+      atualizarCalculos();
+
+      {% if item.ControlaNumerodeSerie and pedido is not defined %}
+      // listener para mudança de lote e carregamento de séries
+      const loteSelect = document.getElementById('numero_lote_escolhido');
+      if (loteSelect) {
+        loteSelect.addEventListener('change', function() {
+          const lote = this.value;
+          if (!lote) {
+            hideSeries();
+            return;
+          }
+          const tipoEstoque = document
+            .getElementById('estoque_origem')
+            .selectedOptions[0]
+            .dataset.tipo;
+
+          fetch(`/admin/shempo/v1/api/series?item={{ item.IDItem }}&lote=${encodeURIComponent(lote)}&tipo=${tipoEstoque}`)
+            .then(r => r.json())
+            .then(json => {
+              const arr = json.series || [];
+              fetchedSeries = arr;
+              serieContainer.innerHTML = '';
+              if (!arr.length) {
+                hideSeries();
+                return;
+              }
+              serieSection.style.display = 'block';
+              adicionaSerieSelect(arr);
+            })
+            .catch(() => hideSeries());
+        });
+      }
+
+      // botão + Selecionar mais
+      addSerieBtn.addEventListener('click', () => {
+        const chosen = Array.from(serieContainer.querySelectorAll('select'))
+                            .map(s => s.value)
+                            .filter(v => v);
+        const remain = fetchedSeries.filter(s => !chosen.includes(s));
+        if (remain.length) adicionaSerieSelect(remain);
+      });
+      {% endif %}
+    });
+  </script>
+{% endblock content %}

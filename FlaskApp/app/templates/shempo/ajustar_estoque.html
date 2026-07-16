@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+{% block title %}Equalizar Estoque{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-3">
+  <h2 class="mb-3">Equalizar Estoque via Arquivo</h2>
+
+  {% if not ajustes %}
+  <form method="POST" enctype="multipart/form-data" action="{{ url_for('euro.ajustar_estoque') }}" class="border p-3 rounded bg-light">
+    <div class="mb-3">
+      <label for="file" class="form-label">Selecione o arquivo (CSV ou XLSX):</label>
+      <input class="form-control" type="file" id="file" name="file" accept=".csv,.xlsx" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Carregar Arquivo</button>
+  </form>
+  {% else %}
+  <h5 class="mb-3 text-success">Pré-visualização dos ajustes:</h5>
+  <form method="POST" action="{{ url_for('euro.ajustar_estoque') }}">
+    <input type="hidden" name="confirmar" value="1">
+    <div class="table-responsive">
+      <table class="table table-bordered table-striped align-middle">
+        <thead class="table-dark">
+          <tr>
+            <th>IDItem</th>
+            <th>Produto</th>
+            <th>Tipo Estoque</th>
+            <th>Ação</th>
+            <th>Lote</th>
+            <th>Série</th>
+            <th>Quantidade</th>
+            <th>CodPonto</th>
+            <th>Logradouro</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in ajustes %}
+          <tr class="{% if not item.ProdutoExiste %}table-danger{% endif %}">
+            <td>{{ item.IDItem }}</td>
+            <td>{{ item.NomeProduto or '---' }}</td>
+            <td>{{ item.IDTipoEstoque }}</td>
+            <td>{{ item.Acao }}</td>
+            <td>{{ item.NumeroLote or '---' }}</td>
+            <td>{{ item.NumeroSerie or '---' }}</td>
+            <td>{{ item.Quantidade }}</td>
+            <td>{{ item.CodPonto or '---' }}</td>
+            <td>{{ item.Logradouro or '---' }}</td>
+          </tr>
+          <input type="hidden" name="ajustes[]" value="{{ item|tojson }}">
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="d-flex justify-content-end mt-3">
+      <a href="{{ url_for('euro.ajustar_estoque') }}" class="btn btn-secondary me-2">Cancelar</a>
+      <button type="submit" class="btn btn-success">Confirmar Ajustes</button>
+    </div>
+  </form>
+  {% endif %}
+
+  <hr>
+  <h5>Estrutura esperada do arquivo:</h5>
+  <pre class="bg-white p-2 border rounded">
+IDItem,IDTipoEstoque,Acao,NumeroLote,NumeroSerie,Quantidade,CodPonto
+49,1,A,LOTE001,SER001,2,
+50,8,R,LOTE123,,5,PTO01
+...</pre>
+</div>
+{% endblock %}

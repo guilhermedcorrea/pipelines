@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Montar Diagramas{% endblock %}
+
+{% block content %}
+<h1>Montar Diagramas</h1>
+<form method="POST">
+  <table class="table table-bordered" id="diagramTable">
+    <thead>
+      <tr>
+        <th>ID Item A</th><th>Nome A</th>
+        <th>ID Item B</th><th>Nome B</th>
+        <th>Posição</th>
+        <th>ID Item Master</th><th>Nome Master</th>
+        <th>PmvID</th><th>Ações</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- renomeei o id do botão para não colidir com a função -->
+  <button type="button" id="btnAddRow" class="btn btn-secondary mb-2">
+    Adicionar Linha
+  </button>
+  <button type="submit" class="btn btn-primary mb-2">
+    Salvar Diagramas
+  </button>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// renomeei a função para evitar conflito com o id do botão
+function addDiagramRow(){
+  const tbody = document.querySelector('#diagramTable tbody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>
+      <input name="id_item_a[]" class="form-control" type="number"
+             onblur="fetchName(this,'nome_a[]')">
+    </td>
+    <td>
+      <input name="nome_a[]" class="form-control" type="text" readonly>
+    </td>
+    <td>
+      <input name="id_item_b[]" class="form-control" type="number"
+             onblur="fetchName(this,'nome_b[]')">
+    </td>
+    <td>
+      <input name="nome_b[]" class="form-control" type="text" readonly>
+    </td>
+    <td>
+      <input name="posicao[]" class="form-control" type="text">
+    </td>
+    <td>
+      <input name="id_item_master[]" class="form-control" type="number"
+             onblur="fetchName(this,'nome_master[]')">
+    </td>
+    <td>
+      <input name="nome_master[]" class="form-control" type="text" readonly>
+    </td>
+    <td>
+      <input name="pmv_id[]" class="form-control" type="number">
+    </td>
+    <td style="white-space: nowrap;">
+      <!-- esse + agora chama a função renomeada -->
+      <button type="button" class="btn btn-success btn-sm"
+              title="Adicionar nova linha"
+              onclick="addDiagramRow()">
+        <i class="bi bi-plus-lg"></i>
+      </button>
+      <button type="button" class="btn btn-danger btn-sm"
+              title="Remover esta linha"
+              onclick="this.closest('tr').remove()">
+        <i class="bi bi-trash"></i>
+      </button>
+    </td>
+  `;
+  tbody.appendChild(tr);
+}
+
+// busca o nome do produto via endpoint e preenche o campo correspondente
+function fetchName(elem, targetNameField){
+  const id = elem.value;
+  const row = elem.closest('tr');
+  if (!id) return;
+  fetch(`/get_nome_produto/${id}`)
+    .then(resp => resp.json())
+    .then(data => {
+      row.querySelector(`input[name="${targetNameField}"]`).value = data.nome || '';
+    })
+    .catch(() => {
+      row.querySelector(`input[name="${targetNameField}"]`).value = '';
+    });
+}
+
+// ao carregar, vincula o botão e cria a primeira linha
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('btnAddRow').addEventListener('click', addDiagramRow);
+  addDiagramRow();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,981 @@
+{# templates/contrato_omie_detalhes.html #}
+{% extends 'base.html' %}
+{% block title %}Contrato Omie Detalhes{% endblock %}
+
+{% block content %}
+  <style>
+    .badge {
+      font-size: 1.2rem !important;
+      padding: 0.75rem 1.25rem !important;
+    }
+
+  #ordens-table .missing-cell {
+  position: sticky;
+  left: 0;
+  z-index: 2;               /* acima das outras células */
+  background-color: #f8f9fa; /* mesma cor de fundo da linha */
+}
+#ordens-table .missing-cell,
+#lancamentos-table .missing-cell {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background-color: #f8f9fa;
+  white-space: normal;
+  padding-left: .5rem;
+}
+
+  </style>
+<div class="container-fluid p-3">
+
+
+
+  <h2 class="mb-4">Detalhes do Contrato Omie</h2>
+
+<div class="card mb-4">
+  <div class="card-body d-flex justify-content-between align-items-center">
+    <!-- Título à esquerda -->
+    <h5 class="card-title mb-0">Contrato: {{ contrato.ReferenciaContratoOmie }}</h5>
+
+    <!-- À direita, badges e botão empilhados -->
+    <div class="d-flex flex-column align-items-end">
+      {# 1) Badge “situação” em cima #}
+      {% if ultima_medicao %}
+        {% set op = ultima_medicao.IDOperacao %}
+        {% set nome = ultima_medicao.NomeOperacao %}
+        {% if op == 1012 %}
+          {% set badge_class = 'bg-success' %}{% set icon = '✅' %}
+        {% elif op == 1011 %}
+          {% set badge_class = 'bg-primary text-white' %}{% set icon = '🔵' %}
+        {% elif op == 1010 %}
+          {% set badge_class = 'bg-info text-dark' %}{% set icon = '✔️' %}
+        {% elif op == 1009 %}
+          {% set badge_class = 'bg-secondary text-white' %}{% set icon = '🕓' %}
+        {% elif op == 1008 %}
+          {% set badge_class = 'bg-warning text-dark' %}{% set icon = '✉️' %}
+        {% elif op == 1007 %}
+          {% set badge_class = 'bg-dark text-white' %}{% set icon = '🟤' %}
+        {% elif op == 1006 %}
+          {% set badge_class = 'bg-danger' %}{% set icon = '🔴' %}
+        {% elif op == 1005 %}
+          {% set badge_class = 'bg-light text-dark' %}{% set icon = '❌' %}
+        {% else %}
+          {% set badge_class = 'bg-light text-dark' %}{% set icon = '⚪️' %}
+        {% endif %}
+        <span class="badge {{ badge_class }}" style="font-size:1.1rem; padding:0.5rem 1rem;">
+          {{ icon }} {{ nome }}
+        </span>
+      {% endif %}
+
+      {# 2) Badge “Atrasado” logo abaixo #}
+      {% if ultima_medicao and atrasados.get(ultima_medicao.NumeroMedicao) %}
+        <span class="badge bg-danger mt-2" style="font-size:1.1rem; padding:0.5rem 1rem;">
+          🔴 Atrasado
+        </span>
+      {% endif %}
+
+      {# 3) Botão Exportar Contrato #}
+      <a href="{{ url_for('euro.exportar_contrato', id=contrato.IDContrato) }}"
+         class="btn btn-success mt-3">
+        <i class="bi bi-file-earmark-excel"></i> Exportar Contrato
+      </a>
+    </div>
+  </div>
+</div>
+
+
+      <p class="mb-1"><strong>IDContratoOmie:</strong> {{ contrato.IDContratoOmie }}</p>
+      <p class="mb-1"><strong>CódigoContratoOmie:</strong> {{ contrato.CodigoContratoOmie }}</p>
+      <p class="mb-1"><strong>ReferenciaContratoOmie:</strong> {{ contrato.ReferenciaContratoOmie }}</p>
+      <p class="mb-1"><strong>IDProjeto:</strong> {{ contrato.IDProjeto }}</p>
+      <p class="mb-1"><strong>IDContrato:</strong> {{ contrato.IDContrato }}</p>
+      <p class="mb-1"><strong>IDEmpresaOmie:</strong> {{ contrato.IDEmpresaOmie }}</p>
+      <p class="mb-1"><strong>BitAtivo:</strong> {{ contrato.BitAtivo }}</p>
+      <p class="mb-1"><strong>VigenciaInicial:</strong> {{ contrato.VigenciaInicial.strftime('%d/%m/%Y') }}</p>
+      <p class="mb-1"><strong>VigenciaFinal:</strong> {{ contrato.VigenciaFinal.strftime('%d/%m/%Y') }}</p>
+      <p class="mb-1"><strong>DiaFaturamento:</strong> {{ contrato.DiaFaturamento }}</p>
+
+
+        {# ─── NOVOS CAMPOS (Contratos) ─── #}
+        <p class="mb-1"><strong>Dias&nbsp;Até&nbsp;Conclusão:</strong>
+          {{ contrato.DiasAteConclusao }}
+        </p>
+
+        {# Início Medição #}
+        {% set im = contrato.InicioMedicao %}
+        <p class="mb-1"><strong>Início&nbsp;Medição:</strong>
+          {% if im %}
+            {% if im.__class__.__name__ in ['datetime', 'date'] %}
+              {{ im.strftime('%d/%m/%Y') }}
+            {% else %}
+              {{ im }}
+            {% endif %}
+          {% endif %}
+        </p>
+
+        {# Final Medição #}
+        {% set fm = contrato.FinalMedicao %}
+        <p class="mb-1"><strong>Final&nbsp;Medição:</strong>
+          {% if fm %}
+            {% if fm.__class__.__name__ in ['datetime', 'date'] %}
+              {{ fm.strftime('%d/%m/%Y') }}
+            {% else %}
+              {{ fm }}
+            {% endif %}
+          {% endif %}
+        </p>
+
+        <p class="mb-1"><strong>Parcelas:</strong> {{ contrato.Parcelas }}</p>
+        <p class="mb-1"><strong>Parcela&nbsp;Atual:</strong> {{ contrato.ParcelaAtual }}</p>
+        <p class="mb-1"><strong>Mês/Ano&nbsp;Parcela:</strong> {{ contrato.MesAnoParcela }}</p>
+
+
+
+      <p class="mb-1"><strong>ValorMensal:</strong>
+         R$ {{ "{:,.2f}".format(contrato.ValorMensal).replace(',', 'X').replace('.', ',').replace('X', '.') }}
+      </p>
+      <p class="mb-1"><strong>ValorTotal:</strong>
+         R$ {{ "{:,.2f}".format(contrato.ValorTotal).replace(',', 'X').replace('.', ',').replace('X', '.') }}
+      </p>
+      <hr class="my-3">
+      <h6 class="mb-2">Empresa</h6>
+      <p class="mb-1"><strong>NomeEmpresa:</strong> {{ contrato.NomeEmpresa }}</p>
+      <p class="mb-1"><strong>CNPJ:</strong> {{ contrato.CNPJ }}</p>
+      <p class="mb-1"><strong>CNAE:</strong> {{ contrato.CNAE }}</p>
+      <p class="mb-1"><strong>ENDERECO:</strong> {{ contrato.ENDERECO }}</p>
+      <p class="mb-1"><strong>BAIRRO:</strong> {{ contrato.BAIRRO }}</p>
+      <p class="mb-1"><strong>CEP:</strong> {{ contrato.CEP }}</p>
+      <p class="mb-1"><strong>Numero:</strong> {{ contrato.Numero }}</p>
+      <p class="mb-1"><strong>NaturezaJuridica:</strong> {{ contrato.NaturezaJuridica }}</p>
+      <p class="mb-0"><strong>DescricaoIdentificadorMatrizFilial:</strong>
+         {{ contrato.DescricaoIdentificadorMatrizFilial }}
+      </p>
+    </div>
+
+{# Após fechar o card da empresa (logo depois de </div></div>) cole isto #}
+{% if pagamentos_em_atraso %}
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">Pagamentos em Atraso</h5>
+      <div class="table-responsive">
+        <table class="table table-bordered align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+        
+              <th>Número Medição</th>
+              <th>Data Início</th>
+              <th>Data Final</th>
+              <th>Dia Faturamento</th>
+              <th>Dias Em Atraso</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in pagamentos_em_atraso %}
+              <tr>
+                <td>{{ p.NumeroMedicao }}</td>
+                <td>{{ p.DataInicioPeriodoMedicao.strftime('%d/%m/%Y') }}</td>
+                <td>{{ p.DataFinalPeriodoMedicao.strftime('%d/%m/%Y') }}</td>
+                <td>{{ p.DiaFaturamento }}</td>
+                <td>{{ p.DiasEmAtraso }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+<form method="post"
+      action="{{ url_for('euro.atualizar_situacao', contrato_id=contrato.IDContrato) }}">
+  <label for="situacaoSelect"><strong>Situação:</strong></label>
+  <select name="situacao" id="situacaoSelect"
+          class="form-select w-auto d-inline-block ms-2"
+          onchange="if(this.value){ this.form.submit(); }">
+    {% for op in situacoes if op.IDOperacao in [1004,1005,1006,1007,1008,1009,1010,1011,1012,1013,1014] %}
+      <option value="{{ op.IDOperacao }}"
+              {% if ultima_medicao and op.IDOperacao == ultima_medicao.IDOperacao %}selected{% endif %}>
+        {{ op.NomeOperacao }}
+      </option>
+    {% endfor %}
+  </select>
+</form>
+
+
+
+  </div>
+
+
+
+  
+
+<ul class="nav nav-tabs mb-3" id="abasContrato" role="tablist">
+  <li class="nav-item">
+    <button class="nav-link active" id="ativos-tab" data-bs-toggle="tab"
+            data-bs-target="#ativos" type="button">
+      <i class="bi bi-hdd-stack"></i> Ativos
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" id="medicoes-tab" data-bs-toggle="tab"
+            data-bs-target="#medicoes" type="button">
+      <i class="bi bi-bar-chart-line"></i> Medições
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" id="ordens-tab" data-bs-toggle="tab"
+            data-bs-target="#ordens" type="button">
+      <i class="bi bi-file-earmark-text"></i> Ordens
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" id="lancamentos-tab" data-bs-toggle="tab"
+            data-bs-target="#lancamentos" type="button">
+      <i class="bi bi-cash-stack"></i> Lançamentos
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" id="notas-tab" data-bs-toggle="tab"
+            data-bs-target="#notas" type="button">
+      <i class="bi bi-receipt-cutoff"></i> Notas Fiscais
+    </button>
+  </li>
+
+  <!-- ← AQUI, antes do fechamento da UL, cole ESTE bloco: -->
+  <li class="nav-item">
+    <button class="nav-link" id="lancfut-tab" data-bs-toggle="tab"
+            data-bs-target="#lancamentos-futuros" type="button">
+      <i class="bi bi-calendar-event"></i> Lançamentos Futuros
+    </button>
+  </li>
+</ul>
+
+
+
+  <div class="tab-content" id="abasContratoContent">
+
+
+
+
+<div class="tab-pane fade show active" id="ativos">
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle" id="ativos-table">
+      <thead>
+        <tr>
+          <th style="width: 50px; text-align:center;">Add Ativo</th>
+          <th>IDAtivo</th>
+          <th>NomeAtivo</th>
+          <th>PlacaAtual</th>
+          <th>EnderecoAtivo</th>
+          <th>CEP</th>
+          <th>Cidade</th>
+          <th>UF</th>
+          <th>AuvoID</th>
+          <th>IDPedidoAtivo</th>
+          <th>IDAtivoAuvo</th>
+          <th>IDContrato</th>
+          <th>EmpresaNome</th>
+          <th>ProjetoNome</th>
+        </tr>
+      </thead>
+
+      <tbody id="ativos-body">
+        {% for a in ativos %}
+          <tr class="ativo-row" data-id="{{ a.IDAtivo }}">
+            <td class="text-center align-middle">
+              <i class="bi bi-plus-circle-fill text-primary add-ativo"
+                 style="cursor:pointer; font-size:1.4rem;"></i>
+            </td>
+            <td class="align-middle">{{ a.IDAtivo }}</td>
+            <td class="align-middle">{{ a.NomeAtivo }}</td>
+            <td class="align-middle">{{ a.PlacaAtual }}</td>
+            <td class="align-middle">{{ a.EnderecoAtivo }}</td>
+            <td class="align-middle">{{ a.CEP }}</td>
+            <td class="align-middle">{{ a.Cidade }}</td>
+            <td class="align-middle">{{ a.UF }}</td>
+            <td class="align-middle">{{ a.AuvoID }}</td>
+            <td class="align-middle">{{ a.IDPedidoAtivo }}</td>
+            <td class="align-middle">{{ a.IDAtivoAuvo }}</td>
+            <td class="align-middle">{{ a.IDContrato }}</td>
+            <td class="align-middle">{{ a.EmpresaNome }}</td>
+            <td class="align-middle">{{ a.ProjetoNome }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
+
+
+
+
+
+
+
+<div class="tab-pane fade" id="medicoes">
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle" id="medicoes-table">
+      <thead>
+        <tr>
+          <th>IDMedicao</th><th>IDContrato</th><th>Aditivo</th><th>SubNumeroMedicao</th>
+          <th>IDProjeto</th><th>NomeProjeto</th><th>EmpresaID</th><th>NomeEmpresa</th>
+          <th>IDEmpresaVendedora</th><th>NomeEmpresaVendedora</th><th>IDAtivo</th>
+          <th>PlacaEquipamento</th><th>DataInicioPeriodoMedicao</th><th>DataFinalPeriodoMedicao</th>
+          <th>DataMobilizacao</th><th>PeriodoProporcional</th><th>ValorUnitario</th>
+          <th>AcrescimosDescontos</th><th>Subtotal</th><th>ValorTotal</th><th>DataEmissao</th>
+          <th>NumeroDiasReferencia</th><th>NumeroDiasMedidos</th><th>NumeroDiasMedicao</th>
+          <th>AuvoID</th><th>GroupID</th><th>NomeAtivoMed</th><th>NumeroMedicao</th>
+          <th>IDTemplate</th><th>Situação</th><th>Espelho&nbsp;Medição</th>
+          <th>ReferenciaCobranca</th><th>IDUsuario</th><th>IDItem</th>
+          <th>IDordemOmie</th><th>ReferenciaContratoOmie</th><th>Emitir&nbsp;NF</th><th>OsOmie</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in medicoes %}
+          {# ------------------------------------------------------------------
+             Cada linha recebe:
+               • class="med-row"  → usada no JS para capturar o duplo-clique
+               • data-num="…"     → Número da medição que será passado à rota
+          ------------------------------------------------------------------ #}
+          <tr class="med-row" data-num="{{ m.NumeroMedicao }}">
+            <td>{{ m.IDMedicao }}</td>
+            <td>{{ m.IDContrato }}</td>
+            <td>{{ m.Aditivo }}</td>
+            <td>{{ m.SubNumeroMedicao }}</td>
+            <td>{{ m.IDProjeto }}</td>
+            <td>{{ m.NomeProjeto }}</td>
+            <td>{{ m.EmpresaID }}</td>
+            <td>{{ m.NomeEmpresa }}</td>
+            <td>{{ m.IDEmpresaVendedora }}</td>
+            <td>{{ m.NomeEmpresaVendedora }}</td>
+            <td>{{ m.IDAtivo }}</td>
+            <td>{{ m.PlacaEquipamento }}</td>
+
+            <td>
+              {{ m.DataInicioPeriodoMedicao.strftime('%d/%m/%Y')
+                 if m.DataInicioPeriodoMedicao else '' }}
+            </td>
+            <td>
+              {{ m.DataFinalPeriodoMedicao.strftime('%d/%m/%Y')
+                 if m.DataFinalPeriodoMedicao else '' }}
+            </td>
+            <td>
+              {{ m.DataMobilizacao.strftime('%d/%m/%Y')
+                 if m.DataMobilizacao else '' }}
+            </td>
+
+            <td>{{ m.PeriodoProporcional }}</td>
+
+            <td>
+              {% if m.ValorUnitario is not none %}
+                R$ {{ "{:,.2f}".format(m.ValorUnitario) }}
+              {% endif %}
+            </td>
+            <td>
+              {% if m.AcrescimosDescontos is not none %}
+                R$ {{ "{:,.2f}".format(m.AcrescimosDescontos) }}
+              {% endif %}
+            </td>
+            <td>
+              {% if m.Subtotal is not none %}
+                R$ {{ "{:,.2f}".format(m.Subtotal) }}
+              {% endif %}
+            </td>
+            <td>
+              {% if m.ValorTotal is not none %}
+                R$ {{ "{:,.2f}".format(m.ValorTotal) }}
+              {% endif %}
+            </td>
+
+            <td>
+              {{ m.DataEmissao.strftime('%d/%m/%Y') if m.DataEmissao else '' }}
+            </td>
+            <td>{{ m.NumeroDiasReferencia }}</td>
+            <td>{{ m.NumeroDiasMedidos }}</td>
+            <td>{{ m.NumeroDiasMedicao }}</td>
+            <td>{{ m.AuvoID }}</td>
+            <td>{{ m.GroupID }}</td>
+            <td>{{ m.NomeAtivoMed }}</td>
+            <td>{{ m.NumeroMedicao }}</td>
+            <td>{{ m.IDTemplate }}</td>
+
+            <td>
+              {% set s = m.NomeOperacao %}
+              {% if s == 'Recebido' %}
+                <span class="badge bg-success">✅ {{ s }}</span>
+              {% elif s == 'Faturado' %}
+                <span class="badge bg-primary text-white">🔵 {{ s }}</span>
+              {% elif s == 'Aprovado' %}
+                <span class="badge bg-info text-dark">✔️ {{ s }}</span>
+              {% elif s == 'Aguardando Aprovação' %}
+                <span class="badge bg-secondary text-white">🕓 {{ s }}</span>
+              {% elif s == 'Enviado' %}
+                <span class="badge bg-warning text-dark">✉️ {{ s }}</span>
+              {% elif s == 'Emitida' %}
+                <span class="badge bg-dark text-white">🟤 {{ s }}</span>
+              {% elif s == 'A Emitir' %}
+                <span class="badge bg-danger">🔴 {{ s }}</span>
+              {% elif s == 'Cancelada' %}
+                <span class="badge bg-light text-dark">❌ {{ s }}</span>
+              {% else %}
+                <span class="badge bg-light text-dark">⚪️ {{ s or 'Sem Info' }}</span>
+              {% endif %}
+            </td>
+
+            <td>
+              <a
+                href="{{ url_for('euro.espelho_medicao',
+                                contrato_id=contrato.IDContrato,
+                                numero_medicao=m.NumeroMedicao) }}"
+                class="badge bg-info text-dark"
+                style="font-size:1rem; padding:0.5rem 1rem;">
+                Espelho Medição
+              </a>
+            </td>
+
+            <td>{{ m.ReferenciaCobranca }}</td>
+            <td>{{ m.IDUsuario }}</td>
+            <td>{{ m.IDItem }}</td>
+            <td>{{ m.IDordemOmie }}</td>
+            <td>{{ m.ReferenciaContratoOmie }}</td>
+            <td>{{ m.BitEmitirNF }}</td>
+            <td>{{ m.OsOmie }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <!-- Paginação: 10 medições por página -->
+    <nav class="d-flex justify-content-center my-3">
+      <ul id="medicoes-pagination" class="pagination mb-0"></ul>
+    </nav>
+
+  </div>
+</div>
+
+
+
+
+
+
+
+
+  
+    <!-- ========================== ORDENS ========================= -->
+<div class="tab-pane fade" id="ordens">
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle" id="ordens-table">
+      <thead>
+        <tr>
+          <th>IDOs</th><th>CodigoClienteOmie</th><th>CodigoInternoOS</th><th>Etapa</th>
+          <th>dataPRevisao</th><th>CodigoInternoOsOmie</th><th>NumeroOsOmie</th>
+          <th>Parcela</th><th>ValorTotal</th><th>DadosAdicionais</th>
+          <th>NumeroPedido</th><th>BitFaturada</th><th>BitCancelada</th><th>Origem</th>
+          <th>DataVencimento</th><th>Percentual</th><th>ValorParcela</th>
+          <th>BitValorIntegral</th><th>Quantidade</th><th>SequenciaItem</th>
+          <th>Placa</th><th>ObservacoesServico</th><th>CodigoCategoriaServico</th>
+          <th>DataCriado</th><th>IDContrato</th><th>EmpresaID</th>
+          <th>IDOperacao</th><th>IDTipoOperacao</th><th>NumeroRecibo</th><th>NumeroMedicao</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in ordens %}
+          {% if o.missing %}
+            <tr>
+              <td colspan="35"
+                  class="missing-cell text-start text-muted"> 
+                Ordem de Serviços ainda não criada para a Medição {{ o.NumeroMedicao }}
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td>{{ o.IDOs }}</td>
+              <td>{{ o.CodigoClienteOmie }}</td>
+              <td>{{ o.CodigoInternoOS }}</td>
+              <td>{{ o.Etapa }}</td>
+              <td>{{ o.dataPRevisao.strftime('%d/%m/%Y') if o.dataPRevisao else '' }}</td>
+              <td>{{ o.CodigoInternoOsOmie }}</td>
+              <td>{{ o.NumeroOsOmie }}</td>
+              <td>{{ o.Parcela }}</td>
+              <td>{% if o.ValorTotal is not none %}R$ {{ "{:,.2f}".format(o.ValorTotal) }}{% endif %}</td>
+              <td>
+                {{ o.DadosAdicionais
+                  .replace('\r\n','<br/>')
+                  .replace('\n','<br/>') 
+                  | safe
+                }}
+              </td>
+
+              <td>{{ o.NumeroPedido }}</td>
+              <td>{{ o.BitFaturada }}</td>
+              <td>{{ o.BitCancelada }}</td>
+              <td>{{ o.Origem }}</td>
+              <td>{{ o.DataVencimento.strftime('%d/%m/%Y') if o.DataVencimento else '' }}</td>
+              <td>{{ o.Percentual }}</td>
+              <td>{% if o.ValorParcela is not none %}R$ {{ "{:,.2f}".format(o.ValorParcela) }}{% endif %}</td>
+              <td>{{ o.BitValorIntegral }}</td>
+              <td>{{ o.Quantidade }}</td>
+              <td>{{ o.SequenciaItem }}</td>
+              <td>{{ o.Placa }}</td>
+              <td>{{ o.ObservacoesServico }}</td>
+              <td>{{ o.CodigoCategoriaServico }}</td>
+              <td>{{ o.DataCriado.strftime('%d/%m/%Y') if o.DataCriado else '' }}</td>
+              <td>{{ o.IDContrato }}</td>
+              <td>{{ o.EmpresaID }}</td>
+              <td>{{ o.IDOperacao }}</td>
+              <td>{{ o.IDTipoOperacao }}</td>
+              <td>{{ o.NumeroRecibo }}</td>
+              <td>{{ o.NumeroMedicao }}</td>
+            </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+
+    
+    <nav class="d-flex justify-content-center my-3">
+      <ul id="ordens-pagination" class="pagination mb-0"></ul>
+    </nav>
+
+  </div>
+</div>
+
+
+
+
+
+
+
+
+
+<!-- ========================= LANÇAMENTOS ========================= -->
+<div class="tab-pane fade" id="lancamentos">
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle" id="lancamentos-table">
+      <thead>
+        <tr>
+          <th>IDLancamentoOmie</th><th>NumeroMedicao</th><th>EmpresaID</th><th>IDContrato</th>
+          <th>IDProjeto</th><th>CodigoCategoria</th><th>CodigoClienteOmie</th><th>TipoDocumento</th>
+          <th>DataEmissao</th><th>DataRegistro</th><th>DataVencimento</th><th>IDContaCorrente</th>
+          <th>CodigoOsOmie</th><th>NumeroDocumento</th><th>NumeroPedido</th><th>NumeroParcela</th>
+          <th>Operacao</th><th>Status</th><th>Valor</th><th>CodigoLancamentoOmie</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {% for l in lancamentos %}
+          {% if l.missing %}
+            {# ——— PLACEHOLDER (não há lançamento) ——— #}
+            <tr>
+              <td colspan="20" class="missing-cell text-start text-muted">
+                Lançamento ainda não criado para a Medição {{ l.NumeroMedicao }}
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td>{{ l.IDLancamentoOmie }}</td>
+              <td>{{ l.NumeroMedicao }}</td>
+              <td>{{ l.EmpresaID }}</td>
+              <td>{{ l.IDContrato }}</td>
+              <td>{{ l.IDProjeto }}</td>
+              <td>{{ l.CodigoCategoria }}</td>
+              <td>{{ l.CodigoClienteOmie }}</td>
+              <td>{{ l.TipoDocumento }}</td>
+              <td>{{ l.DataEmissao.strftime('%d/%m/%Y') if l.DataEmissao else '' }}</td>
+              <td>{{ l.DataRegistro.strftime('%d/%m/%Y') if l.DataRegistro else '' }}</td>
+              <td>{{ l.DataVencimento.strftime('%d/%m/%Y') if l.DataVencimento else '' }}</td>
+              <td>{{ l.IDContaCorrente }}</td>
+              <td>{{ l.CodigoOsOmie }}</td>
+              <td>{{ l.NumeroDocumento }}</td>
+              <td>{{ l.NumeroPedido }}</td>
+              <td>{{ l.NumeroParcela }}</td>
+              <td>{{ l.Operacao }}</td>
+              <td>{{ l.Status }}</td>
+              <td>
+                {% if l.Valor is not none and l.Valor != '' %}
+                  R$ {{ "{:,.2f}".format(l.Valor) }}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td>{{ l.CodigoLancamentoOmie }}</td>
+            </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <!-- paginação -->
+    <nav class="d-flex justify-content-center my-3">
+      <ul id="lancamentos-pagination" class="pagination mb-0"></ul>
+    </nav>
+  </div>
+</div>
+
+
+
+
+
+
+    <!-- ========================== NOTAS ============================= -->
+    <div class="tab-pane fade" id="notas">
+      <p class="text-muted">🧾 Notas fiscais emitidas para este contrato.</p>
+    </div>
+
+
+
+ <div class="tab-pane fade" id="lancamentos-futuros" role="tabpanel"
+     aria-labelledby="lancfut-tab">
+
+  {# ---------- LISTA ---------- #}
+  <div id="lancfut-list" class="list-group">
+    {% for lp in medicoes_planejadas %}
+      <div class="list-group-item d-flex align-items-center"
+           data-idx="{{ loop.index0 }}">
+        <div>📅 Medição – {{ lp.data.strftime('%d/%m/%Y') }}</div>
+        <div class="ms-3">
+          {% if lp.status == 'Aguardando' %}
+            <span class="badge bg-secondary">{{ lp.icon }} Aguardando</span>
+          {% elif lp.status == 'Criada' %}
+            <span class="badge bg-success">{{ lp.icon }} Criada</span>
+          {% else %}
+            <span class="badge bg-danger">{{ lp.icon }} Não Criada</span>
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  {# ---------- CONTROLES DE PÁGINA ---------- #}
+  <nav class="d-flex justify-content-center my-3">
+    <ul id="lancfut-pagination" class="pagination mb-0"></ul>
+  </nav>
+
+  </div> <!-- /.tab-content -->
+</div> <!-- /.container-fluid -->
+{% endblock %}
+
+
+
+
+
+
+
+
+
+
+
+{% block scripts %}
+<script>
+  $(function () {
+    /* --------------------------------------------------------------------
+       1) Captura o ID do contrato a partir da própria URL:
+          …/contrato_omie_detalhes/<IDContrato>
+    -------------------------------------------------------------------- */
+    const contratoId = parseInt(
+      window.location.pathname.split('/').filter(Boolean).pop(),
+      10
+    );
+
+    const tbody = $('#ativos-body');
+
+    /* --------------------------------------------------------------------
+       2) Clonar linha ao clicar no ícone “+”
+    -------------------------------------------------------------------- */
+    tbody.on('click', '.add-ativo', function () {
+      const row   = $(this).closest('tr');
+      const clone = row.clone();
+
+      clone.find('td').each((i, td) => {
+        if (i === 0) {
+          // mantém o ícone “+” funcional
+          $(td).html(
+            '<i class="bi bi-plus-circle-fill text-primary add-ativo" ' +
+            'style="cursor:pointer; font-size:1.4rem;"></i>'
+          );
+        } else if (i === 1) {
+          // coloca o input para digitar o IDAtivo
+          $(td).html(
+            '<input type="number" class="form-control form-control-sm new-id-ativo" ' +
+            'placeholder="IDAtivo">'
+          );
+        } else {
+          // zera as demais células
+          $(td).text('');
+        }
+      });
+
+      row.after(clone);
+    });
+
+    /* --------------------------------------------------------------------
+       3) Quando o usuário digita o IDAtivo
+    -------------------------------------------------------------------- */
+    tbody.on('change', '.new-id-ativo', function () {
+      const idAtivo = $(this).val();
+      if (!idAtivo) return;
+
+      const row   = $(this).closest('tr');
+      const cells = row.find('td');
+
+      /* ---------- 3.1 – GET para validar ativo e preencher dados ---------- */
+      const getUrl =
+        "{{ url_for('euro.api_get_ativo', ativo_id=0) }}"
+          .replace('0', idAtivo) +
+        `?contrato_id=${contratoId}`;
+
+      $.getJSON(getUrl)
+        .done(async data => {
+          /* Se a rota devolve {"error": …} (status 200) */
+          if (data.error) {
+            alert(data.msg || 'Falha ao validar o ativo.');
+            row.remove();
+            return;
+          }
+
+          /* ---------- 3.2 – Pede ao usuário o valor ---------- */
+          const valorStr = prompt('Digite o valor para este ativo (ex: 1234,56):');
+          if (valorStr === null) {                // usuário cancelou
+            row.remove();
+            return;
+          }
+          const valor = parseFloat(valorStr.replace(',', '.'));
+          if (isNaN(valor)) {
+            alert('Valor informado é inválido.');
+            row.remove();
+            return;
+          }
+
+          /* ---------- 3.3 – POST para inserir no ContratoOmieItens ---------- */
+          const postUrl =
+            "{{ url_for('euro.api_get_ativo', ativo_id=0) }}".replace('0', idAtivo);
+
+          const postResp = await fetch(postUrl, {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify({
+                        contrato_id: contratoId,
+                        valor      : valor
+                     })
+          });
+          const postJson = await postResp.json();
+
+          if (!postJson.success) {
+            alert(postJson.msg || 'Erro ao salvar no contrato.');
+            row.remove();
+            return;
+          }
+
+          /* ---------- 3.4 – Preenche a linha com os dados retornados ---------- */
+          cells.eq(1).text(data.IDAtivo);
+          cells.eq(2).text(data.NomeAtivo);
+          cells.eq(3).text(data.PlacaAtual);
+          cells.eq(4).text(data.EnderecoAtivo);
+          cells.eq(5).text(data.CEP);
+          cells.eq(6).text(data.Cidade);
+          cells.eq(7).text(data.UF);
+          cells.eq(8).text(data.AuvoID);
+          cells.eq(9).text(data.IDPedidoAtivo);
+          cells.eq(10).text(data.IDAtivoAuvo);
+          cells.eq(11).text(data.IDContrato);
+          cells.eq(12).text(data.EmpresaNome || '');
+          cells.eq(13).text(data.ProjetoNome || '');
+        })
+        .fail(xhr => {
+          /* Falha na requisição ou erro 4xx/5xx da API */
+          const j = xhr.responseJSON || {};
+          alert(j.msg || 'Ativo não encontrado ou erro de comunicação.');
+          row.remove();
+        });
+    });
+  });
+    $(function () {
+    /* -------------------------------------------------------------
+       Abrir /ver_medicao/<NumeroMedicao> ao dar **duplo-clique**  
+       em qualquer linha da tabela de medições
+    ------------------------------------------------------------- */
+    const baseMedUrl = "{{ url_for('euro.ver_medicao', numero_medicao=0) }}"
+                         .replace(/0$/, '');   // remove o “0” final
+
+    $('.med-row').on('dblclick', function () {
+      const num = $(this).data('num');         // vem do data-num da <tr>
+      if (!num) return;
+      window.open(baseMedUrl + num, '_blank'); // nova aba
+    });
+  });
+    $(function () {
+    /* ------------------------------------------------------------------
+       1) URL base para /ativos_detalhes/<IDAtivo>
+    ------------------------------------------------------------------ */
+    const ativoBaseUrl =
+      "{{ url_for('euro.ativos_detalhes', ativo_id=0) }}".replace(/0$/, '');
+
+    /* ------------------------------------------------------------------
+       2) Duplo-clique em qualquer linha de ativo abre detalhes do ativo
+          – ignora cliques no ícone de “+” (.add-ativo)
+    ------------------------------------------------------------------ */
+    $('#ativos-body').on('dblclick', '.ativo-row', function (e) {
+      if ($(e.target).closest('.add-ativo').length) return;   // clicou no "+"
+      const idAtivo = $(this).data('id');
+      if (!idAtivo) return;
+      window.open(ativoBaseUrl + idAtivo, '_blank');
+    });
+  });
+
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  const pageSize = 10;
+  const items    = Array.from(document.querySelectorAll('#lancfut-list .list-group-item'));
+  if (!items.length) return;
+
+  const pagUl      = document.getElementById('lancfut-pagination');
+  const totalPages = Math.ceil(items.length / pageSize);
+
+  function showPage(p) {
+    items.forEach((el, i) => {
+      if (i >= p * pageSize && i < (p + 1) * pageSize) {
+        el.style.setProperty('display', 'flex', 'important');
+      } else {
+        el.style.setProperty('display', 'none', 'important');
+      }
+    });
+    Array.from(pagUl.children).forEach(li =>
+      li.classList.toggle('active', +li.dataset.page === p)
+    );
+  }
+
+  // monta botões
+  for (let i = 0; i < totalPages; i++) {
+    const li = document.createElement('li');
+    li.className    = 'page-item' + (i === 0 ? ' active' : '');
+    li.dataset.page = i;
+    li.innerHTML    = `<a class="page-link" href="#">${i + 1}</a>`;
+    li.addEventListener('click', e => {
+      e.preventDefault();
+      showPage(i);
+    });
+    pagUl.appendChild(li);
+  }
+
+  // exibe primeira página
+  showPage(0);
+});
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  const pageSizeMed = 10;
+  const medRows     = Array.from(document.querySelectorAll('#medicoes-table tbody tr'));
+  console.log('>> Paginação de Medições: encontrei', medRows.length, 'linhas');
+
+  if (!medRows.length) return;
+
+  const pagMedUl    = document.getElementById('medicoes-pagination');
+  const totalPagesM = Math.ceil(medRows.length / pageSizeMed);
+  console.log('>> Total de páginas necessárias:', totalPagesM);
+
+  function showPageMed(p) {
+    medRows.forEach((row, i) => {
+      row.style.display = (i >= p * pageSizeMed && i < (p + 1) * pageSizeMed) ? '' : 'none';
+    });
+    Array.from(pagMedUl.children).forEach(li =>
+      li.classList.toggle('active', +li.dataset.page === p)
+    );
+  }
+
+  // limpa qualquer paginação antiga (se recarregar via AJAX, por exemplo)
+  pagMedUl.innerHTML = '';
+
+  for (let i = 0; i < totalPagesM; i++) {
+    const li = document.createElement('li');
+    li.className    = 'page-item' + (i === 0 ? ' active' : '');
+    li.dataset.page = i;
+    li.innerHTML    = `<a class="page-link" href="#">${i + 1}</a>`;
+    li.addEventListener('click', e => {
+      e.preventDefault();
+      showPageMed(i);
+    });
+    pagMedUl.appendChild(li);
+  }
+
+  // exibe a primeira página
+  showPageMed(0);
+});
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  const pageSizeOrd = 10;
+  const ordRows     = Array.from(document.querySelectorAll('#ordens-table tbody tr'));
+  if (!ordRows.length) return;
+
+  const pagOrdUl    = document.getElementById('ordens-pagination');
+  const totalPagesO = Math.ceil(ordRows.length / pageSizeOrd);
+
+  function showPageOrd(p) {
+    ordRows.forEach((row, i) => {
+      row.style.display = (i >= p * pageSizeOrd && i < (p + 1) * pageSizeOrd) ? '' : 'none';
+    });
+    Array.from(pagOrdUl.children).forEach(li =>
+      li.classList.toggle('active', +li.dataset.page === p)
+    );
+  }
+
+  pagOrdUl.innerHTML = '';
+
+  for (let i = 0; i < totalPagesO; i++) {
+    const li = document.createElement('li');
+    li.className    = 'page-item' + (i === 0 ? ' active' : '');
+    li.dataset.page = i;
+    li.innerHTML    = `<a class="page-link" href="#">${i + 1}</a>`;
+    li.addEventListener('click', e => {
+      e.preventDefault();
+      showPageOrd(i);
+    });
+    pagOrdUl.appendChild(li);
+  }
+
+  showPageOrd(0);
+});
+
+
+
+document.addEventListener('DOMContentLoaded', () => {
+  const pageSizeLanc = 10;
+  const lancRows     = Array.from(document.querySelectorAll('#lancamentos-table tbody tr'));
+  if (!lancRows.length) return;
+
+  const pagLancUl    = document.getElementById('lancamentos-pagination');
+  const totalPagesL  = Math.ceil(lancRows.length / pageSizeLanc);
+
+  function showPageLanc(p) {
+    lancRows.forEach((row, i) => {
+      row.style.display = (i >= p * pageSizeLanc && i < (p + 1) * pageSizeLanc) ? '' : 'none';
+    });
+    Array.from(pagLancUl.children).forEach(li =>
+      li.classList.toggle('active', +li.dataset.page === p)
+    );
+  }
+
+  // Limpa paginação antiga
+  pagLancUl.innerHTML = '';
+
+  // Gera botões de página
+  for (let i = 0; i < totalPagesL; i++) {
+    const li = document.createElement('li');
+    li.className    = 'page-item' + (i === 0 ? ' active' : '');
+    li.dataset.page = i;
+    li.innerHTML    = `<a class="page-link" href="#">${i + 1}</a>`;
+    li.addEventListener('click', e => {
+      e.preventDefault();
+      showPageLanc(i);
+    });
+    pagLancUl.appendChild(li);
+  }
+
+  // Exibe a primeira página
+  showPageLanc(0);
+});
+</script>
+{% endblock %}

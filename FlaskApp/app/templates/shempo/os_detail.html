@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+
+{% block title %}Detalhes da OS - {{ order.IDOs }}{% endblock %}
+
+{% block content %}
+<h2>Detalhes da OS - {{ order.IDOs }}</h2>
+
+<p><strong>Data:</strong> {{ order.Data.strftime('%d/%m/%Y %H:%M') if order.Data else '-' }}</p>
+<p><strong>Empresa:</strong> {{ order.NomeEmpresa }} ({{ order.CNPJ }})</p>
+<p><strong>Endereço:</strong> {{ order.Endereco or '-' }}</p>
+<p><strong>Técnico:</strong> {{ order.NomeFuncionario }}{% if order.Telefone %} - {{ order.Telefone }}{% endif %}</p>
+<p><strong>Status:</strong> {{ order.StatusOS }}</p>
+
+<hr>
+
+<h4>Itens da OS</h4>
+<div class="table-responsive">
+  <table class="table table-bordered table-hover">
+    <thead class="table-success">
+      <tr>
+        <th>ID</th>
+        <th>Referência</th>
+        <th>NomeFamilia</th>
+        <th>Nome Produto</th>
+        <th>Categoria</th>
+        <th>Quantidade</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in itens %}
+      <tr>
+        <td>{{ item.IDItem }}</td>
+        <td>{{ item.ReferenciaExterna or '-' }}</td>
+        <td>{{ item.NomeFamilia }}</td>
+        <td>{{ item.NomeProduto }}</td>
+        <td>{{ item.NomeCategoria or '-' }}</td>
+        <td>{{ item.Quantidade }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<a href="{{ url_for('euro.visualizar_os') }}" class="btn btn-secondary mt-3">Voltar</a>
+{% endblock %}

@@ -1,0 +1,289 @@
+{# ------------------------------------------------------------------------ #
+  medicoes.html – template completo com SELECT/AUTOCOMPLETE de IDContrato
+# ------------------------------------------------------------------------ #}
+{% extends 'base.html' %}
+
+{% block title %}Cadastro de Medições{% endblock %}
+
+{% block styles_global %}
+  {{ super() }}
+  <style>
+    .container.my-4       { max-width: 100%; width: 100%; }
+    .table-responsive     { overflow-x: auto; max-width: 100%; }
+    input.nomeprojeto-input  { width: 250px; }
+    input.nome-empresa-input { width: 250px; }
+    input.nome-ativo-input   { width: 350px; }
+    input.placa-input        { width: 200px; }
+    input.empresa-vend-field { width: 80px;  }
+    tr.prototype             { display: none; }
+  </style>
+{% endblock %}
+
+{% block content %}
+</div>
+
+{# ---------------------------------------------------------------------- #
+  DATALIST de contratos – alimenta o autocomplete do campo IDContrato
+# ---------------------------------------------------------------------- #}
+<datalist id="contratos-list">
+  {% for c in contratos_json %}
+    <option value="{{ c.IDContrato }}"
+            label="IDContrato: {{ c.IDContrato }} | Aditivo: {{ c.Aditivo }} | Cliente: {{ c.Cliente }} | Empresa: {{ c.Empresa }}">
+  {% endfor %}
+</datalist>
+
+<div class="container-fluid my-4">
+  <form method="post" action="{{ url_for('euro.medicoes_form') }}" novalidate>
+    <div class="table-responsive">
+      <table id="medicoes-table" class="table table-sm">
+        <thead>
+          <tr>
+            <th>IDContrato</th><th>Aditivo</th><th>SubNº</th><th>IDProjeto</th>
+            <th>NomeProjeto</th><th>EmpresaID</th><th>NomeEmpresa</th>
+            <th>VendedoraID</th><th>NomeVendedora</th><th>IDAtivo</th>
+            <th>NomeAtivo</th><th>Placa</th><th>DataInício</th><th>DataFinal</th>
+            <th>DataMobilização</th><th>V.Unitário</th><th>Acrésc/Desc.</th>
+            <th>Prop.</th><th>DiasRef</th><th>DiasMed</th><th>DiasMed.</th>
+            <th>Subtotal</th><th>V.Total</th><th>DataEmiss.</th>
+            <th>AuvoID</th><th>GroupID</th><th>Num.Medição</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="prototype">
+            <!-- Autocomplete de IDContrato -->
+            <td>
+              <input type="text" list="contratos-list"
+                     class="form-control form-control-sm idcontrato-field"
+                     placeholder="digite ou escolha"
+                     name="medicoes[0][IDContrato]">
+            </td>
+            <td><input class="form-control form-control-sm aditivo-field" name="medicoes[0][Aditivo]"></td>
+            <td><input class="form-control form-control-sm sub-field" name="medicoes[0][SubNumeroMedicao]"></td>
+            <td><input type="number" class="form-control form-control-sm idprojeto-field" name="medicoes[0][IDProjeto]"></td>
+            <td><input class="form-control form-control-sm nomeprojeto-input" name="medicoes[0][NomeProjeto]" readonly></td>
+            <td><input type="number" class="form-control form-control-sm empresa-field" name="medicoes[0][EmpresaID]"></td>
+            <td><input class="form-control form-control-sm nome-empresa-input" name="medicoes[0][NomeEmpresa]" readonly></td>
+            <td><input type="number" class="form-control form-control-sm empresa-vend-field" name="medicoes[0][IDEmpresaVendedora]" placeholder="ID"></td>
+            <td><input class="form-control form-control-sm nome-vend-input" name="medicoes[0][NomeEmpresaVendedora]" readonly></td>
+            <td><input type="number" class="form-control form-control-sm ativo-field" name="medicoes[0][IDAtivo]" placeholder="IDAtivo"></td>
+            <td><input class="form-control form-control-sm nome-ativo-input" name="medicoes[0][NomeAtivo]" readonly></td>
+            <td><input class="form-control form-control-sm placa-input" name="medicoes[0][PlacaEquipamento]" readonly></td>
+            <td><input class="form-control form-control-sm data-inicio-field" name="medicoes[0][DataInicioPeriodoMedicao]" type="date"></td>
+            <td><input class="form-control form-control-sm data-final-field" name="medicoes[0][DataFinalPeriodoMedicao]" type="date"></td>
+            <td><input class="form-control form-control-sm data-mob-field" name="medicoes[0][DataMobilizacao]" type="date"></td>
+            <td><input class="form-control form-control-sm valor-unit-field" name="medicoes[0][ValorUnitario]" step="0.01" type="number"></td>
+            <td><input class="form-control form-control-sm acresc-field" name="medicoes[0][AcrescimosDescontos]" step="0.01" type="number"></td>
+            <td><input class="form-control form-control-sm prop-field" name="medicoes[0][PeriodoProporcional]" readonly></td>
+            <td><input class="form-control form-control-sm dias-ref-field" name="medicoes[0][NumeroDiasReferencia]" readonly></td>
+            <td><input class="form-control form-control-sm dias-med-field" name="medicoes[0][NumeroDiasMedidos]" readonly></td>
+            <td><input class="form-control form-control-sm dias-med2-field" name="medicoes[0][NumeroDiasMedicao]" readonly></td>
+            <td><input class="form-control form-control-sm subtotal-field" name="medicoes[0][Subtotal]" readonly></td>
+            <td><input class="form-control form-control-sm total-field" name="medicoes[0][ValorTotal]" readonly></td>
+            <td><input class="form-control form-control-sm" name="medicoes[0][DataEmissao]" type="date"></td>
+            <td><input class="form-control form-control-sm auvoid-input" name="medicoes[0][AuvoID]" readonly></td>
+            <td><input class="form-control form-control-sm groupid-input" name="medicoes[0][GroupID]" readonly></td>
+            <td><input class="form-control form-control-sm numero-field" name="medicoes[0][NumeroMedicao]" readonly></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <input type="hidden" id="next-numero" value="{{ next_numero_medicao }}">
+    <button id="add-row" class="btn btn-sm btn-outline-primary" type="button">＋</button>
+    <button type="submit" class="btn btn-sm btn-primary">Gravar Medições</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ------------------------- Dados vindos do Flask --------------------- */
+const nextNumero = parseInt(document.getElementById('next-numero').value, 10);
+const empresas   = {{ empresas_json|tojson }};
+const projetos   = {{ projetos_json|tojson }};
+const ativos     = {{ ativos_json|tojson }};
+const ativosAuvo = {{ ativos_auvo_json|tojson }};
+const contratos  = {{ contratos_json|tojson }};
+const lookupUrl  = "{{ url_for('euro.medicoes_lookup') }}";
+let rowIndex = 1;
+
+/* ------------------------- Funções utilitárias ----------------------- */
+function diasNoMes(a,m){ return new Date(a, m+1, 0).getDate(); }
+
+function habilitaLinha(row, idx){
+  row.querySelectorAll('[name]').forEach(el=>{
+    el.disabled = false;
+    el.removeAttribute('disabled');
+    el.name = el.name.replace(/\[\d+\]/, `[${idx}]`);
+  });
+}
+
+/* ---------------------- Cálculo de valores --------------------------- */
+function calcularRow(r){
+  const s = new Date(r.querySelector('.data-inicio-field').value);
+  const e = new Date(r.querySelector('.data-final-field').value);
+  const v = parseFloat(r.querySelector('.valor-unit-field').value) || 0;
+  if(isNaN(s) || isNaN(e)) return;
+
+  let t=0, dR=0, dM=0;
+  if(s.getMonth()===e.getMonth() && s.getFullYear()===e.getFullYear()){
+    const dim = diasNoMes(s.getFullYear(), s.getMonth());
+    const u   = e.getDate() - s.getDate() + 1;
+    t = v / dim * u; dR = dim; dM = u;
+  }else{
+    const dim1 = diasNoMes(s.getFullYear(), s.getMonth());
+    const u1   = dim1 - (s.getDate() - 1);
+    const v1   = v / dim1 * u1;
+    const dim2 = diasNoMes(e.getFullYear(), e.getMonth());
+    const u2   = e.getDate();
+    const v2   = v / dim2 * u2;
+    t = v1 + v2; dR = dim1 + dim2; dM = u1 + u2;
+  }
+  r.querySelector('.dias-ref-field').value  = dR;
+  r.querySelector('.dias-med-field').value  = dM;
+  r.querySelector('.dias-med2-field').value = dM;
+  r.querySelector('.prop-field').value      = (dM/dR).toFixed(4);
+  r.querySelector('.subtotal-field').value  = t.toFixed(2);
+  const a = parseFloat(r.querySelector('.acresc-field').value) || 0;
+  r.querySelector('.total-field').value     = (t + a).toFixed(2);
+}
+
+/* ----------------------- Lookup Projeto/Empresa ---------------------- */
+async function fetchDefaults(proj, emp){
+  if(!proj || !emp) return;
+  try{
+    const rsp  = await fetch(`${lookupUrl}?proj=${proj}&emp=${emp}`);
+    const data = await rsp.json();
+    if(!Array.isArray(data) || !data.length) return;
+
+    const tb = document.querySelector('#medicoes-table tbody');
+    Array.from(tb.querySelectorAll('tr:not(.prototype)')).forEach(r=>r.remove());
+    rowIndex = 0;
+
+    data.forEach((ln,i)=>{
+      const pr = tb.querySelector('.prototype');
+      const r  = pr.cloneNode(true);
+      r.classList.remove('prototype'); r.removeAttribute('style');
+      habilitaLinha(r, rowIndex);
+
+      r.querySelector('.idcontrato-field').value   = ln.IDContrato;
+      r.querySelector('.aditivo-field').value      = ln.Aditivo;
+      r.querySelector('.sub-field').value          = i+1;
+      r.querySelector('.idprojeto-field').value    = ln.IDProjeto;
+      r.querySelector('.nomeprojeto-input').value  = ln.NomeProjeto;
+      r.querySelector('.empresa-field').value      = ln.EmpresaID;
+      r.querySelector('.nome-empresa-input').value = ln.NomeEmpresa;
+      r.querySelector('.empresa-vend-field').value = ln.IDEmpresaVendedora;
+      r.querySelector('.nome-vend-input').value    = ln.NomeEmpresaVendedora;
+      r.querySelector('.ativo-field').value        = ln.IDAtivo;
+      r.querySelector('.nome-ativo-input').value   = ln.NomeAtivo;
+      r.querySelector('.placa-input').value        = ln.PlacaEquipamento;
+      r.querySelector('.data-inicio-field').value  = ln.DataInicio;
+      r.querySelector('.data-final-field').value   = ln.DataFinal;
+      r.querySelector('.data-mob-field').value     = ln.DataMobilizacao;
+      r.querySelector('.valor-unit-field').value   = ln.ValorUnitario;
+      r.querySelector('.acresc-field').value       = ln.AcrescimosDescontos;
+      r.querySelector('.prop-field').value         = ln.PeriodoProporcional;
+      r.querySelector('.dias-ref-field').value     = ln.NumeroDiasReferencia;
+      r.querySelector('.dias-med-field').value     = ln.NumeroDiasMedidos;
+      r.querySelector('.dias-med2-field').value    = ln.NumeroDiasMedicao;
+      r.querySelector('.subtotal-field').value     = ln.Subtotal;
+      r.querySelector('.total-field').value        = ln.ValorTotal;
+      r.querySelector('.auvoid-input').value       = ln.AuvoID;
+      r.querySelector('.groupid-input').value      = ln.GroupID;
+      r.querySelector('.numero-field').value       = ln.NumeroMedicao;
+
+      bindRow(r,false);
+      tb.appendChild(r);
+      rowIndex++;
+    });
+  }catch(e){ console.error(e); }
+}
+
+/* -------------------------- Bind de eventos -------------------------- */
+function bindRow(r, listenFilter){
+  /* Preenche o ADITIVO quando o usuário escolhe um IDContrato */
+  r.querySelector('.idcontrato-field').addEventListener('change', ()=>{
+    const val = r.querySelector('.idcontrato-field').value.trim();
+    const ct  = contratos.find(x=>String(x.IDContrato)===val);
+    if(ct) r.querySelector('.aditivo-field').value = ct.Aditivo;
+  });
+
+  /* Projetos e Empresas */
+  r.querySelector('.idprojeto-field').addEventListener('change', ()=>{
+    const v = r.querySelector('.idprojeto-field').value;
+    const p = projetos.find(x=>String(x.IDProjeto)===v);
+    r.querySelector('.nomeprojeto-input').value = p ? p.NomeProjeto : '';
+    if(listenFilter) fetchDefaults(v, r.querySelector('.empresa-field').value);
+  });
+
+  r.querySelector('.empresa-field').addEventListener('change', ()=>{
+    const v = r.querySelector('.empresa-field').value;
+    const e = empresas.find(x=>String(x.EmpresaID)===v);
+    r.querySelector('.nome-empresa-input').value = e ? e.NomeEmpresa : '';
+    if(listenFilter) fetchDefaults(r.querySelector('.idprojeto-field').value, v);
+  });
+
+  r.querySelector('.empresa-vend-field').addEventListener('change', ()=>{
+    const v  = r.querySelector('.empresa-vend-field').value;
+    const ev = empresas.find(x=>String(x.EmpresaID)===v);
+    r.querySelector('.nome-vend-input').value = ev ? ev.NomeEmpresa : '';
+  });
+
+  /* Ativo → preenche nome, placa, AuvoID, GroupID */
+  r.querySelector('.ativo-field').addEventListener('change', ()=>{
+    const id = String(r.querySelector('.ativo-field').value);
+    const a  = ativos.find(x=>String(x.IDAtivo)===id);
+    r.querySelector('.nome-ativo-input').value = a ? a.NomeAtivo  : '';
+    r.querySelector('.placa-input').value      = a ? a.PlacaAtual : '';
+    r.querySelector('.auvoid-input').value     = a ? a.AuvoID     : '';
+    const g = ativosAuvo.find(x=>x.AuvoID == a?.AuvoID);
+    r.querySelector('.groupid-input').value    = g ? g.GroupID    : '';
+  });
+
+  /* Recalcula valores */
+  ['.data-inicio-field','.data-final-field','.valor-unit-field','.acresc-field']
+    .forEach(sel=> r.querySelector(sel).addEventListener('change', ()=>calcularRow(r)));
+}
+
+/* ---------------- Cria a primeira linha ao carregar ------------------ */
+document.addEventListener('DOMContentLoaded', ()=>{
+  const tb = document.querySelector('#medicoes-table tbody');
+  const pr = tb.querySelector('.prototype');
+  pr.querySelectorAll('[name]').forEach(el=>el.disabled = true);
+
+  const first = pr.cloneNode(true);
+  first.classList.remove('prototype'); first.removeAttribute('style');
+  habilitaLinha(first, 0);
+  first.querySelector('.numero-field').value = nextNumero;
+  tb.appendChild(first);
+  bindRow(first, true);
+});
+
+/* --------------------- Botão “＋” para nova linha -------------------- */
+document.getElementById('add-row').addEventListener('click', e=>{
+  e.preventDefault();
+  const tb = document.querySelector('#medicoes-table tbody');
+  const pr = tb.querySelector('.prototype');
+  const r  = pr.cloneNode(true);
+  r.classList.remove('prototype'); r.removeAttribute('style');
+  habilitaLinha(r, rowIndex);
+  r.querySelectorAll('[value]').forEach(el=>el.value='');
+
+  /* Clona alguns valores da primeira linha preenchida, se existir */
+  const first = tb.querySelector('tr:not(.prototype)');
+  if(first){
+    r.querySelector('.idcontrato-field').value = first.querySelector('.idcontrato-field').value;
+    r.querySelector('.aditivo-field').value    = first.querySelector('.aditivo-field').value;
+    r.querySelector('.idprojeto-field').value  = first.querySelector('.idprojeto-field').value;
+    r.querySelector('.empresa-field').value    = first.querySelector('.empresa-field').value;
+    r.querySelector('.nomeprojeto-input').value= first.querySelector('.nomeprojeto-input').value;
+    r.querySelector('.nome-empresa-input').value=first.querySelector('.nome-empresa-input').value;
+  }
+  r.querySelector('.numero-field').value = nextNumero;
+  bindRow(r,false);
+  tb.appendChild(r);
+  rowIndex++;
+});
+</script>
+{% endblock %}

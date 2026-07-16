@@ -1,0 +1,229 @@
+{# templates/ver_medicao.html #}
+{% extends 'base.html' %}
+
+{% block title %}Medição #{{ numero_medicao }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid my-4">
+  <div class="card mb-4">
+
+    {# ───────────────────────────── card‑header ───────────────────────────── }
+    <div class="card-header d-flex">
+      {# título fica à esquerda #}
+      <h5 class="mb-0 me-auto">Medição #{{ numero_medicao }}</h5>
+
+      {# coluna da direita: botão em cima, badge embaixo #}
+      <div class="d-flex flex-column align-items-end">
+
+        {# 1) Botão “Espelho Medição” ─ sempre primeiro #}
+        <a href="{{ url_for('euro.espelho_medicao', numero_medicao=numero_medicao) }}"
+           class="btn btn-light mb-2"
+           style="background:#f0f0f0; color:#000; border:1px solid #ccc;">
+          <i class="bi bi-journal-text" style="font-size:1.5rem;"></i><br>
+          Espelho<br>Medição
+        </a>
+
+        {# 2) Badge de situação ─ imediatamente abaixo do botão #}
+        {% set s = NomeStatus %}
+        {% if s == 'Recebido' %}
+          {% set cls='bg-success'   %}{% set ico='✅' %}
+        {% elif s == 'Faturado' %}
+          {% set cls='bg-primary text-white' %}{% set ico='🔵' %}
+        {% elif s == 'Aprovado' %}
+          {% set cls='bg-info text-dark'     %}{% set ico='✔️' %}
+        {% elif s == 'Aguardando Aprovação' %}
+          {% set cls='bg-secondary text-white'%}{% set ico='🕓' %}
+        {% elif s == 'Enviado' %}
+          {% set cls='bg-warning text-dark'  %}{% set ico='✉️' %}
+        {% elif s == 'Emitida' %}
+          {% set cls='bg-dark text-white'    %}{% set ico='🟤' %}
+        {% elif s == 'A Emitir' %}
+          {% set cls='bg-danger'             %}{% set ico='🔴' %}
+        {% elif s == 'Cancelada' %}
+          {% set cls='bg-light text-dark'    %}{% set ico='❌' %}
+        {% else %}
+          {% set cls='bg-light text-dark'    %}{% set ico='⚪️' %}
+        {% endif %}
+
+        <span class="badge {{ cls }}"
+              style="font-size:1.25rem; padding:0.5rem 1rem;">
+          {{ ico }} {{ s or 'Sem Info' }}
+        </span>
+      </div>
+    </div>
+
+
+
+
+    <div class="card-body">
+      <div class="mb-4">
+        <p><strong>Projeto:</strong> {{ NomeProjeto }}</p>
+        <p>
+          <strong>Data Emissão:</strong>
+          <input type="date" class="editable" data-field="DataEmissao"
+                 value="{{ DataEmissao.date().isoformat() }}">
+        </p>
+        <hr>
+        <p><strong>Cliente:</strong> {{ NomeEmpresa }}</p>
+        <p><strong>CNPJ:</strong> {{ CNPJCliente }}</p>
+        <hr>
+        <p><strong>Vendedora:</strong> {{ NomeEmpresaVendedora }}</p>
+        <p><strong>CNPJ:</strong> {{ CNPJVendedor }}</p>
+        <hr>
+        <p><strong>AuvoID:</strong> {{ AuvoID }}</p>
+        <p><strong>GroupID:</strong> {{ GroupID }}</p>
+      </div>
+
+
+
+
+<form method="post"
+      action="{{ url_for('euro.alterar_status_medicao', numero_medicao=numero_medicao) }}"
+      class="mb-4 d-flex align-items-center">
+  <label for="situacaoSelect" class="me-2"><strong>Situação:</strong></label>
+  <select name="situacao"
+          id="situacaoSelect"
+          class="form-select w-auto"
+          onchange="this.form.submit()">
+    {% for op in situacoes %}
+      <option value="{{ op.IDOperacao }}"
+        {% if ultima_medicao.IDOperacao == op.IDOperacao %}selected{% endif %}>
+        {{ op.NomeOperacao }}
+      </option>
+    {% endfor %}
+  </select>
+</form>
+
+
+
+
+
+
+
+      <div class="table-responsive">
+        <table class="table table-bordered table-hover align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>SubNº</th>
+              <th>IDAtivo</th>
+              <th>IDItem</th>
+              <th>NomeAtivo</th>
+              <th>IDPedido</th>
+              <th>Placa</th>
+              <th>Início</th>
+              <th>Final</th>
+              <th>Mobilização</th>
+              <th>DiasRef</th>
+              <th>DiasMed</th>
+              <th>DiasMed.</th>
+              <th>V.Unit.</th>
+              <th>Acrésc/Desc.</th>
+              <th>Subtotal</th>
+              <th>Valor Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in meds %}
+            <tr data-id="{{ m.IDMedicao }}">
+              <td>{{ m.SubNumeroMedicao }}</td>
+              <td>
+                <a href="{{ url_for('euro.ativos_detalhes', ativo_id=m.IDAtivo) }}">
+                  {{ m.IDAtivo }}
+                </a>
+              </td>
+              <td>{{ m.IDItem }}</td>
+              <td>{{ m.NomeAtivo }}</td>
+              <td>
+                {% if m.IDPedido %}
+                  <a href="{{ url_for('euro.editar_pedido', pedido_id=m.IDPedido) }}">
+                    {{ m.IDPedido }}
+                  </a>
+                {% else %}
+                  &ndash;
+                {% endif %}
+              </td>
+              <td>{{ m.PlacaEquipamento }}</td>
+              <td>
+                <input type="date" class="editable" data-field="DataInicioPeriodoMedicao"
+                       value="{{ m.DataInicioPeriodoMedicao.date().isoformat() }}">
+              </td>
+              <td>
+                <input type="date" class="editable" data-field="DataFinalPeriodoMedicao"
+                       value="{{ m.DataFinalPeriodoMedicao.date().isoformat() }}">
+              </td>
+              <td>
+                <input type="date" class="editable" data-field="DataMobilizacao"
+                       value="{{ m.DataMobilizacao.date().isoformat() }}">
+              </td>
+              <td data-field="NumeroDiasReferencia">{{ m.NumeroDiasReferencia }}</td>
+              <td data-field="NumeroDiasMedidos">{{ m.NumeroDiasMedidos }}</td>
+              <td data-field="NumeroDiasMedicao">{{ m.NumeroDiasMedicao }}</td>
+              <td>
+                <input type="number" step="0.01" class="editable" data-field="ValorUnitario"
+                       value="{{ m.ValorUnitario }}">
+              </td>
+              <td>
+                <input type="number" step="0.01" class="editable" data-field="AcrescimosDescontos"
+                       value="{{ m.AcrescimosDescontos }}">
+              </td>
+              <td>
+                <input type="number" step="0.01" readonly data-field="Subtotal"
+                       value="{{ m.Subtotal }}">
+              </td>
+              <td>
+                <input type="number" step="0.01" readonly data-field="ValorTotal"
+                       value="{{ m.ValorTotal }}">
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <a href="{{ url_for('euro.medicoes_form') }}" class="btn btn-secondary mt-3">
+        Voltar às Medições
+      </a>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.editable').forEach(el => {
+    el.addEventListener('blur', sendUpdate);
+    el.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') ev.target.blur();
+    });
+  });
+
+  function sendUpdate(ev) {
+    const input = ev.target;
+    const fld   = input.dataset.field;
+    const row   = input.closest('tr');
+    const medId = row.dataset.id;
+    const val   = input.value;
+
+    fetch(`/api/medicoes/${medId}`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({[fld]: val})
+    })
+    .then(r => r.json())
+    .then(json => {
+      if (!json.success) {
+        alert('Erro: '+(json.error||''));
+        return;
+      }
+      ['NumeroDiasReferencia','NumeroDiasMedidos','NumeroDiasMedicao']
+        .forEach(f => {
+          const cell = row.querySelector(`[data-field="${f}"]`);
+          if (cell) cell.textContent = json[f];
+        });
+      ['Subtotal','ValorTotal']
+        .forEach(f => {
+          const inp = row.querySelector(`input[data-field="${f}"]`);
+          if (inp) inp.value = json[f];
+        });
+    });
+  }
+</script>
+{% endblock %}

@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+{% block title %}Séries & Lotes por Item{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+  <h2 class="mb-2">Produtos com Número de Série / Lote</h2>
+
+  <!-- form de busca -->
+  <form method="get" action="{{ url_for('euro.produtos_numero_serie') }}" class="mb-3">
+    <div class="input-group">
+      <input type="text" name="search" class="form-control"
+             placeholder="Pesquisar por ID, Nome, Série ou Lote"
+             value="{{ search }}">
+      <button type="submit" class="btn btn-primary">Pesquisar</button>
+    </div>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+      <thead>
+        <tr>
+          <th>ID Item</th>
+          <th>Nome Produto</th>
+          <th>Número de Série</th>
+          <th>Número de Lote</th>
+          <th>ID Estoque</th>
+          <th>Tipo Estoque</th>
+          <th>Data Entrada</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in items %}
+        <tr>
+          <td>{{ row.IDItem }}</td>
+          <td>{{ row.NomeProduto }}</td>
+          <td>{{ row.NumeroSerie }}</td>
+          <td>{{ row.NumeroLote or '-' }}</td>
+          <td>{{ row.IDEstoque }}</td>
+          <td>{{ row.TipoEstoque }}</td>
+          <td>{{ row.DataEntrada.strftime('%Y-%m-%d %H:%M') if row.DataEntrada }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" class="text-center">Nenhum registro encontrado.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- paginação -->
+  <nav aria-label="Navegação de página">
+    <ul class="pagination justify-content-center mt-3">
+      {% if page > 1 %}
+      <li class="page-item">
+        <a class="page-link"
+           href="{{ url_for('euro.produtos_numero_serie', page=page-1, search=search) }}">
+          Anterior
+        </a>
+      </li>
+      {% else %}
+      <li class="page-item disabled"><span class="page-link">Anterior</span></li>
+      {% endif %}
+
+      {% for p in range(1, total_pages + 1) %}
+      <li class="page-item {% if p == page %}active{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.produtos_numero_serie', page=p, search=search) }}">
+          {{ p }}
+        </a>
+      </li>
+      {% endfor %}
+
+      {% if page < total_pages %}
+      <li class="page-item">
+        <a class="page-link"
+           href="{{ url_for('euro.produtos_numero_serie', page=page+1, search=search) }}">
+          Próxima
+        </a>
+      </li>
+      {% else %}
+      <li class="page-item disabled"><span class="page-link">Próxima</span></li>
+      {% endif %}
+    </ul>
+  </nav>
+</div>
+{% endblock %}

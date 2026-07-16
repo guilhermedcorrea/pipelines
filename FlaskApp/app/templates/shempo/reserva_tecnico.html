@@ -1,0 +1,151 @@
+{% extends 'base.html' %}
+{% block title %}Reservas de Técnico{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+  <h2 class="mb-3">
+    <i class="bi bi-calendar-check-fill"></i> Reservas de Técnico
+  </h2>
+
+  <form method="get" action="{{ url_for('euro.reserva_tecnico') }}" class="row g-2 mb-3">
+    <div class="col-md-3">
+      <input type="text" name="search" class="form-control"
+             placeholder="Pesquisar por Pedido ou Produto"
+             value="{{ search }}">
+    </div>
+
+    <div class="col-md-3">
+      <select name="funcionario" class="form-select">
+        <option value="">— selecione Técnico —</option>
+        {% for id, nome in techs %}
+          <option value="{{ id }}" {% if func_id == id %}selected{% endif %}>
+            {{ nome }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-3">
+      <select name="status" class="form-select">
+        <option value="">— selecione Status —</option>
+        {% for id, nome in status_list %}
+          <option value="{{ id }}" {% if status_id == id %}selected{% endif %}>
+            {{ nome }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-1">
+      <button class="btn btn-primary w-100">Aplicar</button>
+    </div>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+      <thead>
+        <tr>
+          <th>ID Pedido</th>
+          <th>Técnico</th>
+          <th>Tipo</th>
+          <th>Qtd</th>
+          <th>Série</th>
+          <th>Lote</th>
+          <th>Produto</th>
+          <th>Foto</th>
+          <th>ID Status</th>
+          <th>Status</th>
+          <th>Data Pedido</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in reservas %}
+        <tr
+          style="cursor: pointer;"
+          ondblclick="window.location.href='{{ url_for('euro.editar_pedido', pedido_id=r.IDPedido) }}';"
+        >
+          <td>{{ r.IDPedido }}</td>
+          <td>{{ r.NomeFuncionario }}</td>
+          <td>{{ r.TipoPedido }}</td>
+          <td>{{ r.Quantidade }}</td>
+          <td>{{ r.NumerodeSerie or '-' }}</td>
+          <td>{{ r.NumeroLote or '-' }}</td>
+          <td>{{ r.NomeProduto }}</td>
+          <td style="width:60px;">
+            {% if image_urls[r.IDItem] %}
+              <img
+                src="{{ image_urls[r.IDItem] }}"
+                width="40" height="40"
+                loading="lazy"
+                onerror="this.onerror=null;
+                  this.src='https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif';"
+              >
+            {% else %}
+              <img
+                src="https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif"
+                width="40" height="40"
+              >
+            {% endif %}
+          </td>
+          <td>{{ r.IDStatusPedido }}</td>
+          <td>
+            {% set s = r.NomeStatusPedido %}
+            {% if s in ['Ativo', 'Criado'] %}
+              <span class="badge bg-success">{{ s }}</span>
+            {% elif s in ['Cancelado', 'Atrasado'] %}
+              <span class="badge bg-danger">{{ s }}</span>
+            {% elif s == 'Concluído' %}
+              <span class="badge bg-primary">{{ s }}</span>
+            {% elif s == 'Reservado' %}
+              <span class="badge" style="background-color:gold;color:black;">{{ s }}</span>
+            {% elif s == 'Produzindo' %}
+              <span class="badge bg-warning text-dark">{{ s }}</span>
+            {% else %}
+              <span class="badge bg-secondary">{{ s }}</span>
+            {% endif %}
+          </td>
+          <td>{{ r.DataPedido.strftime('%Y-%m-%d %H:%M') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <nav aria-label="Navegação de página">
+    <ul class="pagination justify-content-center mt-3">
+      <li class="page-item {% if page == 1 %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.reserva_tecnico',
+                            page=page-1,
+                            search=search,
+                            funcionario=func_id,
+                            status=status_id) }}">
+          Anterior
+        </a>
+      </li>
+      {% for p in range(1, total_pages+1) %}
+      <li class="page-item {% if p == page %}active{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.reserva_tecnico',
+                            page=p,
+                            search=search,
+                            funcionario=func_id,
+                            status=status_id) }}">
+          {{ p }}
+        </a>
+      </li>
+      {% endfor %}
+      <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.reserva_tecnico',
+                            page=page+1,
+                            search=search,
+                            funcionario=func_id,
+                            status=status_id) }}">
+          Próxima
+        </a>
+      </li>
+    </ul>
+  </nav>
+</div>
+{% endblock %}

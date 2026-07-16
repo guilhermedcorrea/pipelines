@@ -40,7 +40,11 @@ from PIL import Image, ImageOps
 from pathlib import Path
 from werkzeug.utils import secure_filename
 import uuid
-from ..autenticacao.acl_menu_paineis import pode_acessar_menu_paineis, requer_item_menu_paineis
+from ..autenticacao.acl_menu_paineis import (
+    obter_id_empresa_proprietaria_usuario,
+    pode_acessar_menu_paineis,
+    requer_item_menu_paineis,
+)
 
 import shutil
 from celery.result import AsyncResult
@@ -463,6 +467,17 @@ def injetar_acl_menu_paineis():
     usuario_logado_eh_vendedor = False
     id_minha_carteira = 0
     minha_carteira_url = None
+    home_usuario_url = None
+
+    try:
+        id_empresa_proprietaria = obter_id_empresa_proprietaria_usuario()
+        if id_empresa_proprietaria == 1:
+            home_usuario_url = url_for("euro.lista_produtos")
+        else:
+            # IDEmpresaProprietaria = 3 e demais empresas continuam na lista de painéis.
+            home_usuario_url = url_for("Paineis.lista_paineis")
+    except Exception:
+        home_usuario_url = url_for("Paineis.lista_paineis")
 
     try:
         usuario_logado_eh_vendedor = bool(
@@ -489,6 +504,7 @@ def injetar_acl_menu_paineis():
         "usuario_logado_eh_vendedor_paineis": usuario_logado_eh_vendedor,
         "id_minha_carteira_vendedor": id_minha_carteira,
         "minha_carteira_url": minha_carteira_url,
+        "home_usuario_url": home_usuario_url,
     }
 
 
@@ -2332,6 +2348,11 @@ def _marcar_conflitos_por_face(ocupacoes_por_face):
 @limiter.limit(LIMITE_GET_TELAS_NAVEGACAO, methods=["GET"])
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def lista_paineis():
+    # A rota raiz de Painéis é a home histórica da aplicação.
+    # Usuários da empresa 1 iniciam no Catálogo Produtos; usuários da empresa 3
+    # (e empresas não mapeadas) permanecem na Lista de Painéis.
+    if obter_id_empresa_proprietaria_usuario() == 1:
+        return redirect(url_for("euro.lista_produtos"))
 
     def _parse_iso_date(s: str):
         try:

@@ -1,0 +1,111 @@
+{# templates/log_medicoes.html #}
+{% extends 'base.html' %}
+{% block title %}Log de Medições{% endblock %}
+
+{% block content %}
+<div class="container-fluid my-4">
+  <h2 class="mb-4">Log de Medições</h2>
+
+  <div class="table-responsive">
+    <table class="table table-striped table-bordered align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>ID Log</th>
+          <th>Nº Medição</th>
+          <th>Usuário</th>
+          <th>Operação Anterior</th>
+          <th>Operação Atual</th>
+          <th>Data Alteração</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log, nome_usuario, oper_ant, oper_atual in rows %}
+          <tr>
+            <td>{{ log.IDLogMedicao }}</td>
+            <td>{{ log.NumeroMedicao }}</td>
+            <td>{{ nome_usuario }}</td>
+
+            {# Operação Anterior com badge #}
+            <td>
+              {% set s_ant = oper_ant %}
+              {% if s_ant == 'Recebido' %}
+                {% set cls_ant = 'bg-success text-white' %}{% set ico_ant = '✅' %}
+              {% elif s_ant == 'Faturado' %}
+                {% set cls_ant = 'bg-primary text-white' %}{% set ico_ant = '🔵' %}
+              {% elif s_ant == 'Aprovado' %}
+                {% set cls_ant = 'bg-info text-dark' %}{% set ico_ant = '✔️' %}
+              {% elif s_ant == 'Aguardando Aprovação' %}
+                {% set cls_ant = 'bg-secondary text-white' %}{% set ico_ant = '🕓' %}
+              {% elif s_ant == 'Enviado' %}
+                {% set cls_ant = 'bg-warning text-dark' %}{% set ico_ant = '✉️' %}
+              {% elif s_ant == 'Emitida' %}
+                {% set cls_ant = 'bg-dark text-white' %}{% set ico_ant = '🟤' %}
+              {% elif s_ant == 'A Emitir' %}
+                {% set cls_ant = 'bg-danger text-white' %}{% set ico_ant = '🔴' %}
+              {% elif s_ant == 'Cancelada' %}
+                {% set cls_ant = 'bg-light text-dark' %}{% set ico_ant = '❌' %}
+              {% else %}
+                {% set cls_ant = 'bg-light text-dark' %}{% set ico_ant = '⚪️' %}
+              {% endif %}
+              <span class="badge {{ cls_ant }}" style="font-size:1.25rem; padding:0.5rem 1rem;">
+                {{ ico_ant }} {{ s_ant or '—' }}
+              </span>
+            </td>
+
+            {# Operação Atual com badge #}
+            <td>
+              {% set s = oper_atual %}
+              {% if s == 'Recebido' %}
+                {% set cls = 'bg-success text-white'   %}{% set ico = '✅' %}
+              {% elif s == 'Faturado' %}
+                {% set cls = 'bg-primary text-white'   %}{% set ico = '🔵' %}
+              {% elif s == 'Aprovado' %}
+                {% set cls = 'bg-info text-dark'        %}{% set ico = '✔️' %}
+              {% elif s == 'Aguardando Aprovação' %}
+                {% set cls = 'bg-secondary text-white'  %}{% set ico = '🕓' %}
+              {% elif s == 'Enviado' %}
+                {% set cls = 'bg-warning text-dark'     %}{% set ico = '✉️' %}
+              {% elif s == 'Emitida' %}
+                {% set cls = 'bg-dark text-white'       %}{% set ico = '🟤' %}
+              {% elif s == 'A Emitir' %}
+                {% set cls = 'bg-danger text-white'     %}{% set ico = '🔴' %}
+              {% elif s == 'Cancelada' %}
+                {% set cls = 'bg-light text-dark'       %}{% set ico = '❌' %}
+              {% else %}
+                {% set cls = 'bg-light text-dark'       %}{% set ico = '⚪️' %}
+              {% endif %}
+              <span class="badge {{ cls }}" style="font-size:1.25rem; padding:0.5rem 1rem;">
+                {{ ico }} {{ s or '—' }}
+              </span>
+            </td>
+
+            <td class="text-nowrap">
+              {{ log.DataAlteracao.strftime('%Y-%m-%d %H:%M:%S') }}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <nav aria-label="Paginação" class="d-flex justify-content-center my-4">
+    <ul class="pagination mb-0">
+      <li class="page-item {% if page == 1 %}disabled{% endif %}">
+        <a class="page-link" href="{{ url_for('euro.log_medicoes', page=page-1) }}">Anterior</a>
+      </li>
+      {% for p in display_pages %}
+        {% if p == '...' %}
+          <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% else %}
+          <li class="page-item {% if p == page %}active{% endif %}">
+            <a class="page-link" href="{{ url_for('euro.log_medicoes', page=p) }}">{{ p }}</a>
+          </li>
+        {% endif %}
+      {% endfor %}
+      <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+        <a class="page-link" href="{{ url_for('euro.log_medicoes', page=page+1) }}">Próxima</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+{% endblock %}

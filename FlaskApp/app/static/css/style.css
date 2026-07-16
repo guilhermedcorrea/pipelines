@@ -1,0 +1,99 @@
+body {
+  background-color: #f7fff7;
+  margin: 0;
+  padding: 0;
+}
+
+.navbar {
+  background-color: #2f7d44;
+}
+
+.navbar .nav-link,
+.navbar .navbar-brand {
+  color: #fff !important;
+}
+
+.table thead {
+  background-color: #d3f2d3;
+}
+
+.btn-custom {
+  background-color: #3cb060;
+  color: #fff;
+  border: none;
+}
+
+.btn-custom:hover {
+  background-color: #369957;
+}
+
+
+.container,
+.container-fluid {
+  width: 100% !important;
+  max-width: 100% !important;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* Responsividade da tabela */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+}
+
+/* Evita quebra nos botões dentro da tabela */
+.table td form {
+  display: inline-block;
+  margin: 0;
+}
+
+/* Responsividade extra para celular */
+@media (max-width: 768px) {
+  h2, h3 {
+    font-size: 1.2rem;
+  }
+
+  .table th, .table td {
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+
+  .btn-custom, .btn {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.9rem;
+  }
+}
+
+
+
+/* força o carousel a usar flexbox e centrar o item ativo */
+#itemImagesCarousel .carousel-inner {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+}
+/* remove o float padrão dos itens para o flex funcionar */
+#itemImagesCarousel .carousel-item {
+  float: none !important;
+}
+
+
+
+
+
+@media (min-width: 768px) {        /* Bootstrap ≥ md  */
+  .pagination-center {
+    display: flex;                 /* garante flexbox */
+    justify-content: center;       /* centro geométrico do nav */
+    transform: translateX(-8.333%);/* puxa 1 coluna (12-grid)   */
+  }
+}
+
+/* Em telas menores o grid empilha; não precisa correção */
+@media (max-width: 767.98px) {
+  .pagination-center {
+    display: flex;
+    justify-content: center;
+  }
+}

@@ -1,0 +1,33 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Estoque Manutenção Externa - {{ product.NomeProduto }} ({{ total_externa }}){% endblock %}
+
+{% block content %}
+<h2>Estoque Manutenção Externa - {{ product.NomeProduto }} ({{ total_externa }})</h2>
+<table class="table table-bordered">
+  <thead>
+    <tr>
+      <th>ID Estoque</th>
+      <th>ID Item</th>
+      <th>Nome Item</th>
+      <th>Saldo</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% if manut_externa %}
+      {% for m in manut_externa %}
+      <tr>
+        <td>{{ m.IDEstoque }}</td>
+        <td>{{ m.IDItem }}</td>
+        <td>{{ m.NomeProduto }}</td>
+        <td>{{ m.Saldo }}</td>
+      </tr>
+      {% endfor %}
+    {% else %}
+      <tr>
+        <td colspan="2">Nenhum registro encontrado.</td>
+      </tr>
+    {% endif %}
+  </tbody>
+</table>
+<a href="{{ url_for('euro.ver_estoques', item_id=product.IDItem) }}" class="btn btn-secondary mt-3">Voltar</a>
+{% endblock %}

@@ -8,6 +8,7 @@ from .celery_app import celery_app
 
 from config import (
     SQLALCHEMY_DATABASE_URI,
+    SQLALCHEMY_BINDS,
     SECRET_KEY,
     RECAPTCHA_PUBLIC_KEY,
     RECAPTCHA_PRIVATE_KEY,
@@ -54,6 +55,7 @@ def create_app() -> Flask:
         raise RuntimeError("SECRET_KEY não definida no .env ou ambiente!")
 
     app.config["SQLALCHEMY_DATABASE_URI"] = SQLALCHEMY_DATABASE_URI
+    app.config["SQLALCHEMY_BINDS"] = SQLALCHEMY_BINDS
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
@@ -186,9 +188,6 @@ def create_app() -> Flask:
     login_manager.session_protection = None if session_protection_env in {"", "none", "0", "false", "off"} else session_protection_env
 
     with app.app_context():
-        engine = db.engine
-
-        @event.listens_for(engine, "connect")
         def _set_sqlserver_session_settings(dbapi_connection, connection_record):
             cursor = dbapi_connection.cursor()
             cursor.execute(
@@ -202,14 +201,21 @@ def create_app() -> Flask:
             )
             cursor.close()
 
+        # Aplica as mesmas opções de sessão ao banco principal e ao bind Shempo.
+        for engine in db.engines.values():
+            event.listen(engine, "connect", _set_sqlserver_session_settings)
+
     from .euromidia.controle_paineis_views import paineis_bp
     from .autenticacao.autenticacao_views import autenticacao_bp
+    from .shempo.shempo_views import euro
+  
     from .admin.admin_views import admin
     from .kanban.kanban_views import kanban_bp
     #from .admin.estoque_views import estoques_bp
 
     app.register_blueprint(paineis_bp, url_prefix="/paineis")
     app.register_blueprint(autenticacao_bp, url_prefix="/autenticacao")
+    app.register_blueprint(euro)
     app.register_blueprint(admin, url_prefix="/admin")
     app.register_blueprint(kanban_bp, url_prefix="/kanban")
     # app.register_blueprint(estoques_bp, url_prefix="/estoques")

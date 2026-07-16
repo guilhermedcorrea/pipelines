@@ -1,0 +1,45 @@
+{# templates/clientes_notasdebito.html #}
+{% extends 'base.html' %}
+{% block title %}Clientes / Notas Débito{% endblock %}
+
+{% block content %}
+<div class="container p-4">
+  <h2>Clientes – {{ mes }}/{{ ano }}</h2>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead>
+        <tr>
+          <th>Empresa Compradora</th>
+          <th>CNPJ Compradora</th>
+          <th>Projeto</th>
+          <th>Empresa Vendedora</th>
+          <th>CNPJ Vendedora</th>
+          <th>Qtde Pedidos</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for reg in empresas %}
+        <tr
+          ondblclick="location='{{ url_for(
+            'euro.pedidos_por_cliente',
+            empresa_id=reg.id_compradora,
+            vendedora_id=reg.id_vendedora,
+            projeto_id=reg.id_projeto,
+            ano=ano,
+            mes=mes
+          ) }}'"
+          style="cursor:pointer;"
+        >
+          <td>{{ reg.nome_compradora }}</td>
+          <td>{{ reg.cnpj_compradora }}</td>
+          <td>{{ reg.nome_projeto or '–' }}</td>
+          <td>{{ reg.nome_vendedora }}</td>
+          <td>{{ reg.cnpj_vendedora }}</td>
+          <td>{{ reg.qtd_pedidos }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

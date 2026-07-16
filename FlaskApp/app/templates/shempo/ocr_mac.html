@@ -1,0 +1,104 @@
+{# templates/ocr_mac.html #}
+{% extends 'base.html' %}
+
+{% block title %}Leitor de MAC Address{% endblock %}
+
+{% block content %}
+  <h1>Leitor de MAC Address</h1>
+
+  {% if stage == 'upload' %}
+    <!-- Etapa 1: Upload da imagem -->
+    <form method="post" enctype="multipart/form-data">
+      <label>Imagem:
+        <input type="file" name="image" accept="image/*" required>
+      </label><br><br>
+      <button type="submit">Enviar e escanear</button>
+    </form>
+
+  {% elif stage == 'register' %}
+    <!-- Etapa 2: Mostrar MAC e coletar dados -->
+    <form method="post">
+      <p><strong>MAC detectado:</strong> {{ mac }}</p>
+      <input type="hidden" name="mac" value="{{ mac }}">
+
+      <label>Referência:
+        <input type="number" name="referencia" required>
+      </label><br><br>
+
+      <label>Estoque:
+        <select class="form-select" name="estoque" onchange="toggleCodPonto(this)" required>
+          <option value="">Selecione</option>
+          <option value="EstoqueMatriz">EstoqueMatriz</option>
+          <option value="EstoqueManutencaoExterna">EstoqueManutencaoExterna</option>
+          <option value="EstoqueContainer">EstoqueContainer</option>
+          <option value="EstoqueEuroMatriz">EstoqueEuroMatriz</option>
+          <option value="EstoqueEuro">EstoqueEuro</option>
+          <option value="EstoqueShempo">EstoqueShempo</option>
+          <option value="EstoqueManutencaoInterna">EstoqueManutencaoInterna</option>
+        </select>
+      </label><br><br>
+
+      <label id="cod-ponto-wrapper" style="display:none;">
+        Ponto de Estoque:
+        <select class="form-select" name="cod_ponto"></select>
+      </label><br><br>
+
+      <label>Lote:
+        <input type="text" class="form-control" name="lote" placeholder="Número do lote (default 1)">
+      </label><br><br>
+
+      <button type="submit">Confirmar</button>
+    </form>
+
+  {% elif stage == 'done' %}
+    <!-- Etapa 3: Confirmação -->
+    {% if erro %}
+      <p style="color: red;"><strong>{{ erro }}</strong></p>
+    {% else %}
+      <p><strong>MAC Address:</strong> {{ mac }}</p>
+      <p><strong>Referência (IDItem):</strong> {{ produto.IDItem }}</p>
+      <p><strong>Referência Externa:</strong> {{ produto.ReferenciaExterna }}</p>
+      <p><strong>Nome do Produto:</strong> {{ produto.NomeProduto }}</p>
+      <p><strong>Estoque selecionado:</strong> {{ estoque }}</p>
+      {% if cod_ponto %}
+        <p><strong>Cód. Ponto:</strong> {{ cod_ponto }}</p>
+      {% endif %}
+      <p><strong>Lote registrado:</strong> {{ lote }}</p>
+    {% endif %}
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // fallback para não undefined
+  const pontosEuro   = {{ (pontos_euro|default([]))|tojson }};
+  const pontosShempo = {{ (pontos_shempo|default([]))|tojson }};
+
+  function toggleCodPonto(selectEstoque) {
+    const tipo = selectEstoque.value;
+    const wrapper = document.getElementById('cod-ponto-wrapper');
+    const sel = wrapper.querySelector('select[name="cod_ponto"]');
+    sel.innerHTML = '';
+    wrapper.style.display = 'none';
+
+    if (tipo === 'EstoqueEuroMatriz') {
+      wrapper.style.display = 'block';
+      pontosEuro.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.IDProprietario + '|' + item.CodPonto;
+        opt.textContent = item.Logradouro;
+        sel.appendChild(opt);
+      });
+    }
+    else if (tipo === 'EstoqueShempo') {
+      wrapper.style.display = 'block';
+      pontosShempo.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.ID + '|' + item.CodPonto;
+        opt.textContent = item.Logradouro;
+        sel.appendChild(opt);
+      });
+    }
+  }
+</script>
+{% endblock %}

@@ -1,0 +1,145 @@
+{# templates/editar_projetos.html #}
+{% extends 'base.html' %}
+{% block title %}Editar Projetos{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+  <h2 class="mb-2"><i class="bi bi-kanban-fill"></i> Editar Projetos</h2>
+
+  <!-- Busca -->
+  <form method="get" class="mb-2" action="{{ url_for('euro.editar_projetos') }}">
+    <div class="input-group">
+      <input
+        type="text" name="search"
+        class="form-control"
+        placeholder="Pesquisar por ID, Nome ou Referência"
+        value="{{ search }}"
+      >
+      <button class="btn btn-primary">Pesquisar</button>
+    </div>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Nome</th>
+          <th>Cidade</th>
+          <th>UF</th>
+          <th>Referência Externa</th>
+          <th>Tabela de Preço</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in projetos %}
+        <tr>
+          <td>{{ p.IDProjeto }}</td>
+
+          {# NomeProjeto inline edit #}
+          <td>
+            <form
+              method="post"
+              action="{{ url_for('euro.editar_projetos', page=page, search=search) }}"
+            >
+              <input type="hidden" name="IDProjeto" value="{{ p.IDProjeto }}">
+              <input
+                name="NomeProjeto"
+                class="form-control"
+                value="{{ p.NomeProjeto or '' }}"
+                onkeydown="if(event.key==='Enter') this.form.submit()"
+              >
+            </form>
+          </td>
+
+          <td>{{ p.CidadeProjeto }}</td>
+
+          {# UF inline edit #}
+          <td>
+            <form
+              method="post"
+              action="{{ url_for('euro.editar_projetos', page=page, search=search) }}"
+            >
+              <input type="hidden" name="IDProjeto" value="{{ p.IDProjeto }}">
+              <input
+                name="UF"
+                class="form-control"
+                value="{{ p.UF or '' }}"
+                onkeydown="if(event.key==='Enter') this.form.submit()"
+              >
+            </form>
+          </td>
+
+          {# Referência Externa inline edit #}
+          <td>
+            <form
+              method="post"
+              action="{{ url_for('euro.editar_projetos', page=page, search=search) }}"
+            >
+              <input type="hidden" name="IDProjeto" value="{{ p.IDProjeto }}">
+              <input
+                name="ReferenciaExternaProjeto"
+                class="form-control"
+                value="{{ p.ReferenciaExternaProjeto or '' }}"
+                onkeydown="if(event.key==='Enter') this.form.submit()"
+              >
+            </form>
+          </td>
+
+          {# Select para Tabela de Preço #}
+          <td>
+            <form
+              method="post"
+              action="{{ url_for('euro.editar_projetos', page=page, search=search) }}"
+            >
+              <input type="hidden" name="IDProjeto" value="{{ p.IDProjeto }}">
+              <select
+                name="IDTabelaPReco"
+                class="form-select"
+                onchange="this.form.submit()"
+              >
+                <option value="">— selecione —</option>
+                {% for t in tabelas %}
+                <option
+                  value="{{ t.IDTabelaPreco }}"
+                  {% if t.IDTabelaPreco == p.IDTabelaPReco %}selected{% endif %}
+                >
+                  {{ t.NomeTabelaPReco }} – {{ t.ReferenciaTabelaPreco }}
+                </option>
+                {% endfor %}
+              </select>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Paginação -->
+  <nav class="mt-2" aria-label="Navegação de página">
+    <ul class="pagination justify-content-center">
+      <li class="page-item {% if page==1 %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.editar_projetos', page=page-1, search=search) }}">
+          Anterior
+        </a>
+      </li>
+      {% for pnum in range(1, total_pages+1) %}
+      <li class="page-item {% if pnum==page %}active{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.editar_projetos', page=pnum, search=search) }}">
+          {{ pnum }}
+        </a>
+      </li>
+      {% endfor %}
+      <li class="page-item {% if page==total_pages %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.editar_projetos', page=page+1, search=search) }}">
+          Próxima
+        </a>
+      </li>
+    </ul>
+  </nav>
+</div>
+{% endblock %}

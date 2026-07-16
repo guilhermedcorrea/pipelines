@@ -1,0 +1,117 @@
+{# templates/pedidos_por_cliente.html #}
+{% extends 'base.html' %}
+{% block title %}Pedidos de {{ empresa_vendedora.NomeEmpresa }}{% endblock %}
+
+{% block content %}
+<div class="container p-4">
+  <h2>Pedidos - {{ empresa_vendedora.NomeEmpresa }} ({{ mes }}/{{ ano }})</h2>
+
+  <form method="post" action="{{ url_for('euro.gerar_notas_debito') }}">
+    <input type="hidden" name="ano" value="{{ ano }}">
+    <input type="hidden" name="mes" value="{{ mes }}">
+
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th></th>
+            <th>ID Pedido</th>
+            <th>Compradora</th>
+            <th>CNPJ Compradora</th>
+            <th>Projeto</th>
+            <th>Vendedora</th>
+            <th>CNPJ Vendedora</th>
+            <th>Tipo</th>
+            <th>Data</th>
+            <th>Situação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for pedido, nome_status in pedidos %}
+          <tr
+            ondblclick="location='{{ url_for('euro.ver_pedido', pedido_id=pedido.IDPedido) }}'"
+            style="cursor:pointer;"
+          >
+            <td>
+              <input
+                type="checkbox"
+                name="order_ids"
+                value="{{ pedido.IDPedido }}"
+                checked
+              >
+            </td>
+            <td>{{ pedido.IDPedido }}</td>
+            <td>{{ empresa_compradora.NomeEmpresa }}</td>
+            <td>{{ empresa_compradora.CNPJ }}</td>
+            <td>{{ projeto.NomeProjeto or '–' }}</td>
+            <td>{{ empresa_vendedora.NomeEmpresa }}</td>
+            <td>{{ empresa_vendedora.CNPJ }}</td>
+
+            {# TipoPedido com badge e ícone #}
+            <td>
+              {% set t = pedido.TipoPedido %}
+              {% if t == 'Reserva Técnico' %}
+                <span class="badge"
+                      style="background-color:#f0f0f0;color:#333;
+                             font-size:1rem;padding:0.5rem 1rem;">
+                  <i class="bi bi-person-check-fill me-1"></i>{{ t }}
+                </span>
+              {% elif t == 'Produção' %}
+                <span class="badge"
+                      style="background-color:gold;color:#000;
+                             font-size:1rem;padding:0.5rem 1rem;">
+                  <i class="bi bi-gear-fill me-1"></i>{{ t }}
+                </span>
+              {% elif t == 'Pedido Venda' %}
+                <span class="badge bg-primary"
+                      style="font-size:1rem;padding:0.5rem 1rem;">
+                  <i class="bi bi-cart-fill me-1"></i>{{ t }}
+                </span>
+              {% else %}
+                <span class="badge bg-secondary"
+                      style="font-size:1rem;padding:0.5rem 1rem;">
+                  {{ t or '–' }}
+                </span>
+              {% endif %}
+            </td>
+
+            <td>
+              {{ pedido.DataPedido.strftime('%Y-%m-%d') if pedido.DataPedido else '–' }}
+            </td>
+
+            {# NomeStatusPedido com badge #}
+            <td>
+              {% set s = nome_status %}
+              {% if s in ['Ativo','Criado'] %}
+                <span class="badge bg-success"
+                      style="font-size:1rem;padding:0.5rem 1rem;">{{ s }}</span>
+              {% elif s in ['Cancelado','Atrasado'] %}
+                <span class="badge bg-danger"
+                      style="font-size:1rem;padding:0.5rem 1rem;">{{ s }}</span>
+              {% elif s == 'Concluído' %}
+                <span class="badge bg-primary"
+                      style="font-size:1rem;padding:0.5rem 1rem;">{{ s }}</span>
+              {% elif s == 'Reservado' %}
+                <span class="badge"
+                      style="background-color:gold;color:black;
+                             font-size:1rem;padding:0.5rem 1rem;">{{ s }}</span>
+              {% elif s == 'Produzindo' %}
+                <span class="badge bg-warning text-dark"
+                      style="font-size:1rem;padding:0.5rem 1rem;">{{ s }}</span>
+              {% else %}
+                <span class="badge bg-secondary"
+                      style="font-size:1rem;padding:0.5rem 1rem;">
+                  {{ s or '–' }}
+                </span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <button type="submit" class="btn btn-success">Gerar Nota Débito</button>
+  </form>
+</div>
+{% endblock %}

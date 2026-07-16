@@ -1,0 +1,124 @@
+{% extends 'base.html' %}
+{% block title %}Movimentar Estoque do Item {{ item.IDItem }}{% endblock %}
+
+{% block content %}
+<h2>Movimentar Estoque do Item {{ item.IDItem }} - {{ item.NomeProduto }}</h2>
+
+<form method="POST" action="{{ url_for('euro.movimentar_estoque_pedido', pedido_id=pedido.IDPedido, item_id=item.IDItem) }}">
+  <!-- Estoque de Origem -->
+  <div class="mb-3">
+    <label for="estoque_origem" class="form-label">Estoque de Origem</label>
+    <select name="estoque_origem" id="estoque_origem" class="form-select" onchange="atualizarProprietario('origem')">
+      {% for nome, lista in origem_groups.items() %}
+      <option value="{{ nome }}">{{ nome }} (Qtd: {{ lista[0].Saldo }})</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <!-- Proprietário de Origem -->
+  <div class="mb-3">
+    <label for="proprietario_origem" class="form-label">Proprietário de Origem</label>
+    <select name="proprietario_origem" id="proprietario_origem" class="form-select">
+      <!-- Preenchido via JS -->
+    </select>
+  </div>
+
+  <!-- Estoque de Destino -->
+  <div class="mb-3">
+    <label for="estoque_destino" class="form-label">Receber Estoque</label>
+    <select name="estoque_destino" id="estoque_destino" class="form-select" onchange="atualizarProprietario('destino')">
+      {% for nome, lista in destino_groups.items() %}
+      <option value="{{ nome }}">{{ nome }} (Qtd: {{ lista[0].Saldo }})</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <!-- Proprietário de Destino -->
+  <div class="mb-3">
+    <label for="proprietario_destino" class="form-label">Proprietário de Destino</label>
+    <select name="proprietario_destino" id="proprietario_destino" class="form-select">
+      <!-- Preenchido via JS -->
+    </select>
+  </div>
+
+  <!-- Quantidade a Transferir -->
+  <div class="mb-3">
+    <label for="quantidade" class="form-label">Quantidade a Transferir</label>
+    <input type="number" name="quantidade" id="quantidade" class="form-control" value="0" min="0" oninput="atualizarCalculos()">
+  </div>
+
+  <!-- Exibição dinâmica dos saldos -->
+  <div class="mb-3">
+    <p><strong>Disponível no Estoque de Origem após Transferência:</strong> <span id="origem_restante">0</span></p>
+    <p><strong>Disponível no Estoque de Destino após Transferência:</strong> <span id="destino_restante">0</span></p>
+  </div>
+
+  <div class="row">
+    <div class="col-md-6">
+      <h4>Detalhes Estoque de Origem</h4>
+      <table class="table table-bordered">
+        <tr>
+          <th>ID Item</th>
+          <th>Nome Produto</th>
+          <th>FamiliaID</th>
+          <th>Referência Externa</th>
+          <th>Saldo Atual</th>
+          <th>Saldo Após Transferência</th>
+        </tr>
+        <tr>
+          <td>{{ item.IDItem }}</td>
+          <td>{{ item.NomeProduto }}</td>
+          <td>{{ item.FamiliaID or '-' }}</td>
+          <td>{{ item.ReferenciaExterna }}</td>
+          <td id="origem_atual">0</td>
+          <td id="origem_transferido">0</td>
+        </tr>
+      </table>
+    </div>
+    <div class="col-md-6">
+      <h4>Detalhes Estoque de Destino</h4>
+      <table class="table table-bordered">
+        <tr>
+          <th>ID Item</th>
+          <th>Nome Produto</th>
+          <th>FamiliaID</th>
+          <th>Referência Externa</th>
+          <th>Saldo Atual</th>
+          <th>Saldo Após Transferência</th>
+        </tr>
+        <tr>
+          <td>{{ item.IDItem }}</td>
+          <td>{{ item.NomeProduto }}</td>
+          <td>{{ item.FamiliaID or '-' }}</td>
+          <td>{{ item.ReferenciaExterna }}</td>
+          <td id="destino_atual">0</td>
+          <td id="destino_transferido">0</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">Confirmar</button>
+</form>
+
+<a href="{{ url_for('euro.ver_estoques', item_id=item.IDItem) }}" class="btn btn-secondary mt-3">Voltar</a>
+
+<script>
+  // GARANTIR QUE NÃO REDIRECIONA O FORM
+  document.querySelector('form').addEventListener('submit', function(e) {
+    const action = this.action;
+    if (!action.includes('/movimentar_estoque_pedido/')) {
+      e.preventDefault();
+      alert('Erro: formulário com rota incorreta!');
+    }
+  });
+
+  function atualizarProprietario(tipo) {
+    // Se quiser preencher os selects via AJAX, faça aqui
+  }
+
+  function atualizarCalculos() {
+    // Se quiser calcular o saldo restante, implemente aqui
+  }
+</script>
+{% endblock %}

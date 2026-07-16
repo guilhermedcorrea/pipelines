@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block title %}Detalhes do Contrato{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <h2 class="mb-4">Detalhes do Contrato #{{ contrato.IDContrato }}</h2>
+  <table class="table table-bordered table-striped">
+    <tbody>
+      <tr><th>Referência Externa</th><td>{{ contrato.ReferenciaExterna }}</td></tr>
+      <tr><th>Aditivo</th><td>{{ contrato.Aditivo }}</td></tr>
+      <tr><th>Status</th><td>{{ 'Ativo' if contrato.BitAtivo else 'Inativo' }}</td></tr>
+      <tr><th>Cliente ID</th><td>{{ contrato.ClienteID }}</td></tr>
+      <tr><th>Empresa ID</th><td>{{ contrato.EmpresaID }}</td></tr>
+      <tr><th>Tipo Contrato</th><td>{{ contrato.IDTipoContrato }}</td></tr>
+      <tr><th>Data Vigência</th><td>{{ contrato.DataVigenciaContrato }}</td></tr>
+      <tr><th>Data Final Vigência</th><td>{{ contrato.DataFinalVigenciaContrato }}</td></tr>
+      <tr><th>Contrato Assinado</th><td>{{ 'Sim' if contrato.ContratoAssinado else 'Não' }}</td></tr>
+      <tr><th>Valor Contrato</th><td>R$ {{ '%.2f' | format(contrato.ValorContrato or 0) }}</td></tr>
+      <tr><th>Data Contrato</th><td>{{ contrato.DataContrato }}</td></tr>
+      <tr><th>Cidade da Obra</th><td>{{ contrato.CidadeLocalObra }}</td></tr>
+      <tr><th>UF</th><td>{{ contrato.UF }}</td></tr>
+      <tr><th>Vendedor ID</th><td>{{ contrato.IDVendedor }}</td></tr>
+      <tr><th>Pedido Cliente</th><td>{{ contrato.PedidoCliente }}</td></tr>
+      <tr><th>Referência Contrato</th><td>{{ contrato.ReferenciaContrato }}</td></tr>
+      <tr><th>Seguro</th><td>{{ 'Sim' if contrato.Seguro else 'Não' }}</td></tr>
+      <tr><th>Medicao</th><td>{{ 'Sim' if contrato.Medicao else 'Não' }}</td></tr>
+      <tr><th>Responsável Medição</th><td>{{ contrato.ResponsavelMedicao }}</td></tr>
+      <tr><th>Dia Padrão Medição</th><td>{{ contrato.DiaPadraoMedicao }}</td></tr>
+      <tr><th>Método de Cobrança</th><td>{{ contrato.MetodoCobranca }}</td></tr>
+      <tr><th>Dia Padrão Faturamento</th><td>{{ contrato.DiaPadraoFaturamento }}</td></tr>
+      <tr><th>Observação</th><td>{{ contrato.Observacao }}</td></tr>
+      <tr><th>Final do Período de Medição</th><td>{{ contrato.FinalPeriodoMedicao }}</td></tr>
+      <tr><th>Contrato (documento)</th><td><pre>{{ contrato.Contrato }}</pre></td></tr>
+      <tr><th>Final Indefinido</th><td>{{ 'Sim' if contrato.FinalIndefinido else 'Não' }}</td></tr>
+      <tr><th>Dias até Conclusão</th><td>{{ contrato.DiasAteConclusao }}</td></tr>
+    </tbody>
+  </table>
+  <a href="{{ url_for('euro.lista_contratos') }}" class="btn btn-secondary">Voltar</a>
+</div>
+{% endblock %}

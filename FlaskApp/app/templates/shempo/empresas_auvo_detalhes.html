@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+{% block title %}EmpresaAuvo #{{ empresa.IDEmpresaAuvo }}{% endblock %}
+
+{% block content %}
+
+<div class="container my-4">
+  <h2>EmpresaAuvo #{{ empresa.IDEmpresaAuvo }}</h2>
+
+  <form method="post" class="row g-3">
+    <!-- EmpresaID (com busca via Select2) -->
+    <div class="col-md-4">
+      <label for="EmpresaID" class="form-label">EmpresaID</label>
+      <select id="EmpresaID" name="EmpresaID" class="form-select" style="width:100%">
+        <option value="">— selecione —</option>
+        {% for id,nome in empresas_opts %}
+          <option value="{{ id }}"
+            {% if empresa.EmpresaID == id %}selected{% endif %}>
+            {{ id }} | {{ nome }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- ExternalID (com busca via Select2) -->
+    <div class="col-md-4">
+      <label for="ExternalID" class="form-label">ExternalID</label>
+      <select id="ExternalID" name="ExternalID" class="form-select" style="width:100%">
+        <option value="">— selecione —</option>
+        {% for id,label in external_opts %}
+          <option value="{{ id }}"
+            {% if empresa.ExternalID == id|string %}selected{% endif %}>
+            {{ label }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- GroupID (com busca via Select2) -->
+    <div class="col-md-4">
+      <label for="GroupID" class="form-label">GroupID</label>
+      <select id="GroupID" name="GroupID" class="form-select" style="width:100%">
+        <option value="">— selecione —</option>
+        {% for id,label in group_opts %}
+          <option value="{{ id }}"
+            {% if empresa.GroupID == id %}selected{% endif %}>
+            {{ label }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Toggle BitAtivo (ativa/inativa cliente) -->
+    <div class="col-md-4 d-flex align-items-end">
+      <div class="form-check form-switch">
+        <input class="form-check-input"
+               type="checkbox"
+               id="BitAtivo"
+               name="BitAtivo"
+               {% if empresa.BitAtivo %}checked{% endif %}>
+        <label class="form-check-label" for="BitAtivo">
+          Cliente Ativo
+        </label>
+      </div>
+    </div>
+
+    <!-- campos de texto editáveis -->
+    {% for field,label in [
+         ('CpfCnpj','CPF/CNPJ'),
+         ('Telefone','Telefone'),
+         ('Email','Email'),
+         ('Endereco','Endereço'),
+         ('EnderecoComplemento','Complemento'),
+         ('Latitude','Latitude'),
+         ('Longitude','Longitude'),
+         ('Descricao','Descrição')
+       ] %}
+    <div class="col-md-6">
+      <label for="{{ field }}" class="form-label">{{ label }}</label>
+      <input type="text"
+             id="{{ field }}"
+             name="{{ field }}"
+             class="form-control"
+             value="{{ empresa[field] or '' }}">
+    </div>
+    {% endfor %}
+
+    <div class="col-12">
+      <button type="submit" class="btn btn-primary">Salvar</button>
+      <a href="{{ url_for('euro.empresas_auvo') }}" class="btn btn-secondary">← Voltar</a>
+    </div>
+  </form>
+</div>
+
+<!-- Select2 (se já estiver no base.html, pode remover estes 3 includes) -->
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+<!-- Init Select2 nos três selects (mantém o value/POST idêntico) -->
+<script>
+  $(function () {
+    function initSelect2Safe($el, placeholder){
+      try {
+        if ($el.hasClass('select2-hidden-accessible')) {
+          $el.select2('destroy');
+        }
+      } catch(e) {}
+      $el.select2({
+        width: '100%',
+        placeholder: placeholder,
+        allowClear: true
+      });
+    }
+
+    initSelect2Safe($('#EmpresaID'), 'Digite para buscar…');
+    initSelect2Safe($('#ExternalID'), 'Digite para buscar…');
+    initSelect2Safe($('#GroupID'),   'Digite para buscar…');
+  });
+</script>
+
+{% endblock %}

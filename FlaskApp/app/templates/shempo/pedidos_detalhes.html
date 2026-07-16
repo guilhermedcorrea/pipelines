@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+{% block title %}Detalhes do Pedido {{ pedido.IDPedido }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+  <h2 class="mb-4">Pedido #{{ pedido.IDPedido }}</h2>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <dl class="row">
+        <dt class="col-sm-3">Tipo do Pedido:</dt>
+        <dd class="col-sm-9">{{ pedido.TipoPedido or '-' }}</dd>
+
+        <dt class="col-sm-3">Referência:</dt>
+        <dd class="col-sm-9">{{ pedido.ReferenciaPedido or '-' }}</dd>
+
+        <dt class="col-sm-3">Projeto:</dt>
+        <dd class="col-sm-9">{{ pedido.IDProjeto or '-' }}</dd>
+
+        <dt class="col-sm-3">Empresa Compradora:</dt>
+        <dd class="col-sm-9">{{ pedido.IDEmpresaCompradora or '-' }}</dd>
+
+        <dt class="col-sm-3">Empresa Vendedora:</dt>
+        <dd class="col-sm-9">{{ pedido.IDEmpresaVendedora or '-' }}</dd>
+
+        <dt class="col-sm-3">Técnico:</dt>
+        <dd class="col-sm-9">{{ pedido.IDFuncionario or '-' }}</dd>
+
+        <dt class="col-sm-3">OS Auvo:</dt>
+        <dd class="col-sm-9">{{ pedido.OSAuvo or '-' }}</dd>
+
+        <dt class="col-sm-3">Data do Pedido:</dt>
+        <dd class="col-sm-9">
+          {{ pedido.DataPedido.strftime('%d/%m/%Y %H:%M') if pedido.DataPedido else '-' }}
+        </dd>
+
+        <dt class="col-sm-3">Valor Total:</dt>
+        <dd class="col-sm-9">R$ {{ '%.2f'|format(pedido.Valor or 0) }}</dd>
+      </dl>
+    </div>
+  </div>
+
+  <h4 class="mb-3">Itens do Pedido</h4>
+  <div class="table-responsive">
+    <table class="table table-bordered align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>IDItem</th>
+          <th>Produto</th>
+          <th>Quantidade</th>
+          <th>Valor Unitário</th>
+          <th style="width: 50px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in itens %}
+        <!-- Linha principal -->
+        <tr>
+          <td>{{ item.IDItem }}</td>
+          <td>{{ item.NomeProduto }}</td>
+          <td>{{ item.Quantidade }}</td>
+          <td>R$ {{ '%.2f'|format(item.ValorUnitario or 0) }}</td>
+          <td class="text-center">
+            {% if item.IDPedidoIten in lotes_por_item %}
+              <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#lotes-{{ item.IDPedidoIten }}">
+                +
+              </button>
+            {% endif %}
+          </td>
+        </tr>
+
+        {% if item.IDPedidoIten in lotes_por_item %}
+        <!-- Lotes expandíveis -->
+        <tr class="collapse bg-light" id="lotes-{{ item.IDPedidoIten }}">
+          <td colspan="5" style="padding: 15px;">
+            <strong>Lotes para o Produto (IDItem={{ item.IDItem }}):</strong>
+            <div class="table-responsive mt-2">
+              <table class="table table-bordered small">
+                <thead class="table-light">
+                  <tr>
+                    <th>IDPedido</th>
+                    <th>IDItem</th>
+                    <th>NomeProduto</th>
+                    <th>Número do Lote</th>
+                    <th>Quantidade</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for lote in lotes_por_item[item.IDPedidoIten] %}
+                  <tr>
+                    <td>{{ lote.IDPedido }}</td>
+                    <td>{{ lote.IDItem }}</td>
+                    <td>{{ lote.NomeProduto }}</td>
+                    <td>{{ lote.NumeroLote }}</td>
+                    <td>{{ lote.Quantidade }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

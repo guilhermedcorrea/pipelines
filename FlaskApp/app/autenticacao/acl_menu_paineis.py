@@ -1,7 +1,7 @@
 from functools import wraps
 from unicodedata import normalize
 
-from flask import abort
+from flask import abort, current_app, g
 from flask_login import current_user
 
 
@@ -126,6 +126,56 @@ ITENS_MENU_BLOQUEADOS_PARA_COORDENADOR = {
 }
 
 
+ITENS_MENU_BLOQUEADOS_PARA_EMPRESA_1 = {
+    # Agrupador Estoques e todas as telas exibidas dentro dele.
+    "estoque",
+    "estoques",
+    "disponibilidades",
+    "paineis",
+    "lista_paineis",
+    "grade_painel",
+    "reserva",
+    "reserva_ocupacao",
+    "ocupacao_reserva",
+    "vencimentos_campanhas",
+    "vencimentos_campanhas_euromidia",
+
+    # Check-in: cadastro, listagem, arquivos e visualização.
+    "checkin",
+    "checkin_novo",
+    "realizar_checkin",
+    "lista_checkins",
+    "checkins_lista",
+    "checkin_lista",
+    "checkin_arquivo",
+    "checkin_visualizar",
+
+    # Agrupador Atendimento e todas as telas vinculadas ao Kanban.
+    "atendimento",
+    "kanban",
+    "kanban_atendimento",
+    "atendimento_redirect",
+    "kanban_view",
+    "kanbans",
+    "kanbans_lista",
+    "historico_atendimento",
+    "historico_cards",
+    "historico_cards_lista",
+    "health_check_comercial",
+
+    # Agrupador Financeiro e todas as telas exibidas dentro dele.
+    "financeiro",
+    "contratos",
+    "contratos_lista",
+    "movimentacao_financeira",
+    "lista_movimentacao_empresas",
+    "inadimplentes",
+    "listadevedores",
+    "aprovacao_contratos",
+    "lista_aprovacao_contratos",
+}
+
+
 ITENS_MENU_LIBERADOS_PARA_COORDENADOR = {
     "atendimento",
     "kanban",
@@ -163,6 +213,201 @@ def _normalizar_texto_acl(valor) -> str:
     texto = str(valor or "").strip().lower()
     texto = normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
     return texto.strip()
+
+
+def _converter_int_acl(valor, padrao: int = 0) -> int:
+    """Converte valores vindos do usuário/SQLAlchemy sem liberar acesso em caso de erro."""
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        return padrao
+
+
+def _flag_ativa_acl(valor) -> bool:
+    """Interpreta BIT/booleano de forma segura, inclusive quando vier como texto."""
+    if isinstance(valor, bool):
+        return valor
+
+    if isinstance(valor, (int, float)):
+        return int(valor) == 1
+
+    return _normalizar_texto_acl(valor) in {
+        "1",
+        "true",
+        "t",
+        "sim",
+        "s",
+        "yes",
+        "y",
+        "on",
+    }
+
+
+def _primeiro_atributo_usuario(*nomes):
+    """Retorna o primeiro atributo existente e não nulo do usuário autenticado."""
+    for nome in nomes:
+        valor = getattr(current_user, nome, None)
+        if valor is not None:
+            return valor
+    return None
+
+
+def _id_usuario_logado_acl() -> int:
+    """Obtém o ID do usuário de forma compatível com o modelo Flask-Login."""
+    candidatos = [
+        _primeiro_atributo_usuario(
+            "IDDimUsuarios",
+            "IDDimUsuario",
+            "id_usuario",
+            "usuario_id",
+            "id",
+        )
+    ]
+
+    try:
+        candidatos.append(current_user.get_id())
+    except Exception:
+        pass
+
+    for valor in candidatos:
+        id_usuario = _converter_int_acl(valor)
+        if id_usuario > 0:
+            return id_usuario
+
+    return 0
+
+
+def _dados_empresariais_usuario_catalogo():
+    """
+    Carrega da DimUsuarios os campos usados pela autorização do Catálogo Produtos.
+
+    A consulta ao banco é a fonte principal, pois alguns modelos usados pelo
+    Flask-Login não carregam IDEmpresaProprietaria e BitFullEmpresas no
+    ``current_user``. O resultado fica em cache somente durante a requisição.
+    """
+    chave_cache = "_acl_dados_usuario_catalogo_produtos"
+    if hasattr(g, chave_cache):
+        return getattr(g, chave_cache)
+
+    id_usuario = _id_usuario_logado_acl()
+    dados = None
+
+    if id_usuario > 0:
+        try:
+            from sqlalchemy import text
+            from ..extensions import db
+
+            registro = db.session.execute(
+                text(
+                    """
+                    SELECT TOP (1)
+                           IDEmpresaProprietaria,
+                           BitFullEmpresas,
+                           BitAtivo
+                      FROM [Integracao].[Silver].[DimUsuarios]
+                     WHERE IDDimUsuarios = :id_usuario
+                    """
+                ),
+                {"id_usuario": id_usuario},
+            ).mappings().first()
+
+            if registro is not None:
+                dados = {
+                    "IDEmpresaProprietaria": registro.get("IDEmpresaProprietaria"),
+                    "BitFullEmpresas": registro.get("BitFullEmpresas"),
+                    "BitAtivo": registro.get("BitAtivo"),
+                }
+        except Exception as exc:
+            # A aplicação continua funcional caso o banco esteja indisponível;
+            # nesse caso, a validação usa os atributos já carregados no usuário.
+            try:
+                current_app.logger.warning(
+                    "Não foi possível consultar DimUsuarios para validar o Catálogo Produtos: %s",
+                    exc,
+                )
+            except Exception:
+                pass
+
+    if dados is None:
+        dados = {
+            "IDEmpresaProprietaria": _primeiro_atributo_usuario(
+                "IDEmpresaProprietaria",
+                "id_empresa_proprietaria",
+                "IDEmpresa",
+                "id_empresa",
+            ),
+            "BitFullEmpresas": _primeiro_atributo_usuario(
+                "BitFullEmpresas",
+                "bit_full_empresas",
+                "FullEmpresas",
+                "full_empresas",
+            ),
+            "BitAtivo": _primeiro_atributo_usuario(
+                "BitAtivo",
+                "bit_ativo",
+                "Ativo",
+                "ativo",
+            ),
+        }
+
+    setattr(g, chave_cache, dados)
+    return dados
+
+
+def obter_id_empresa_proprietaria_usuario() -> int:
+    """Retorna a empresa proprietária do usuário autenticado.
+
+    A leitura usa a mesma consulta centralizada à ``Silver.DimUsuarios`` que
+    controla o Catálogo Produtos. Assim, o redirecionamento da tela inicial
+    não depende de o modelo do Flask-Login ter carregado esse campo.
+    """
+    if not getattr(current_user, "is_authenticated", False):
+        return 0
+
+    dados = _dados_empresariais_usuario_catalogo()
+
+    bit_ativo = dados.get("BitAtivo")
+    if bit_ativo is not None and not _flag_ativa_acl(bit_ativo):
+        return 0
+
+    return _converter_int_acl(dados.get("IDEmpresaProprietaria"))
+
+
+def usuario_pertence_empresa_proprietaria_1() -> bool:
+    """Retorna ``True`` somente para usuário ativo da IDEmpresaProprietaria 1."""
+    return obter_id_empresa_proprietaria_usuario() == 1
+
+
+def item_menu_bloqueado_para_empresa_1(item_menu: str) -> bool:
+    """Centraliza as telas que a empresa proprietária 1 não pode abrir."""
+    return _normalizar_texto_acl(item_menu) in ITENS_MENU_BLOQUEADOS_PARA_EMPRESA_1
+
+
+def usuario_pode_acessar_catalogo_produtos() -> bool:
+    """
+    Autoriza o Catálogo Produtos somente quando o usuário está ativo e atende
+    pelo menos uma destas condições:
+
+    - IDEmpresaProprietaria = 1; ou
+    - BitFullEmpresas = 1.
+
+    A mesma função controla o menu e o acesso direto ao endpoint.
+    """
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    dados = _dados_empresariais_usuario_catalogo()
+
+    bit_ativo = dados.get("BitAtivo")
+    if bit_ativo is not None and not _flag_ativa_acl(bit_ativo):
+        return False
+
+    id_empresa = _converter_int_acl(dados.get("IDEmpresaProprietaria"))
+    possui_acesso_total_empresas = _flag_ativa_acl(
+        dados.get("BitFullEmpresas")
+    )
+
+    return id_empresa == 1 or possui_acesso_total_empresas
 
 
 def _perfil_usuario_logado() -> str:
@@ -393,6 +638,15 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
 
     chave = _normalizar_texto_acl(item_menu)
 
+    if chave in {"catalogo_produtos", "catalogo_de_produtos", "lista_produtos"}:
+        return usuario_pode_acessar_catalogo_produtos()
+
+    # Esta regra empresarial tem prioridade sobre perfil e permissões, inclusive
+    # ADMIN_TUDO. Assim, usuários da empresa 1 não conseguem abrir as rotas por
+    # URL direta quando elas usam requer_item_menu_paineis(...).
+    if usuario_pertence_empresa_proprietaria_1() and item_menu_bloqueado_para_empresa_1(chave):
+        return False
+
     if chave in {"vencimentos_campanhas", "vencimentos_campanhas_euromidia"}:
         return (
             usuario_eh_perfil_admin()
@@ -440,6 +694,21 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
         return chave in ITENS_MENU_PAINEIS_USUARIO_LEGADO
 
     return True
+
+
+def requer_acesso_catalogo_produtos(view_func):
+    """Bloqueia o acesso direto ao Catálogo Produtos fora da regra empresarial."""
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if not getattr(current_user, "is_authenticated", False):
+            return abort(401)
+
+        if not usuario_pode_acessar_catalogo_produtos():
+            return abort(403)
+
+        return view_func(*args, **kwargs)
+
+    return wrapper
 
 
 def requer_item_menu_paineis(item_menu: str):

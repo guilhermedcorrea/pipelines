@@ -1,0 +1,220 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Movimentação de Produtos{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+  <h2 class="mb-3">Movimentação de Produtos</h2>
+  
+  <!-- Formulário de Pesquisa -->
+  <form method="get" action="{{ url_for('euro.movimentacao_produto') }}" class="mb-3">
+    <div class="input-group">
+      <input type="text" name="search" class="form-control"
+             placeholder="Pesquisar por ID ou Nome do Produto"
+             value="{{ search }}">
+      <button type="submit" class="btn btn-primary">Pesquisar</button>
+    </div>
+  </form>
+  
+  <!-- Tabela de Movimentações -->
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>ID Mov.</th>
+          <th>Usuário</th>
+          <th>Quantidade</th>
+          <th>Proprietário Origem</th>
+          <th>Cód. Ponto Origem</th>
+          <th>Proprietário Destino</th>
+          <th>Cód. Ponto Destino</th>
+          <th>Data</th>
+          <th>Movimentação</th>
+          <th>Foto</th>
+          <th>Produto</th>
+          <th style="width:50px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if movimentacoes %}
+          {% for mov in movimentacoes %}
+          <tr>
+            <td>{{ mov.IDMovimentacao }}</td>
+            <td>{{ mov.NomeUsuario }}</td>
+            <td>{{ mov.Quantidade }}</td>
+            <td>{{ mov.ProprietarioOrigem }}</td>
+            <td>{{ mov.CodPontoOrigem }}</td>
+            <td>{{ mov.ProprietarioDestino }}</td>
+            <td>{{ mov.CodPontoDestino }}</td>
+            <td>
+              {% if mov.DataMovimentacao %}
+                {{ mov.DataMovimentacao.strftime("%d/%m/%Y %H:%M") }}
+              {% endif %}
+            </td>
+           <td>
+          {# badge colorida conforme tipo de movimentação, Pedido Desmembrado em dourado #}
+          {% set m = mov.NomeMovimentacao %}
+          {% if m.startswith('Pedido Desmembrado') %}
+            <span class="badge"
+                  style="background-color:#FFD700; color:#000; font-size:1rem; padding:0.5rem 1rem;">
+              🔀 {{ m }}
+            </span>
+          {% elif 'Entrada' in m %}
+            <span class="badge bg-primary" style="font-size:1rem; padding:0.5rem 1rem;">
+              {{ m }}
+            </span>
+          {% elif 'Saída' in m or 'Devolução' in m %}
+            <span class="badge bg-danger" style="font-size:1rem; padding:0.5rem 1rem;">
+              {{ m }}
+            </span>
+          {% elif 'Transferência' in m %}
+            <span class="badge bg-success" style="font-size:1rem; padding:0.5rem 1rem;">
+              {{ m }}
+            </span>
+          {% else %}
+            <span class="badge bg-secondary" style="font-size:1rem; padding:0.5rem 1rem;">
+              {{ m }}
+            </span>
+          {% endif %}
+        </td>
+
+
+            <td style="width:60px;">
+              {% if mov.IDItem and image_urls[mov.IDItem] %}
+                <img
+                  src="{{ image_urls[mov.IDItem] }}"
+                  alt="Foto"
+                  width="40" height="40"
+                  loading="lazy"
+                  onerror="this.onerror=null;
+                    this.src='https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif';"
+                >
+              {% else %}
+                <img
+                  src="https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif"
+                  alt="Sem imagem"
+                  width="40" height="40"
+                >
+              {% endif %}
+            </td>
+            <td>
+              {% if mov.IDItem %}
+                <a href="{{ url_for('euro.ver_estoques', item_id=mov.IDItem) }}">
+                  {{ mov.NomeProduto }}
+                </a>
+              {% else %}
+                {{ mov.NomeProduto }}
+              {% endif %}
+            </td>
+            <td>
+              {% if mov.ControlaLote == 1 and mov.Lotes|length > 0 %}
+                <button class="btn btn-sm btn-secondary"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#detalhes-{{ mov.IDMovimentacao }}">
+                  +
+                </button>
+              {% endif %}
+            </td>
+          </tr>
+          {% if mov.ControlaLote == 1 and mov.Lotes|length > 0 %}
+          <tr class="collapse bg-light" id="detalhes-{{ mov.IDMovimentacao }}">
+            <td colspan="12" style="padding:10px;">
+              <strong>Lotes para o Produto (IDItem={{ mov.IDItem }}):</strong>
+              <div class="table-responsive mt-2">
+                <table class="table table-bordered small">
+                  <thead>
+                    <tr>
+                      <th>IDLote</th>
+                      <th>NumeroLote</th>
+                      <th>Quantidade</th>
+                      <th>IDEstoque</th>
+                      <th>Data Entrada</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for lote in mov.Lotes %}
+                    <tr>
+                      <td>{{ lote.IDLote }}</td>
+                      <td>{{ lote.NumeroLote }}</td>
+                      <td>{{ lote.Quantidade }}</td>
+                      <td>{{ lote.IDEstoque }}</td>
+                      <td>
+                        {% if lote.DataEntrada %}
+                          {{ lote.DataEntrada.strftime("%d/%m/%Y %H:%M") }}
+                        {% endif %}
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="12" class="text-center">Nenhuma movimentação encontrada.</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+  
+  <!-- Paginação “inteligente” -->
+  <nav aria-label="Navegação de página">
+    {% set window = 2 %}
+    {% set start = page - window if page - window > 1 else 1 %}
+    {% set end   = page + window if page + window < total_pages else total_pages %}
+    <ul class="pagination justify-content-center mt-3">
+      {# Anterior #}
+      <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.movimentacao_produto', page=page-1 if page>1 else 1, search=search) }}">
+          Anterior
+        </a>
+      </li>
+
+      {# Primeiro #}
+      {% if start > 1 %}
+      <li class="page-item">
+        <a class="page-link" href="{{ url_for('euro.movimentacao_produto', page=1, search=search) }}">1</a>
+      </li>
+      {% if start > 2 %}
+      <li class="page-item disabled"><span class="page-link">…</span></li>
+      {% endif %}
+      {% endif %}
+
+      {# Janela em torno da página atual #}
+      {% for p in range(start, end+1) %}
+      <li class="page-item {% if p == page %}active{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.movimentacao_produto', page=p, search=search) }}">
+          {{ p }}
+        </a>
+      </li>
+      {% endfor %}
+
+      {# Último #}
+      {% if end < total_pages %}
+      {% if end < total_pages - 1 %}
+      <li class="page-item disabled"><span class="page-link">…</span></li>
+      {% endif %}
+      <li class="page-item">
+        <a class="page-link"
+           href="{{ url_for('euro.movimentacao_produto', page=total_pages, search=search) }}">
+          {{ total_pages }}
+        </a>
+      </li>
+      {% endif %}
+
+      {# Próxima #}
+      <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.movimentacao_produto', page=page+1 if page<total_pages else total_pages, search=search) }}">
+          Próxima
+        </a>
+      </li>
+    </ul>
+  </nav>
+</div>
+{% endblock %}

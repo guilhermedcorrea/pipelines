@@ -1,0 +1,171 @@
+{# templates/lista_medicoes.html #}
+{% extends 'base.html' %}
+
+{% block title %}Lista de Medições{% endblock %}
+
+{% block content %}
+  {% set qa = other_args %}
+
+  <div class="container-fluid my-4">
+    <h2 class="mb-4">Lista de Medições</h2>
+
+    <!-- ------------------------ BUSCA ------------------------ -->
+    <form method="get"
+          action="{{ url_for('euro.lista_medicoes') }}"
+          class="mb-3">
+      <div class="input-group">
+        <input type="text" name="search" class="form-control"
+               placeholder="Pesquisar por Empresa ou Nº Medição"
+               value="{{ search }}">
+        <button class="btn btn-primary" type="submit">Buscar</button>
+      </div>
+    </form>
+
+    <!-- ----------------------- TABELA ------------------------ -->
+    <div class="table-responsive">
+      <table class="table table-striped table-bordered align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Nº Medição</th>
+            <th>ID&nbsp;Contrato</th>
+            <th>Projeto</th>
+            <th>Empresa</th>
+            <th>Placa</th>
+            <th class="text-nowrap">Início</th>
+            <th class="text-nowrap">Final</th>
+            <th class="text-nowrap">Mobilização</th>
+            <th>Valor&nbsp;Total</th>
+            <th class="text-nowrap">Emissão</th>
+            <th class="text-nowrap">Status</th>
+            <th>Usuário</th>
+            <th>Empresa Proprietária</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {# --- cores para badge de empresa proprietária --- #}
+          {% set cores_emp = {
+            'Shempo-SH53': '#2f7d44',
+            'Sinamovel':   '#EC691F'
+          } %}
+          {# --- estilos para badge de status (NomeOperacao) --- #}
+          {% set status_styles = {
+            'Recebido':              ('bg-success text-white',    '✅'),
+            'Faturado':              ('bg-primary text-white',    '🔵'),
+            'Aprovado':              ('bg-info text-dark',        '✔️'),
+            'Aguardando Aprovação':  ('bg-secondary text-white',  '🕓'),
+            'Enviado':               ('bg-warning text-dark',     '✉️'),
+            'Emitida':               ('bg-dark text-white',       '🟤'),
+            'A Emitir':              ('bg-danger text-white',     '🔴'),
+            'Cancelada':             ('bg-light text-dark',       '❌')
+          } %}
+
+          {% for m in medicoes %}
+            {% set cor_emp = cores_emp.get(m.NomeEmpresaProprietaria, '#6c757d') %}
+            {% set cls, ico = status_styles.get(
+                 m.NomeOperacao,
+                 ('bg-light text-dark', '⚪️')
+            ) %}
+
+            <tr class="clickable-row"
+                data-href="{{ url_for('euro.ver_medicao',
+                                      numero_medicao=m.NumeroMedicao) }}">
+
+              <td>{{ m.NumeroMedicao }}</td>
+              <td>{{ m.IDContrato }}</td>
+              <td>{{ m.NomeProjeto }}</td>
+              <td>{{ m.NomeEmpresa }}</td>
+              <td>{{ m.PlacaEquipamento }}</td>
+
+              <td class="text-nowrap">
+                {{ m.DataInicioPeriodoMedicao.strftime('%Y-%m-%d')
+                   if m.DataInicioPeriodoMedicao else '' }}
+              </td>
+              <td class="text-nowrap">
+                {{ m.DataFinalPeriodoMedicao.strftime('%Y-%m-%d')
+                   if m.DataFinalPeriodoMedicao else '' }}
+              </td>
+              <td class="text-nowrap">
+                {{ m.DataMobilizacao.strftime('%Y-%m-%d')
+                   if m.DataMobilizacao else '' }}
+              </td>
+
+              <td>
+                {% if m.ValorTotal is not none %}
+                  R$ {{ "{:,.2f}".format(m.ValorTotal)
+                         .replace(",", "X").replace(".", ",").replace("X", ".") }}
+                {% endif %}
+              </td>
+
+              <td class="text-nowrap">
+                {{ m.DataEmissao.strftime('%Y-%m-%d') if m.DataEmissao else '' }}
+              </td>
+
+              {# ------------------ BADGE DE STATUS ------------------ #}
+              <td class="text-nowrap">
+                <span class="badge rounded-pill {{ cls }}"
+                      style="font-size:1rem; padding:0.55rem 1.1rem;">
+                  {{ ico }} {{ m.NomeOperacao or '-' }}
+                </span>
+              </td>
+
+              <td>{{ m.NomeUsuario or '-' }}</td>
+
+              {# ------------ BADGE EMPRESA PROPRIETÁRIA ------------ #}
+              <td class="text-nowrap">
+                <span class="badge rounded-pill"
+                      style="
+                        background-color: {{ cor_emp }};
+                        color:#fff;
+                        font-size:0.9rem;
+                        padding:0.4rem 0.8rem;">
+                  {{ m.NomeEmpresaProprietaria or '-' }}
+                </span>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ---------------------- PAGINAÇÃO ---------------------- -->
+    <nav aria-label="Paginação" class="d-flex justify-content-center my-4">
+      <ul class="pagination mb-0">
+        <li class="page-item {% if page == 1 %}disabled{% endif %}">
+          <a class="page-link"
+             href="{{ url_for('euro.lista_medicoes', page=page-1, **qa) }}">
+            Anterior
+          </a>
+        </li>
+
+        {% for p in display_pages %}
+          {% if p == '...' %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+          {% else %}
+            <li class="page-item {% if p == page %}active{% endif %}">
+              <a class="page-link"
+                 href="{{ url_for('euro.lista_medicoes', page=p, **qa) }}">
+                {{ p }}
+              </a>
+            </li>
+          {% endif %}
+        {% endfor %}
+
+        <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+          <a class="page-link"
+             href="{{ url_for('euro.lista_medicoes', page=page+1, **qa) }}">
+            Próxima
+          </a>
+        </li>
+      </ul>
+    </nav>
+  </div>
+
+  <!-- --------------- LINHAS CLICÁVEIS --------------- -->
+  <script>
+    document.querySelectorAll('.clickable-row')
+      .forEach(row =>
+        row.addEventListener('click',
+          () => window.location = row.dataset.href));
+  </script>
+{% endblock %}

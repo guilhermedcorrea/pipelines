@@ -1,0 +1,111 @@
+{% extends 'base.html' %}
+{% block title %}Cadastrar Empresa{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+  <h2>Cadastrar Empresa</h2>
+  <form method="POST" id="formEmpresa">
+    <!-- Nome da Empresa agora auto-preenchido com razão social -->
+    <div class="mb-3">
+      <label for="NomeEmpresa" class="form-label">Razão Social (Nome da Empresa) *</label>
+      <input type="text" class="form-control" id="NomeEmpresa" name="NomeEmpresa"
+             value="{{ NomeEmpresa|default('') }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="CNPJ" class="form-label">CNPJ *</label>
+      <input type="text" class="form-control" id="CNPJ" name="CNPJ"
+             value="{{ CNPJ|default('') }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="UF" class="form-label">UF *</label>
+      <input type="text" class="form-control" id="UF" name="UF"
+             value="{{ UF|default('') }}" required>
+    </div>
+
+    <!-- Campos auto-preenchíveis -->
+    <div class="mb-3">
+      <label for="ENDERECO" class="form-label">Endereço</label>
+      <input type="text" class="form-control" id="ENDERECO" name="ENDERECO"
+             value="{{ ENDERECO|default('') }}">
+    </div>
+    <div class="mb-3">
+      <label for="BAIRRO" class="form-label">Bairro</label>
+      <input type="text" class="form-control" id="BAIRRO" name="BAIRRO"
+             value="{{ BAIRRO|default('') }}">
+    </div>
+    <div class="mb-3">
+      <label for="CidadeEmpresa" class="form-label">Cidade</label>
+      <input type="text" class="form-control" id="CidadeEmpresa" name="CidadeEmpresa"
+             value="{{ CidadeEmpresa|default('') }}">
+    </div>
+    <div class="mb-3">
+      <label for="CNAE" class="form-label">CNAE</label>
+      <input type="text" class="form-control" id="CNAE" name="CNAE"
+             value="{{ CNAE|default('') }}">
+    </div>
+    <div class="mb-3">
+      <label for="COMPLEMENTO" class="form-label">Complemento</label>
+      <input type="text" class="form-control" id="COMPLEMENTO" name="COMPLEMENTO"
+             value="{{ COMPLEMENTO|default('') }}">
+    </div>
+    <div class="mb-3">
+      <label for="NomeFantasia" class="form-label">Nome Fantasia</label>
+      <input type="text" class="form-control" id="NomeFantasia" name="NomeFantasia"
+             value="{{ NomeFantasia|default('') }}">
+    </div>
+    <div class="mb-3">
+      <label for="CapitalSocial" class="form-label">Capital Social</label>
+      <input type="number" step="0.01" class="form-control" id="CapitalSocial" name="CapitalSocial"
+             value="{{ CapitalSocial|default('') }}">
+    </div>
+    <div class="mb-3">
+      <label for="Telefone" class="form-label">Telefone</label>
+      <input type="text" class="form-control" id="Telefone" name="Telefone"
+             value="{{ Telefone|default('') }}">
+    </div>
+    <div class="mb-3">
+      <label for="NaturezaJuridica" class="form-label">Natureza Jurídica</label>
+      <input type="text" class="form-control" id="NaturezaJuridica" name="NaturezaJuridica"
+             value="{{ NaturezaJuridica|default('') }}">
+    </div>
+    <div class="mb-3">
+      <label for="CodigoNaturezaJuridica" class="form-label">Código Natureza Jurídica</label>
+      <input type="text" class="form-control" id="CodigoNaturezaJuridica" name="CodigoNaturezaJuridica"
+             value="{{ CodigoNaturezaJuridica|default('') }}">
+    </div>
+    <div class="mb-3">
+      <label for="SituacaoEspecial" class="form-label">Situação Especial</label>
+      <input type="text" class="form-control" id="SituacaoEspecial" name="SituacaoEspecial"
+             value="{{ SituacaoEspecial|default('') }}">
+    </div>
+    <div class="mb-3">
+      <label for="SituacaoCadastral" class="form-label">Situação Cadastral</label>
+      <input type="text" class="form-control" id="SituacaoCadastral" name="SituacaoCadastral"
+             value="{{ SituacaoCadastral|default('') }}">
+    </div>
+
+    <button type="submit" class="btn btn-primary">Confirmar</button>
+    <p class="mt-2 text-muted">* Campos obrigatórios</p>
+  </form>
+</div>
+
+<script>
+document.getElementById('CNPJ').addEventListener('blur', function() {
+  const raw = this.value;
+  fetch(`{{ url_for('euro.get_empresa_info') }}?cnpj=${encodeURIComponent(raw)}`)
+    .then(r => r.json())
+    .then(json => {
+      if (json.error) {
+        console.warn('API retornou erro:', json.error);
+        return;
+      }
+      // Popula cada campo cujo id == key
+      Object.entries(json).forEach(([key, val]) => {
+        const el = document.getElementById(key);
+        if (el) el.value = val ?? '';
+      });
+    })
+    .catch(err => console.error('Falha ao chamar get_empresa_info:', err));
+});
+</script>
+{% endblock %}

@@ -1,0 +1,169 @@
+{# ================================================================
+   templates/lista_entradas.html
+   Lista de entradas + marcação de etiqueta + geração de código-barras
+   ============================================================== #}
+{% extends 'base.html' %}
+{% block title %}Entradas de Produtos{% endblock %}
+
+{% block content %}
+{% set q = request.args.to_dict() %}
+{% set _ = q.pop('page', None) %}
+
+<div class="container-fluid p-2">
+  <h2 class="mb-4">Entradas de Produtos</h2>
+
+  <!-- barra superior: botão & busca -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <form id="form-etiquetas" method="post"
+          action="{{ url_for('euro.gerar_etiquetas') }}" class="m-0">
+      {{ csrf_token() if csrf_token is defined }}
+      <button type="submit" class="btn btn-success">Gerar Etiquetas</button>
+    </form>
+
+    <form method="get" action="{{ url_for('euro.lista_entradas') }}" class="m-0">
+      <div class="input-group">
+        <input type="text" name="search" class="form-control"
+               placeholder="Pesquisar por ID ou Nome" value="{{ search }}">
+        <button class="btn btn-primary" type="submit">Pesquisar</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Tabela -->
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+      <thead class="table-light text-center">
+        <tr>
+          <th style="width:40px"><input type="checkbox" id="chk-all"></th>
+          <th>ID&nbsp;Item</th>
+          <th>Nome&nbsp;Produto</th>
+          <th>Qtd</th>
+          <th>ID&nbsp;TipoEst.</th>
+          <th>ID&nbsp;Estoque</th>
+          <th>ID&nbsp;Série</th>
+          <th>Concluído</th>
+          <th>Data&nbsp;Entrada</th>
+          <th>Cód&nbsp;Barras</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for e in entradas %}
+        <tr class="text-center">
+          <td>
+            <input type="checkbox" class="form-check-input chk-row"
+                   data-id="{{ e.IDEntrada }}"
+                   {% if e.BitEtiqueta %}checked{% endif %}>
+          </td>
+
+          <td>{{ e.IDItem }}</td>
+          <td class="text-start">{{ e.NomeProduto }}</td>
+          <td>{{ e.Quantidade }}</td>
+          <td>{{ e.IDTipoEstoque }}</td>
+          <td>{{ e.IDEstoque }}</td>
+          <td>{{ e.IDSerie or '-' }}</td>
+          <td>{{ '✔' if e.BitConcluido else '–' }}</td>
+          <td>{{ e.DataEntrada.strftime('%d/%m/%Y %H:%M') if e.DataEntrada else '-' }}</td>
+
+          <td>
+            {% if barcode_map[e.IDEntrada] %}
+              <a href="{{ barcode_map[e.IDEntrada] }}" target="_blank" title="Ver etiqueta">
+                <i class="bi bi-upc-scan fs-4"></i>
+              </a>
+            {% else %}–{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Paginação -->
+  <nav class="d-flex justify-content-center my-4" aria-label="Paginação">
+    <ul class="pagination mb-0">
+      <li class="page-item {% if page == 1 %}disabled{% endif %}">
+        <a class="page-link" href="{{ url_for('euro.lista_entradas', page=page-1, **q) }}">Anterior</a>
+      </li>
+
+      {% for p in display_pages %}
+        {% if p == '...' %}
+          <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% else %}
+          <li class="page-item {% if p == page %}active{% endif %}">
+            <a class="page-link" href="{{ url_for('euro.lista_entradas', page=p, **q) }}">{{ p }}</a>
+          </li>
+        {% endif %}
+      {% endfor %}
+
+      <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+        <a class="page-link" href="{{ url_for('euro.lista_entradas', page=page+1, **q) }}">Próxima</a>
+      </li>
+    </ul>
+  </nav>
+</div>
+{% endblock content %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+
+  /* master checkbox */
+  const chkAll = document.getElementById('chk-all');
+  chkAll.addEventListener('change', () => {
+    document.querySelectorAll('.chk-row').forEach(c => {
+      c.checked = chkAll.checked;
+      c.dispatchEvent(new Event('change'));
+    });
+  });
+
+  /* AJAX para toggle_etiqueta */
+  const csrf  = {{ (csrf_token() if csrf_token is defined else '') | tojson }};
+  const base  = '{{ url_for("euro.toggle_etiqueta", identrada=0).rsplit("/",1)[0] }}/';
+
+  document.querySelectorAll('.chk-row').forEach(chk => {
+    chk.addEventListener('change', async () => {
+      const url = base + chk.dataset.id;
+      chk.disabled = true;
+      try {
+        const r = await fetch(url, {
+          method : 'POST',
+          headers: {
+            'Content-Type'    : 'application/json',
+            'X-CSRFToken'     : csrf,
+            'X-Requested-With': 'fetch'
+          }
+        });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.msg || 'Erro');
+      } catch (err) {
+        alert(err.message);
+        chk.checked = !chk.checked;
+      } finally {
+        chk.disabled = false;
+      }
+    });
+  });
+
+  /* injeta ids[] antes do submit */
+  const form = document.getElementById('form-etiquetas');
+  form.addEventListener('submit', (ev) => {
+    form.querySelectorAll('input[name="ids[]"]').forEach(e => e.remove());
+    const marcadas = document.querySelectorAll('.chk-row:checked');
+    if (marcadas.length === 0) {
+      ev.preventDefault();
+      alert('Nenhuma entrada marcada!');
+      return;
+    }
+    marcadas.forEach(chk => {
+      const h   = document.createElement('input');
+      h.type    = 'hidden';
+      h.name    = 'ids[]';
+      h.value   = chk.dataset.id;
+      form.appendChild(h);
+    });
+    console.log('[Gerar Etiquetas] ids =>',
+      [...marcadas].map(c => c.dataset.id));
+  });
+
+});
+</script>
+{% endblock scripts %}

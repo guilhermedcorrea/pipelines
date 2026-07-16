@@ -1,0 +1,134 @@
+{# templates/notas_debito.html #}
+{% extends 'base.html' %}
+{% block title %}Notas de Débito{% endblock %}
+
+{% block content %}
+{% set qa = request.args.to_dict() %}
+{% set _ = qa.pop('page', None) %}
+
+<div class="container p-4">
+  <h2 class="mb-3">Notas de Débito</h2>
+
+  <!-- barra de pesquisa e filtros -->
+  <form method="get" action="{{ url_for('euro.notas_debito') }}" class="mb-3">
+    <div class="input-group">
+      <input
+        type="text"
+        name="search"
+        class="form-control"
+        placeholder="Pesquisar por Cliente"
+        value="{{ search }}"
+      >
+      <input
+        type="date"
+        name="date_filter"
+        class="form-control"
+        value="{{ date_filter }}"
+      >
+      <select name="status_filter" class="form-select" style="max-width:200px;">
+        <option value="">Todas Situações</option>
+        {% for st in status_list %}
+          <option value="{{ st.NomeStatusPedido }}"
+            {% if status_filter == st.NomeStatusPedido %}selected{% endif %}>
+            {{ st.NomeStatusPedido }}
+          </option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-primary">Filtrar</button>
+    </div>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Cliente</th>
+          <th>CNPJ</th>
+          <th>Data</th>
+          <th>Valor R$</th>
+          <th>Situação</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for nota, cliente, cnpj, situacao in notas %}
+        <tr
+          ondblclick="location='{{ url_for('euro.nota_debito_detalhes', nota_id=nota.IDNotaDebito) }}'"
+          style="cursor:pointer;"
+        >
+          <td>{{ nota.IDNotaDebito }}</td>
+          <td>{{ cliente }}</td>
+          <td>{{ cnpj }}</td>
+          <td>{{ nota.DataNotaDebito.strftime('%Y-%m-%d') }}</td>
+          <td>{{ '{:,.2f}'.format(nota.Valor) }}</td>
+          <td>
+            {% set s = situacao %}
+            {% if s in ['Ativo','Criado'] %}
+              <span class="badge bg-success"
+                    style="font-size:1rem; padding:0.5rem 1rem; display:inline-block;">
+                {{ s }}
+              </span>
+            {% elif s in ['Cancelado','Atrasado'] %}
+              <span class="badge bg-danger"
+                    style="font-size:1rem; padding:0.5rem 1rem; display:inline-block;">
+                {{ s }}
+              </span>
+            {% elif s == 'Concluído' %}
+              <span class="badge bg-primary"
+                    style="font-size:1rem; padding:0.5rem 1rem; display:inline-block;">
+                {{ s }}
+              </span>
+            {% elif s == 'Reservado' %}
+              <span class="badge bg-warning text-dark"
+                    style="font-size:1rem; padding:0.5rem 1rem; display:inline-block;">
+                {{ s }}
+              </span>
+            {% elif s == 'Produzindo' %}
+              <span class="badge bg-warning text-dark"
+                    style="font-size:1rem; padding:0.5rem 1rem; display:inline-block;">
+                {{ s }}
+              </span>
+            {% else %}
+              <span class="badge bg-secondary"
+                    style="font-size:1rem; padding:0.5rem 1rem; display:inline-block;">
+                {{ s }}
+              </span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- paginação -->
+  <nav aria-label="Paginação">
+    <ul class="pagination justify-content-center mt-4">
+      <li class="page-item {% if page == 1 %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.notas_debito', page=page-1, **qa) }}">
+          Anterior
+        </a>
+      </li>
+      {% for p in display_pages %}
+        {% if p == '...' %}
+          <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% else %}
+          <li class="page-item {% if p == page %}active{% endif %}">
+            <a class="page-link"
+               href="{{ url_for('euro.notas_debito', page=p, **qa) }}">
+              {{ p }}
+            </a>
+          </li>
+        {% endif %}
+      {% endfor %}
+      <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.notas_debito', page=page+1, **qa) }}">
+          Próxima
+        </a>
+      </li>
+    </ul>
+  </nav>
+</div>
+{% endblock %}

@@ -1,0 +1,784 @@
+{# templates/desmembrar_modal.html #}
+<div class="modal fade" id="desmembrarModal"
+     tabindex="-1"
+     aria-labelledby="desmembrarModalLabel"
+     aria-hidden="true"
+     data-last-id="{{ ultimo_pedido_id or pedido.IDPedido }}"
+     data-total-pedido="{{ '%.2f' % (total_pedido or 0.0) }}">
+  <div class="modal-dialog modal-dialog-scrollable" id="desmembrarModalDialog">
+    <div class="modal-content">
+
+      <style>
+        /* ---- LARGURA TOTAL DO MODAL ---- */
+        #desmembrarModalDialog {
+          max-width: none !important;
+          width: calc(100vw - 3rem);
+          margin: 1.75rem auto;
+        }
+        #desmembrarModal .table td,
+        #desmembrarModal .table th {
+          white-space: nowrap;
+          vertical-align: middle;
+        }
+        #desmembrarModal .table .col-produto,
+        #desmembrarModal .table .col-serie,
+        #desmembrarModal .table .col-lote {
+          white-space: normal;
+          word-break: break-word;
+        }
+
+        /* ===== Abinhas estilo “Windows” sobre Bootstrap Tabs ===== */
+        .win-tabs {
+          border-bottom: 1px solid #dee2e6;
+          display: flex;
+          gap: .25rem;
+          padding: .25rem;
+          overflow-x: auto;
+        }
+        .win-tab {
+          display: inline-flex;
+          align-items: center;
+          gap: .5rem;
+          padding: .4rem .75rem;
+          border: 1px solid #d0d7de;
+          border-bottom: none;
+          border-top-left-radius: .5rem;
+          border-top-right-radius: .5rem;
+          background: #f7f7f7;
+          color: #495057;
+          cursor: pointer;
+          user-select: none;
+          transition: background .15s ease;
+        }
+        .win-tab:hover { background: #eee; }
+        .win-tab.active {
+          background: #ffffff;
+          color: #0d6efd;
+          font-weight: 600;
+          border-color: #c8d1da;
+          box-shadow: inset 0 1px 0 #fff;
+        }
+        .win-tab-content {
+          border: 1px solid #d0d7de;
+          border-top: none;
+          padding: .75rem;
+          background: #ffffff;
+        }
+        .small-help {
+          font-size: 0.85rem;
+          color: #6c757d;
+        }
+      </style>
+
+      <div class="modal-header">
+        <h5 class="modal-title" id="desmembrarModalLabel">
+          {% if pitem is defined %}
+            Desmembrar Item – Pedido #{{ pedido.IDPedido }}
+          {% else %}
+            Desmembrar Pedido – Pedido #{{ pedido.IDPedido }}
+          {% endif %}
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+
+      <!-- ⚠️ ID ÚNICO: nada de repetir "desmembrarModal" aqui -->
+      <div class="modal-body" id="desmembrarModalBody">
+
+        {% if pitem is defined %}
+          <div class="mb-3">
+            <strong>Produto:</strong>
+            {% if produto is defined and produto %}{{ produto.NomeProduto }}{% else %}ID {{ pitem.IDItem }}{% endif %}<br>
+            <strong>Quantidade atual:</strong> {{ pitem.Quantidade or 0 }}<br>
+            <strong>Item do pedido:</strong> #{{ pitem.IDPedidoIten }}
+          </div>
+        {% else %}
+          <div class="mb-3">
+            <strong>Pedido:</strong> #{{ pedido.IDPedido }}<br>
+
+            {% if itens is defined and itens %}
+              <div class="table-responsive mt-2">
+                <table class="table table-sm table-bordered">
+                  <thead class="table-light">
+                    <tr>
+                      <th style="width: 80px;">IDItem</th>
+                      <th class="col-produto">Produto</th>
+                      <th style="width: 80px; text-align:right;">Qtd</th>
+                      <th style="width: 120px; text-align:right;">Vlr Unit.</th>
+                      <th class="col-serie">Número de Série</th>
+                      <th class="col-lote">Lote</th>
+                      <th style="width: 130px; text-align:right;">Vlr Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for row in itens %}
+                      {% set _pitem = None %}
+                      {% set _prod  = None %}
+                      {% set _nome  = None %}
+                      {% set _qtd   = None %}
+                      {% set _vu    = None %}
+                      {% set _serie = None %}
+                      {% set _lote  = None %}
+                      {% set _vt    = None %}
+
+                      {% if row is mapping %}
+                        {% set _pitem = row.get('pitem', row.get('PedidoItens')) %}
+                        {% set _prod  = row.get('produto', row.get('Produto')) %}
+                        {% set _nome  = row.get('NomeProduto') %}
+                        {% set _qtd   = row.get('Quantidade') %}
+                        {% set _vu    = row.get('ValorUnitario') %}
+                        {% set _serie = row.get('NumeroSerie', row.get('NumerodeSerie')) %}
+                        {% set _lote  = row.get('NumeroLote', row.get('Lote')) %}
+                        {% set _vt    = row.get('ValorTotal') %}
+                      {% elif row is sequence %}
+                        {% set _pitem = row[0] %}
+                        {% if row|length > 1 %}{% set _prod = row[1] %}{% endif %}
+                      {% else %}
+                        {% set _pitem = row %}
+                      {% endif %}
+
+                      {% if _nome is none and _prod %}{% set _nome = _prod.NomeProduto %}{% endif %}
+                      {% if _qtd  is none and _pitem %}{% set _qtd  = _pitem.Quantidade %}{% endif %}
+                      {% if _vu   is none and _pitem %}{% set _vu   = _pitem.ValorUnitario %}{% endif %}
+                      {% if _vt   is none and _pitem and ('ValorTotal' in _pitem.__dict__) %}{% set _vt = _pitem.ValorTotal %}{% endif %}
+
+                      {% if _serie is none and _pitem %}
+                        {% if 'NumerodeSerie' in _pitem.__dict__ and _pitem.NumerodeSerie %}
+                          {% set _serie = _pitem.NumerodeSerie %}
+                        {% elif 'NumeroSerie' in _pitem.__dict__ and _pitem.NumeroSerie %}
+                          {% set _serie = _pitem.NumeroSerie %}
+                        {% endif %}
+                      {% endif %}
+                      {% if _lote is none and _pitem and ('NumeroLote' in _pitem.__dict__) and _pitem.NumeroLote %}
+                        {% set _lote = _pitem.NumeroLote %}
+                      {% endif %}
+
+                      {% if _serie is sequence and (_serie is not string) %}
+                        {% set _serie = ', '.join(_serie | map('string')) %}
+                      {% endif %}
+                      {% if _lote is sequence and (_lote is not string) %}
+                        {% set _lote = ', '.join(_lote | map('string')) %}
+                      {% endif %}
+
+                      {% set _qf = (_qtd if _qtd is not none else 0) | float %}
+                      {% set _uf = (_vu  if _vu  is not none else 0) | float %}
+                      {% if _vt is not none %}
+                        {% set _vt_num = _vt | float %}
+                      {% else %}
+                        {% set _vt_num = _qf * _uf %}
+                      {% endif %}
+
+                      {% set _iditem = '-' %}
+                      {% if _pitem %}
+                        {% set _iditem = _pitem.IDItem %}
+                      {% elif row is mapping and ('IDItem' in row) %}
+                        {% set _iditem = row['IDItem'] %}
+                      {% endif %}
+
+                      <tr>
+                        <td>{{ _iditem }}</td>
+                        <td class="col-produto">
+                          {% if _nome %}{{ _nome }}
+                          {% elif _pitem %}ID {{ _pitem.IDItem }}
+                          {% else %}-{% endif %}
+                        </td>
+                        <td style="text-align:right;">{{ (_qtd is not none) and _qtd or 0 }}</td>
+                        <td style="text-align:right;">R$ {{ '%.2f' % _uf }}</td>
+                        <td class="col-serie">{{ (_serie is not none and _serie != '') and _serie or '—' }}</td>
+                        <td class="col-lote">{{ (_lote  is not none and _lote  != '') and _lote  or '—' }}</td>
+                        <td style="text-align:right;">R$ {{ '%.2f' % _vt_num }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <em>Os itens do pedido serão exibidos no assistente de desmembramento.</em>
+            {% endif %}
+          </div>
+        {% endif %}
+
+        <hr>
+
+        {% set _max_allowed = 999999 %}
+        {% if pitem is defined and pitem and pitem.Quantidade is not none %}
+          {% set _max_allowed = pitem.Quantidade %}
+        {% elif qtd_max is defined and qtd_max %}
+          {% set _max_allowed = qtd_max %}
+        {% elif itens is defined and itens %}
+          {% set ns = namespace(total=0) %}
+          {% for row in itens %}
+            {% if row is mapping %}
+              {% set __p = row.get('pitem', row.get('PedidoItens')) %}
+              {% set __q = row.get('Quantidade') %}
+              {% if __q is not none %}
+                {% set ns.total = ns.total + __q %}
+              {% elif __p %}
+                {% set ns.total = ns.total + (__p.Quantidade or 0) %}
+              {% endif %}
+            {% elif row is sequence %}
+              {% set __p = row[0] %}
+              {% set ns.total = ns.total + (__p.Quantidade or 0) %}
+            {% else %}
+              {% set ns.total = ns.total + (row.Quantidade or 0) %}
+            {% endif %}
+          {% endfor %}
+          {% if ns.total > 0 %}{% set _max_allowed = ns.total %}{% endif %}
+        {% endif %}
+
+        <div class="row g-3 align-items-end">
+          <div class="col-sm-4">
+            <label class="form-label" for="qtdPedidosInput">Quantos pedidos deseja criar?</label>
+            <input type="number" min="1" max="{{ _max_allowed }}" class="form-control" id="qtdPedidosInput" value="1">
+            <div class="form-text">Mínimo 1, máximo {{ _max_allowed }}.</div>
+          </div>
+          <div class="col-sm-8">
+            <div class="alert alert-info mb-0">
+              <strong>Próximo passo:</strong> Abriremos abas para distribuir os itens entre os novos pedidos.
+            </div>
+          </div>
+        </div>
+
+        {# ======= BLOCO “Pedido Pai” resumido acima das abas ======= #}
+        <div class="mt-3">
+          <div class="p-3 bg-light border rounded">
+            <div class="d-flex justify-content-between">
+              <div>
+                <strong>Pedido Pai (#{{ pedido.IDPedido }})</strong>
+              </div>
+            </div>
+            <div class="mt-2 row">
+              <div class="col-md-6">
+                <div><strong>Referência:</strong> {{ pedido.ReferenciaPedido or '—' }}</div>
+                <div><strong>Projeto:</strong> {{ projeto.NomeProjeto if projeto else (pedido.IDProjeto or '—') }}</div>
+
+                <hr class="my-2">
+                <div><strong>Compradora – Empresa:</strong> {{ compradora_empresa.NomeEmpresa if compradora_empresa else '—' }}</div>
+                <div><strong>Compradora – Referência Externa:</strong> {{ compradora_empresa.ReferenciaExternaEmpresa if compradora_empresa else '—' }}</div>
+                <div><strong>Compradora – Local:</strong> {{ (compradora_empresa.CidadeEmpresa ~ ', ' ~ compradora_empresa.UF) if compradora_empresa else '—' }}</div>
+              </div>
+              <div class="col-md-6">
+                <div><strong>Vendedora – Empresa:</strong> {{ vendedora_empresa.NomeEmpresa if vendedora_empresa else '—' }}</div>
+                <div><strong>Vendedora – Referência Externa:</strong> {{ vendedora_empresa.ReferenciaExternaEmpresa if vendedora_empresa else '—' }}</div>
+                <div><strong>Vendedora – Local:</strong> {{ (vendedora_empresa.CidadeEmpresa ~ ', ' ~ vendedora_empresa.UF) if vendedora_empresa else '—' }}</div>
+              </div>
+            </div>
+            <div class="mt-2 row">
+              <div class="col-md-4"><strong>DataPedido:</strong> {{ pedido.DataPedido.strftime('%d/%m/%Y') if pedido.DataPedido else '—' }}</div>
+              <div class="col-md-4"><strong>OSAuvo:</strong> {{ pedido.OSAuvo or '-' }}</div>
+              <div class="col-md-4"><strong>TipoPedido:</strong> {{ pedido.TipoPedido or '-' }}</div>
+            </div>
+          </div>
+        </div>
+
+        {# ======= CONTÊINER DAS ABINHAS (SERÁ PREENCHIDO VIA JS) ======= #}
+        <div class="mt-3" id="wizardTabsRoot" aria-live="polite">
+          <!-- As abinhas e seus conteúdos serão injetados aqui via JS -->
+        </div>
+
+      </div>
+
+      
+  <div class="modal-footer">
+  <button type="button" 
+          class="btn btn-outline-secondary" 
+          data-bs-dismiss="modal">
+    Cancelar
+  </button>
+
+  {# Botão Salvar com URL correta do endpoint no blueprint 'euro' #}
+  <button type="button"
+          class="btn btn-primary"
+          id="saveSplitBtn"
+          data-pedido-id="{{ pedido.IDPedido }}"
+          data-save-url="{{ url_for('euro.desmembrar_salvar', pedido_id=pedido.IDPedido) }}">
+    Salvar
+  </button>
+
+  <a class="btn btn-secondary" 
+     id="goToWizardBtn" 
+     href="#"
+     data-pedido-id="{{ pedido.IDPedido }}"
+     {% if pitem is defined and pitem %}
+       data-pedido-iten-id="{{ pitem.IDPedidoIten }}"
+     {% endif %}>
+    Continuar
+  </a>
+</div>
+
+
+    </div>
+  </div>
+</div>
+
+{# ====== DADOS para o JS (itens do pedido pai + último IDPedido + total do pedido) ====== #}
+<script id="__desm_data__" type="application/json">
+  {{
+    {
+      "last_id": (ultimo_pedido_id or pedido.IDPedido) | int,
+      "total_pedido": (total_pedido or 0.0),
+      "itens": (
+        itens if itens is string
+        else (
+          itens if itens is not none
+          else []
+        )
+      ),
+      "parent_items_simple": (
+        parent_items_simple
+        if parent_items_simple is not none
+        else []
+      )
+    } | tojson
+  }}
+</script>
+
+<!-- ############ FALLBACK INLINE: monta as abas mesmo sem JS externo ############ -->
+<script>
+/* Se o script externo marcar presença, o fallback fica inativo */
+if (!window.__DESMEMBRAR_EXTERNAL__) {
+  (function initInlineTabsOnLoad(){
+    'use strict';
+
+    function parseData(){
+      try{
+        const el = document.getElementById('__desm_data__');
+        return JSON.parse(el?.textContent || '{}');
+      }catch(e){ return {}; }
+    }
+    const DESM_DATA = parseData();
+
+    function money(n){ n = Number(n||0); return n.toFixed(2); }
+    function moneyBR(n){ return money(n).replace('.', ','); }
+
+    // saldo global por IDItem
+    const initialRemaining = {};
+    if (Array.isArray(DESM_DATA.itens)) {
+      DESM_DATA.itens.forEach(it => {
+        const id  = it.IDItem ?? (it.pitem?.IDItem);
+        const qtd = Number(it.Quantidade ?? it.pitem?.Quantidade ?? 0);
+        if (id != null) initialRemaining[id] = (initialRemaining[id] || 0) + qtd;
+      });
+    } else if (Array.isArray(DESM_DATA.parent_items_simple)) {
+      DESM_DATA.parent_items_simple.forEach(it => {
+        const id  = it.IDItem ?? (it.pitem?.IDItem);
+        const qtd = Number(it.Quantidade ?? it.pitem?.Quantidade ?? 0);
+        if (id != null) initialRemaining[id] = (initialRemaining[id] || 0) + qtd;
+      });
+    }
+
+    function buildTabs(modal, nWanted) {
+      if (!modal) return;
+      const input   = modal.querySelector('#qtdPedidosInput');
+      const tabsRoot= modal.querySelector('#wizardTabsRoot');
+      if (!input || !tabsRoot) return;
+
+      const min = parseInt(input.min || '1', 10);
+      const max = parseInt(input.max || '999999', 10);
+      let n = parseInt(nWanted, 10);
+      if (!Number.isFinite(n)) n = min;
+      if (n < min) n = min;
+      if (Number.isFinite(max) && n > max) n = max;
+
+      if (tabsRoot.dataset.lastN && parseInt(tabsRoot.dataset.lastN, 10) === n) return;
+      tabsRoot.dataset.lastN = String(n);
+      tabsRoot.innerHTML = '';
+
+      // Estado de alocação corrente entre abas (IDItem -> qtd alocada global)
+      const allocated = {};
+      Object.keys(initialRemaining).forEach(k => allocated[k] = 0);
+
+      const bar     = document.createElement('div');
+      bar.className = 'win-tabs';
+      bar.setAttribute('role', 'tablist');
+
+      const content = document.createElement('div');
+      content.className = 'win-tab-content';
+
+      function activate(idx) {
+        bar.querySelectorAll('.win-tab').forEach(t => t.classList.remove('active'));
+        content.querySelectorAll('.tab-pane-like').forEach(p => p.style.display = 'none');
+        const t = bar.querySelector('[data-tab="'+idx+'"]');
+        const p = content.querySelector('[data-panel="'+idx+'"]');
+        if (t) t.classList.add('active');
+        if (p) p.style.display = 'block';
+      }
+
+      const lastId = Number(modal.getAttribute('data-last-id') || DESM_DATA.last_id || 0);
+      const totalPedido = Number(modal.getAttribute('data-total-pedido') || DESM_DATA.total_pedido || 0);
+
+      // helpers de saldo
+      function getRemaining(idItem){
+        const base = initialRemaining[idItem] || 0;
+        const used = allocated[idItem] || 0;
+        return Math.max(0, base - used);
+      }
+
+      function getItemById(id) {
+        id = Number(id);
+        const arr = Array.isArray(DESM_DATA.itens) && DESM_DATA.itens.length
+          ? DESM_DATA.itens
+          : (Array.isArray(DESM_DATA.parent_items_simple) ? DESM_DATA.parent_items_simple : []);
+        return arr.find(x => (x.IDItem ?? x?.pitem?.IDItem) == id);
+      }
+      function getItemName(it, id) {
+        return it?.NomeProduto ?? it?.produto?.NomeProduto ?? ('ID ' + id);
+      }
+      function getItemUnit(it) {
+        return Number(it?.ValorUnitario ?? it?.pitem?.ValorUnitario ?? 0);
+      }
+      function isItemTakenGlobally(idItem) {
+        return (allocated[idItem] || 0) > 0;
+      }
+      function buildOptionsHtml() {
+        const arr = Array.isArray(DESM_DATA.itens) && DESM_DATA.itens.length
+          ? DESM_DATA.itens
+          : (Array.isArray(DESM_DATA.parent_items_simple) ? DESM_DATA.parent_items_simple : []);
+        const seen = new Set();
+        let html = '';
+        arr.forEach(it => {
+          const id = it.IDItem ?? it?.pitem?.IDItem;
+          if (id == null || seen.has(id)) return;
+          seen.add(id);
+          const nome = getItemName(it, id);
+          const disabled = isItemTakenGlobally(id) ? 'disabled' : '';
+          html += `<option value="${id}" ${disabled}>${nome}</option>`;
+        });
+        return html;
+      }
+      function lineTemplate(optionsHtml) {
+        return `
+          <div class="row g-2 align-items-center js-line">
+            <div class="col-12 col-lg-6">
+              <select class="form-select js-sel">
+                <option value="">-- selecione um item --</option>
+                ${optionsHtml}
+              </select>
+            </div>
+            <div class="col-6 col-lg-2">
+              <input type="number" class="form-control js-qty" min="0" placeholder="Qtd">
+              <div class="small-help js-max-help"></div>
+            </div>
+            <div class="col-6 col-lg-2">
+              <input type="text" class="form-control js-unit" placeholder="Vlr Unit." readonly>
+            </div>
+            <div class="col-6 col-lg-2">
+              <div class="d-flex gap-2">
+                <input type="text" class="form-control js-total" placeholder="Total" readonly>
+                <button type="button" class="btn btn-outline-danger js-remove" title="Remover linha">×</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      // ====== monta cada aba ======
+      for (let i = 1; i <= n; i++) {
+        const tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = 'win-tab' + (i === 1 ? ' active' : '');
+        tab.dataset.tab = String(i);
+        tab.textContent = 'Pedido ' + i;
+        tab.addEventListener('click', () => activate(i));
+        bar.appendChild(tab);
+
+        const panel = document.createElement('div');
+        panel.className = 'tab-pane-like';
+        panel.dataset.panel = String(i);
+        panel.style.display = (i === 1 ? 'block' : 'none');
+
+        const previewId = (lastId || 0) + i; // apenas exibindo
+        panel.innerHTML = `
+          <div class="row g-3 align-items-end">
+            <div class="col-12 col-md-3">
+              <label class="form-label">Pedido (preview)</label>
+              <input type="text" class="form-control js-preview-id" value="${previewId}" readonly>
+              <div class="small-help">Somente visualização.</div>
+
+              <!-- NOVO CAMPO: DataAgendado -->
+              <label class="form-label mt-3">Data agendada</label>
+              <input type="date" class="form-control js-date" placeholder="AAAA-MM-DD">
+              <div class="small-help">Opcional: data prevista para este pedido.</div>
+            </div>
+
+            <!-- NOVO: Observação por pedido (dentro da aba) -->
+            <div class="col-12 col-md-9">
+              <label class="form-label">Observação do pedido</label>
+              <textarea class="form-control js-obs" rows="2" placeholder="Observação do pedido"></textarea>
+            </div>
+
+            <div class="col-12 col-md-12">
+              <label class="form-label d-flex align-items-center justify-content-between">
+                <span>Itens do Pedido Pai</span>
+                <button type="button" class="btn btn-sm btn-outline-primary js-add-line">+ Selecionar mais</button>
+              </label>
+
+              <div class="border rounded p-2" data-lines>
+                <!-- linhas dinâmicas entram aqui -->
+              </div>
+
+              <div class="small-help mt-1">
+                Apenas itens do pedido pai; cada item pode ser alocado em apenas um pedido filho.
+              </div>
+
+              <!-- === AJUSTE: Total desta aba (dinâmico) === -->
+              <div class="mt-2 text-end">
+                <span class="fw-bold">Total desta aba:</span>
+                <span class="fw-bold"> R$ <span class="js-tab-total">0,00</span></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-2"></div>
+        `;
+
+        // ======= binds e lógica por aba (linhas dinâmicas) =======
+        const linesBox = panel.querySelector('[data-lines]');
+        const addBtn   = panel.querySelector('.js-add-line');
+
+        // >>> NOVO: função para recalcular o total desta aba
+        function recalcTabTotal(panelRef) {
+          const lines = panelRef.querySelectorAll('.js-line');
+          let sum = 0;
+          lines.forEach(line => {
+            const qv = parseFloat(line.querySelector('.js-qty')?.value || '0');
+            const unitStr = (line.querySelector('.js-unit')?.value || '')
+              .replace(/\./g,'').replace(',', '.');
+            const uv = parseFloat(unitStr || '0');
+            if (Number.isFinite(qv) && Number.isFinite(uv)) {
+              sum += qv * uv;
+            }
+          });
+          const out = panelRef.querySelector('.js-tab-total');
+          if (out) out.textContent = moneyBR(sum);
+        }
+
+        function updateLine(line) {
+          const sel = line.querySelector('.js-sel');
+          const qty = line.querySelector('.js-qty');
+          const unit  = line.querySelector('.js-unit');
+          const total = line.querySelector('.js-total');
+          const help  = line.querySelector('.js-max-help');
+
+          const id = Number(sel.value || 0);
+          if (!id) {
+            qty.value = '';
+            qty.max = 0;
+            unit.value  = '';
+            total.value = '';
+            help.textContent = '';
+            recalcTabTotal(panel); // <<< atualiza total ao limpar linha
+            return;
+          }
+
+          const it   = getItemById(id);
+          const base = initialRemaining[id] || 0;
+
+          // tira a própria linha da conta quando calcular "used"
+          const currentLineQty = Number(qty.value || 0);
+          const usedGlobal  = (allocated[id] || 0) - currentLineQty;
+          const rem  = Math.max(0, base - usedGlobal);
+
+          qty.max = rem;
+          help.textContent = 'Disponível: ' + rem;
+
+          const vu = getItemUnit(it);
+          unit.value = money(vu);
+
+          let qn = Math.max(0, Math.min(Number(qty.value || 0), rem));
+          if (qn !== Number(qty.value || 0)) qty.value = qn;
+
+          total.value = money(qn * vu);
+
+          // <<< NOVO: sempre recalcula o total desta aba
+          recalcTabTotal(panel);
+        }
+
+        function applyAllocationChange(line) {
+          const sel = line.querySelector('.js-sel');
+          const qty = line.querySelector('.js-qty');
+          const id  = Number(sel.value || 0);
+
+          const oldId  = Number(line.dataset.lastId  || 0);
+          const oldQty = Number(line.dataset.lastQty || 0);
+          if (oldId) allocated[oldId] = Math.max(0, (allocated[oldId] || 0) - oldQty);
+
+          const newQty = Number(qty.value || 0);
+          if (id) allocated[id] = (allocated[id] || 0) + newQty;
+
+          line.dataset.lastId  = String(id || 0);
+          line.dataset.lastQty = String(newQty || 0);
+        }
+
+        function refreshAllLinesUI() {
+          const optionHtml = buildOptionsHtml();
+          panel.querySelectorAll('.js-line').forEach(line => {
+            const sel = line.querySelector('.js-sel');
+            const cur = Number(sel.value || 0);
+
+            sel.innerHTML = `<option value="">-- selecione um item --</option>${optionHtml}`;
+
+            if (cur) {
+              // reabilita a opção desta própria linha se já estiver "tomada"
+              const opt = Array.from(sel.options).find(o => Number(o.value || 0) === cur);
+              if (opt) opt.disabled = false;
+              sel.value = String(cur);
+            }
+
+            updateLine(line);
+          });
+        }
+
+        function bindLine(line) {
+          const sel = line.querySelector('.js-sel');
+          const qty = line.querySelector('.js-qty');
+          const btn = line.querySelector('.js-remove');
+
+          sel.addEventListener('change', () => {
+            qty.value = '';
+            applyAllocationChange(line); // retira alocação anterior
+            updateLine(line);
+            applyAllocationChange(line); // aplica alocação atual (qty=0)
+            refreshAllLinesUI();
+            recalcTabTotal(panel); // <<< NOVO
+          });
+
+          qty.addEventListener('input', () => {
+            updateLine(line);
+            applyAllocationChange(line);
+            refreshAllLinesUI();
+            recalcTabTotal(panel); // <<< NOVO
+          });
+
+          btn.addEventListener('click', () => {
+            const id  = Number(sel.value || 0);
+            const qn  = Number(qty.value || 0);
+            if (id) allocated[id] = Math.max(0, (allocated[id] || 0) - qn);
+            line.remove();
+            refreshAllLinesUI();
+            recalcTabTotal(panel); // <<< NOVO
+          });
+        }
+
+        function addLine() {
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = lineTemplate(buildOptionsHtml());
+          const line = wrapper.firstElementChild;
+          linesBox.appendChild(line);
+          bindLine(line);
+          refreshAllLinesUI();
+          recalcTabTotal(panel); // <<< NOVO
+        }
+
+        addBtn.addEventListener('click', addLine);
+        // cria primeira linha
+        addLine();
+
+        content.appendChild(panel);
+        recalcTabTotal(panel); // <<< NOVO (garantia inicial)
+      }
+
+      tabsRoot.appendChild(bar);
+      tabsRoot.appendChild(content);
+    }
+
+    const modalNow = document.getElementById('desmembrarModal');
+    if (modalNow) {
+      const input = modalNow.querySelector('#qtdPedidosInput');
+      buildTabs(modalNow, (input && input.value) ? input.value : '1');
+      if (input) {
+        input.addEventListener('input',  e => buildTabs(modalNow, e.target.value));
+        input.addEventListener('change', e => buildTabs(modalNow, e.target.value));
+      }
+    }
+
+    window.__desmembrarInit = function(el) {
+      try {
+        const modalEl = el && el.id === 'desmembrarModal'
+          ? el
+          : (el ? el.querySelector('#desmembrarModal') : document.getElementById('desmembrarModal'));
+        if (!modalEl) return;
+        const input = modalEl.querySelector('#qtdPedidosInput');
+        buildTabs(modalEl, (input && input.value) ? input.value : '1');
+        if (input && !input.__boundDesm__) {
+          input.__boundDesm__ = true;
+          input.addEventListener('input',  e => buildTabs(modalEl, e.target.value));
+          input.addEventListener('change', e => buildTabs(modalEl, e.target.value));
+        }
+      } catch (e) {
+        console.error('[desmembrar inline] init error:', e);
+      }
+    };
+  })();
+}
+</script>
+
+<!-- ========= JS do botão SALVAR (usa /desmembrar-salvar) ========= -->
+<script>
+(function () {
+  function collectChildrenPayload(modalEl){
+    const panels = modalEl.querySelectorAll('.tab-pane-like');
+    const children = [];
+    panels.forEach(panel => {
+      const lines = [];
+      panel.querySelectorAll('.js-line').forEach(line => {
+        const key = (line.querySelector('.js-sel')?.value || '').trim();
+        const qty = parseInt(line.querySelector('.js-qty')?.value || '0', 10);
+        const unitField = (line.querySelector('.js-unit')?.value || '').replace(/\./g,'').replace(',', '.');
+        const unit = parseFloat(unitField || '0');
+        if (key && qty > 0) {
+          lines.push({ key, qty, unit: (isFinite(unit) && unit > 0) ? unit : undefined });
+        }
+      });
+
+      // Observação desta aba
+      const obs = (panel.querySelector('.js-obs')?.value || '').trim();
+
+      // NOVO: DataAgendado desta aba (AAAA-MM-DD do input[type=date])
+      const _date = (panel.querySelector('.js-date')?.value || '').trim();
+
+      children.push({
+        lines,
+        observacao: obs || undefined,
+        data_agendado: _date || undefined   // <<< incluído no payload
+      });
+    });
+    // remove abas vazias no fim (estética do payload)
+    while (children.length && !(children[children.length-1].lines||[]).length) children.pop();
+    return { children };
+  }
+
+  document.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('#saveSplitBtn');
+    if (!btn) return;
+
+    const modal = document.getElementById('desmembrarModal');
+    const pedidoId = parseInt(btn.dataset.pedidoId, 10);
+    const payload = collectChildrenPayload(modal);
+
+    if (!payload.children.length) {
+      alert('Selecione pelo menos um item em alguma aba.');
+      return;
+    }
+
+    btn.disabled = true;
+    try {
+      const urlAttr = btn.dataset.saveUrl || `/pedidos/${pedidoId}/desmembrar_salvar`;
+      const res = await fetch(urlAttr, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Falha ao salvar');
+
+      alert(`Sucesso! Pedidos filhos criados: ${data.filhos.join(', ')}`);
+      try { window.bootstrap?.Modal?.getOrCreateInstance(modal)?.hide(); } catch(_) {}
+      location.reload();
+    } catch (e) {
+      alert('Erro: ' + (e.message || e));
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+</script>

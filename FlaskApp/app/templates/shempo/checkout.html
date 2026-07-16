@@ -1,0 +1,513 @@
+{# templates/checkout.html #}
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Checkout – Peças e Componentes{% endblock %}
+
+{% block content %}
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0/dist/css/select2.min.css" rel="stylesheet"/>
+
+<div class="container my-5" style="max-width:900px;">
+  <h2 class="mb-4">Checkout</h2>
+  <form method="POST" action="{{ url_for('euro.checkout') }}">
+
+    <!-- Itens no Carrinho -->
+    <div class="card mb-4">
+      <div class="card-header"><h5 class="mb-0">Itens no Carrinho</h5></div>
+      <div class="card-body p-0">
+        <table class="table mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>IDItem</th>
+              <th>Produto</th>
+              <th>Disp.</th>
+              <th style="width:110px;">Qtd.</th>
+              <th style="width:140px;">V. Unitário</th>   {# NOVO #}
+              <th style="width:160px;">V. Total</th>      {# NOVO #}
+              <th style="width:140px;">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in items %}
+              {% set prod = entry.produto %}
+              <tr>
+                <td>{{ prod.IDItem }}</td>
+                <td>{{ prod.NomeProduto }}</td>
+                <td>{{ entry.estoques|map(attribute='Saldo')|sum }}</td>
+                <td>
+                  <input type="number"
+                         name="quantidade_{{ prod.IDItem }}"
+                         min="1"
+                         max="{{ entry.estoques|map(attribute='Saldo')|sum }}"
+                         value="{{ cart[prod.IDItem] }}"
+                         class="form-control form-control-sm js-qtd"
+                         data-item="{{ prod.IDItem }}"
+                         style="width:100px;">
+                </td>
+
+                {# NOVO: Valor Unitário #}
+                <td>
+                  <input type="text"
+                         inputmode="decimal"
+                         placeholder="ex.: 1.234,56"
+                         name="valor_unitario_{{ prod.IDItem }}"
+                         class="form-control form-control-sm js-vunit"
+                         data-item="{{ prod.IDItem }}"
+                         autocomplete="off"
+                         style="width:130px;">
+                </td>
+
+                {# NOVO: Valor Total #}
+                <td>
+                  <input type="text"
+                         inputmode="decimal"
+                         placeholder="preenche auto"
+                         name="valor_total_{{ prod.IDItem }}"
+                         class="form-control form-control-sm js-vtotal"
+                         data-item="{{ prod.IDItem }}"
+                         autocomplete="off"
+                         style="width:150px;">
+                </td>
+
+                <td>
+                  <button type="submit"
+                          class="btn btn-outline-danger btn-sm"
+                          formaction="{{ url_for('euro.remove_from_cart', item_id=prod.IDItem) }}"
+                          formmethod="post" formnovalidate>
+                    <i class="bi bi-trash"></i> Remover
+                  </button>
+                </td>
+              </tr>
+
+              <!-- Seletor de Estoque -->
+              <tr>
+                <td colspan="7" class="bg-light pt-2 pb-2">
+                  <label class="form-label">Selecione o Estoque:</label>
+                  <select name="estoque_{{ prod.IDItem }}"
+                          class="form-select form-select-sm estoque-select"
+                          data-item="{{ prod.IDItem }}">
+                    {% for est in entry.estoques %}
+                      {% set key = prod.IDItem|string ~ ',' ~ est.IDEstoque %}
+                      <option value="{{ est.IDEstoque }}"
+                              data-tipo="{{ est.IDTipoEstoque }}"
+                              data-codponto="{{ est.CodPonto|default('') }}"
+                              {% if (lotes_json.get(key, [])|length > 0) or loop.first %}selected{% endif %}>
+                        {{ tipo_est_map[est.IDTipoEstoque] }} ({{ est.Saldo }} unid.)
+                      </option>
+                    {% endfor %}
+                  </select>
+
+                  <!-- CodPonto para EuroMatriz -->
+                  <div id="codponto_section_{{ prod.IDItem }}" style="display:none;" class="mt-2">
+                    <label class="form-label small text-muted">Selecione CodPonto</label>
+                    <select name="codponto_{{ prod.IDItem }}"
+                            id="codponto_select_{{ prod.IDItem }}"
+                            class="form-select form-select-sm">
+                      <option value="">-- selecione um ponto --</option>
+                    </select>
+                  </div>
+                </td>
+              </tr>
+
+              {# Bloco de Lotes — renderiza sempre; JS controla exibição #}
+              {% if prod.ControlaLote %}
+              <tr id="lote_section_{{ prod.IDItem }}" class="bg-white lote-section" style="display:none;">
+                <td colspan="7">
+                  <strong>Lotes disponíveis:</strong>
+                  <table class="table table-sm table-bordered mt-2 mb-2">
+                    <thead>
+                      <tr><th>Nº Lote</th><th>Qtd.</th></tr>
+                    </thead>
+                    <tbody id="lote_body_{{ prod.IDItem }}" class="lote-body"></tbody>
+                  </table>
+                  <div class="mt-2">
+                    <label for="lote_{{ prod.IDItem }}" class="form-label small text-muted">
+                      Selecione o Lote
+                    </label>
+                    <select id="lote_{{ prod.IDItem }}"
+                            name="lote_{{ prod.IDItem }}"
+                            class="form-select form-select-sm lote-select"
+                            disabled>
+                      <option value="" disabled selected>— escolha um lote —</option>
+                    </select>
+                  </div>
+                </td>
+              </tr>
+              {% endif %}
+
+              {# Bloco de Séries #}
+              {% if prod.ControlaNumerodeSerie %}
+              <tr id="serie_section_{{ prod.IDItem }}" class="bg-white serie-section" style="display:none;">
+                <td colspan="7">
+                  <label class="form-label">Selecione Série(s):</label>
+                  <div id="serie_container_{{ prod.IDItem }}" class="mb-2"></div>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-primary add-serie"
+                    data-item="{{ prod.IDItem }}"
+                  >
+                    + Selecionar mais
+                  </button>
+                </td>
+              </tr>
+              {% endif %}
+
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Finalizar Pedido -->
+    <div class="card">
+      <div class="card-header"><h5 class="mb-0">Finalizar Pedido</h5></div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label for="tipo_pedido" class="form-label">Tipo Pedido</label>
+          <select class="form-select" id="tipo_pedido" name="tipo_pedido">
+            <option value="venda">Pedido Venda</option>
+            <option value="reserva">Reserva Técnico</option>
+          </select>
+        </div>
+
+        <!-- Venda -->
+        <div id="div_venda" style="display:none;">
+          <div class="mb-3">
+            <label for="referencia_pedido" class="form-label">Referência do Pedido</label>
+            <input type="number" id="referencia_pedido" name="referencia_pedido" class="form-control">
+          </div>
+          <div class="mb-3">
+            <label for="id_projeto" class="form-label">Projeto</label>
+            <select id="id_projeto" name="id_projeto" class="form-select select2" data-placeholder="Selecione um projeto">
+              <option value="" disabled selected></option>
+              {% for p in projetos %}
+                <option value="{{ p.IDProjeto }}">{{ p.NomeProjeto }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label for="id_empresa_compradora" class="form-label">Empresa Compradora</label>
+            <select id="id_empresa_compradora" name="id_empresa_compradora" class="form-select select2" data-placeholder="Selecione uma empresa">
+              <option value="" disabled selected></option>
+              {% for e in empresas %}
+                <option value="{{ e.EmpresaID }}">{{ e.NomeEmpresa }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label for="id_empresa_vendedora" class="form-label">Empresa Vendedora</label>
+            <select id="id_empresa_vendedora" name="id_empresa_vendedora" class="form-select select2" data-placeholder="Selecione uma empresa">
+              <option value="" disabled selected></option>
+              {% for e in empresas %}
+                <option value="{{ e.EmpresaID }}">{{ e.NomeEmpresa }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <!-- Reserva -->
+        <div id="div_reserva" style="display:none;">
+          <div class="mb-3">
+            <label for="os_auvo" class="form-label">
+              OS Auvo <small class="text-muted">(opcional)</small>
+            </label>
+            <input type="number" id="os_auvo" name="os_auvo" class="form-control" placeholder="Opcional">
+          </div>
+          <div class="mb-3">
+            <label for="tecnico" class="form-label">Técnico</label>
+            <select id="tecnico" name="tecnico" class="form-select">
+              <option value="" disabled selected>Selecione</option>
+              {% for func in funcionarios %}
+                <option value="{{ func.IDFuncionario }}">{{ func.NomeFuncionario }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-custom">Fechar Pedido</button>
+      </div>
+    </div>
+
+  </form>
+</div>
+
+  <!-- jQuery + Select2 JS -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
+
+  <script>
+    // ------------------------ helpers moeda ------------------------
+    function parseMoney(str) {
+      if (!str) return NaN;
+      // aceita "1.234,56" ou "1234.56"
+      const s = String(str).trim().replace(/\./g, '').replace(',', '.');
+      return parseFloat(s);
+    }
+    function formatMoney(n) {
+      if (!isFinite(n)) return '';
+      return n.toFixed(2).replace('.', ',');
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      // 1) Toggle Venda vs Reserva
+      const tipo = document.getElementById('tipo_pedido'),
+            divV = document.getElementById('div_venda'),
+            divR = document.getElementById('div_reserva');
+      function toggleVR() {
+        divV.style.display = tipo.value === 'venda'   ? 'block' : 'none';
+        divR.style.display = tipo.value === 'reserva' ? 'block' : 'none';
+      }
+      tipo.addEventListener('change', toggleVR);
+      toggleVR();
+
+      // 2) Select2
+      if (window.jQuery && $.fn.select2) {
+        $('.select2').select2({ width: '100%', allowClear: true });
+      }
+
+      // 3) Auto-cálculo V.Total = Qtd * V.Unit (se usuário não editar o total)
+      const qtdInputs   = document.querySelectorAll('.js-qtd');
+      const vunitInputs = document.querySelectorAll('.js-vunit');
+      const vtotInputs  = document.querySelectorAll('.js-vtotal');
+
+      // marca total como "autofill" inicialmente
+      vtotInputs.forEach(i => i.dataset.autofill = '1');
+
+      function recalcFor(itemId) {
+        const qEl = document.querySelector(`.js-qtd[data-item="${itemId}"]`);
+        const uEl = document.querySelector(`.js-vunit[data-item="${itemId}"]`);
+        const tEl = document.querySelector(`.js-vtotal[data-item="${itemId}"]`);
+        if (!qEl || !uEl || !tEl) return;
+
+        const q = parseInt(qEl.value || '0', 10);
+        const u = parseMoney(uEl.value);
+        const shouldFill = tEl.dataset.autofill === '1';
+
+        if (shouldFill && isFinite(q) && isFinite(u)) {
+          tEl.value = formatMoney(q * u);
+        }
+      }
+
+      // se usuário digitar no total, desliga o autofill
+      vtotInputs.forEach(i => {
+        i.addEventListener('input', () => { i.dataset.autofill = '0'; });
+        i.addEventListener('change', () => { i.dataset.autofill = '0'; });
+      });
+
+      qtdInputs.forEach(i => i.addEventListener('input', () => recalcFor(i.dataset.item)));
+      vunitInputs.forEach(i => i.addEventListener('input', () => recalcFor(i.dataset.item)));
+
+      // ------------------------ dados do servidor ------------------------
+      const lotesData     = {{ lotes_json   | tojson }};
+      const codpontosData = {{ codpontos_json | tojson }};
+      const EURO_TIPO     = {{ tipo_ids['EstoqueEuroMatriz'] }};
+      const fetchedSeries = {};
+
+      function hideSeries(itemId) {
+        const sec  = document.getElementById(`serie_section_${itemId}`);
+        const cont = document.getElementById(`serie_container_${itemId}`);
+        if (sec)  sec.style.display = 'none';
+        if (cont) cont.innerHTML = '';
+      }
+
+      function addSerieSelect(itemId) {
+        const arr = fetchedSeries[itemId] || [];
+        if (!arr.length) return;
+        const cont = document.getElementById(`serie_container_${itemId}`);
+        const selected = Array.from(cont.querySelectorAll('select'))
+                              .map(s => s.value)
+                              .filter(v => v);
+        const remaining = arr.filter(serie => !selected.includes(serie));
+        if (!remaining.length) return;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'd-flex align-items-center mb-2 serie-wrapper';
+        const sel = document.createElement('select');
+        sel.name      = `serie_${itemId}[]`;
+        sel.className = 'form-select form-select-sm me-2';
+        sel.innerHTML = '<option value="">Selecione a série</option>';
+        remaining.forEach(numSerie => {
+          sel.insertAdjacentHTML('beforeend',
+            `<option value="${numSerie}">${numSerie}</option>`
+          );
+        });
+        wrap.appendChild(sel);
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-sm btn-outline-danger';
+        btn.textContent = '×';
+        btn.onclick = () => wrap.remove();
+        wrap.appendChild(btn);
+
+        cont.appendChild(wrap);
+      }
+
+      // quando muda estoque, recarrega codponto, lotes e limpa séries
+      document.querySelectorAll('.estoque-select').forEach(sel => {
+        sel.addEventListener('change', () => {
+          const itemId = sel.dataset.item;
+          const key    = `${itemId},${sel.value}`;
+          const tipo   = sel.selectedOptions[0].dataset.tipo;
+
+          // CodPonto (apenas EuroMatriz)
+          const cpSec = document.getElementById(`codponto_section_${itemId}`);
+          const cpSel = document.getElementById(`codponto_select_${itemId}`);
+          if (cpSec && cpSel) {
+            if (tipo == EURO_TIPO && (codpontosData[key] || []).length) {
+              cpSel.innerHTML = '<option value="">-- selecione um ponto --</option>';
+              (codpontosData[key] || []).forEach(p =>
+                cpSel.insertAdjacentHTML('beforeend', `<option>${p}</option>`)
+              );
+              cpSec.style.display = 'block';
+            } else {
+              cpSec.style.display = 'none';
+            }
+          }
+
+          // Lotes
+          const loteSec  = document.getElementById(`lote_section_${itemId}`);
+          const loteBody = document.getElementById(`lote_body_${itemId}`);
+          const loteSel  = document.getElementById(`lote_${itemId}`);
+          if (loteSec && loteBody && loteSel) {
+            loteBody.innerHTML = '';
+            if ((lotesData[key] || []).length > 0) {
+              loteSel.innerHTML  = '<option value="" disabled selected>— escolha um lote —</option>';
+              (lotesData[key] || []).forEach(l => {
+                loteBody.insertAdjacentHTML('beforeend',
+                  `<tr><td>${l.NumeroLote}</td><td>${l.Quantidade}</td></tr>`
+                );
+                loteSel.insertAdjacentHTML('beforeend',
+                  `<option value="${l.NumeroLote}">${l.NumeroLote} (Qtd: ${l.Quantidade})</option>`
+                );
+              });
+              loteSel.disabled      = false;
+              loteSec.style.display = 'table-row';
+            } else {
+              loteSel.innerHTML     = '<option value="" disabled selected>— sem lotes —</option>';
+              loteSel.disabled      = true;
+              loteSec.style.display = 'none';
+            }
+          }
+
+          // Limpa séries já carregadas
+          hideSeries(itemId);
+
+          // OnChange do lote: buscar séries
+          if (loteSel) {
+            loteSel.onchange = () => {
+              const loteVal = loteSel.value;
+              if (!loteVal) {
+                hideSeries(itemId);
+                return;
+              }
+              fetch(
+                `/admin/shempo/v1/api/series?item=${itemId}` +
+                `&lote=${encodeURIComponent(loteVal)}` +
+                `&tipo=${tipo}`
+              )
+              .then(r => r.json())
+              .then(data => {
+                const arr = data.series || [];
+                fetchedSeries[itemId] = arr;
+                const sec  = document.getElementById(`serie_section_${itemId}`);
+                const cont = document.getElementById(`serie_container_${itemId}`);
+                if (sec && cont && arr.length) {
+                  cont.innerHTML = '';
+                  sec.style.display = 'table-row';
+                  const wrap = document.createElement('div');
+                  wrap.className = 'd-flex align-items-center mb-2 serie-wrapper';
+                  const s = document.createElement('select');
+                  s.name      = `serie_${itemId}[]`;
+                  s.className = 'form-select form-select-sm me-2';
+                  s.innerHTML = '<option value="">Selecione a série</option>';
+                  arr.forEach(numSerie =>
+                    s.insertAdjacentHTML('beforeend',
+                      `<option value="${numSerie}">${numSerie}</option>`
+                    )
+                  );
+                  wrap.appendChild(s);
+                  const b = document.createElement('button');
+                  b.type = 'button';
+                  b.className = 'btn btn-sm btn-outline-danger';
+                  b.textContent = '×';
+                  b.onclick = () => wrap.remove();
+                  wrap.appendChild(b);
+                  cont.appendChild(wrap);
+                } else {
+                  hideSeries(itemId);
+                }
+              })
+              .catch(() => hideSeries(itemId));
+            };
+          }
+        });
+      });
+
+      // botão + Selecionar mais séries
+      document.querySelectorAll('.add-serie').forEach(btn =>
+        btn.addEventListener('click', () => addSerieSelect(btn.dataset.item))
+      );
+
+      // inicializa
+      document.querySelectorAll('.estoque-select')
+              .forEach(s => s.dispatchEvent(new Event('change')));
+    });
+
+    // ------------------------ PREFILL via scanner ------------------------
+    document.addEventListener('DOMContentLoaded', () => {
+      const prefill = {{ prefill_json | tojson }};
+      if (!Object.keys(prefill).length) return;
+      const waitFor = (cond, cb) => (function w(){ cond() ? cb() : setTimeout(w,90); })();
+
+      Object.entries(prefill).forEach(([itemId, lst]) => {
+        const info0   = lst[0];
+        const estSel  = document.querySelector(`select[name="estoque_${itemId}"]`);
+        if (!estSel) return;
+
+        // estoque
+        [...estSel.options].forEach(o => {
+          if (+o.value === info0.estoque && +o.dataset.tipo === info0.tipo)
+            o.selected = true;
+        });
+        estSel.dispatchEvent(new Event('change'));
+
+        // codponto (EuroMatriz)
+        if (info0.codp !== undefined && info0.codp !== null){
+          waitFor(() => document.getElementById(`codponto_select_${itemId}`),
+                  () => {
+            const cpSel = document.getElementById(`codponto_select_${itemId}`);
+            if (cpSel){
+              [...cpSel.options].forEach(o => { if (o.value == info0.codp) o.selected = true; });
+              cpSel.dispatchEvent(new Event('change'));
+            }
+          });
+        }
+
+        // lote
+        waitFor(() => document.getElementById(`lote_${itemId}`), () => {
+          const loteSel = document.getElementById(`lote_${itemId}`);
+          if (!loteSel) return;
+          [...loteSel.options].forEach(o => { if (o.value === info0.lote) o.selected = true; });
+          loteSel.dispatchEvent(new Event('change'));
+        });
+
+        // séries
+        waitFor(() => {
+          const cont = document.getElementById(`serie_container_${itemId}`);
+          return cont && cont.querySelector('select option');
+        }, () => {
+          const cont = document.getElementById(`serie_container_${itemId}`);
+          lst.forEach(si => {
+            let sel = [...cont.querySelectorAll('select')].find(s => !s.value);
+            if (!sel){
+              const addBtn = document.querySelector(`.add-serie[data-item="${itemId}"]`);
+              if (addBtn) addBtn.click();
+              sel = cont.lastElementChild.querySelector('select');
+            }
+            [...sel.options].forEach(o => { if (o.value === si.serie) o.selected = true; });
+          });
+        });
+      });
+    });
+  </script>
+{% endblock content %}

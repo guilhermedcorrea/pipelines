@@ -1,0 +1,92 @@
+{# -------------------------------------------------------------------- #
+  templates/medicoes_aprovadas.html
+  Lista de medições aprovadas (10 p/ página) com pesquisa por Número
+# -------------------------------------------------------------------- #}
+{% extends 'base.html' %}
+
+{% block title %}Medições Aprovadas{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+  <h2 class="mb-2">Medições Aprovadas</h2>
+
+  <!-- barra de pesquisa -->
+  <form method="get" action="{{ url_for('euro.lista_medicoes_aprovadas') }}" class="mb-3">
+    <div class="input-group">
+      <input type="text" name="search" class="form-control"
+             placeholder="Pesquisar por Número da Medição"
+             value="{{ search }}">
+      <button type="submit" class="btn btn-primary">Pesquisar</button>
+    </div>
+  </form>
+
+  <!-- tabela -->
+  <div class="table-responsive">
+    <table class="table table-sm table-striped align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>ID</th>
+          <th>NumeroMedicao</th>
+          <th>Valor (R$)</th>
+          <th>Qtd Equip.</th>
+          <th>Data Aprovação</th>
+          <th>Usuário</th>
+          <th>Situação</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in items %}
+          <tr>
+            <td>{{ m.IDMedicaoAprovada }}</td>
+            <td>{{ m.NumeroMedicao }}</td>
+            <td>{{ '{:,.2f}'.format(m.Valor) }}</td>
+            <td>{{ m.QuantidadeEquipamentos }}</td>
+            <td>{{ m.DataAprovacao.strftime('%d/%m/%Y %H:%M') if m.DataAprovacao else '' }}</td>
+            <td>{{ m.NomeUsuario }}</td>
+            <td>{{ m.Situacao }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="text-center">Nenhuma medição encontrada.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- paginação -->
+  {% set qa = other_args %}
+  <nav aria-label="Paginação" class="d-flex justify-content-center my-3">
+    <ul class="pagination mb-0">
+
+      {# botão anterior #}
+      <li class="page-item {% if page == 1 %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.lista_medicoes_aprovadas', page=page-1, **qa) }}">
+          Anterior
+        </a>
+      </li>
+
+      {# números/reticências #}
+      {% for p in display_pages %}
+        {% if p == '...' %}
+          <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% else %}
+          <li class="page-item {% if p == page %}active{% endif %}">
+            <a class="page-link"
+               href="{{ url_for('euro.lista_medicoes_aprovadas', page=p, **qa) }}">
+              {{ p }}
+            </a>
+          </li>
+        {% endif %}
+      {% endfor %}
+
+      {# botão próximo #}
+      <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+        <a class="page-link"
+           href="{{ url_for('euro.lista_medicoes_aprovadas', page=page+1, **qa) }}">
+          Próxima
+        </a>
+      </li>
+    </ul>
+  </nav>
+</div>
+{% endblock %}

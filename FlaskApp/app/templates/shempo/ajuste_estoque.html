@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% block title %}Ajuste de Estoque{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-3">
+  <h2 class="mb-3">Ajuste de Estoque via CSV</h2>
+
+  <!-- Se não existe pré-visualização (não foi enviado CSV ainda), mostra o formulário -->
+  {% if not ajustes %}
+  <form method="POST" enctype="multipart/form-data" action="{{ url_for('euro.ajuste_estoque') }}" class="border p-3 rounded bg-light">
+    <div class="mb-3">
+      <label for="file" class="form-label">Selecione o arquivo CSV:</label>
+      <!-- O 'name' deve ser igual ao usado no back-end: 'file' -->
+      <input class="form-control" type="file" id="file" name="file" accept=".csv" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Carregar Arquivo</button>
+  </form>
+
+  {% else %}
+  <!-- Pré-visualização dos ajustes, com botão para Confirmar -->
+  <h5 class="mb-3 text-success">Pré-visualização dos ajustes:</h5>
+  <form method="POST" action="{{ url_for('euro.ajuste_estoque') }}">
+    <input type="hidden" name="confirmar" value="1">
+    <table class="table table-bordered table-striped align-middle">
+      <thead class="table-dark">
+        <tr>
+          <th>IDItem</th>
+          <th>Nome do Produto</th>
+          <th>Saldo Atual</th>
+          <th>Nova Quantidade</th>
+          <th>Estoque Mínimo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in ajustes %}
+        <tr class="{% if not item.ProdutoExiste %}table-danger{% endif %}">
+          <td>{{ item.IDItem }}</td>
+          <td>{{ item.NomeProduto }}</td>
+          <td>{{ item.SaldoAtual }}</td>
+          <td>{{ item.NovaQuantidade }}</td>
+          <td>{{ item.NovoMinimo }}</td>
+        </tr>
+        <!-- Serializa cada linha de ajuste para reenviar no POST de confirmação -->
+        <input type="hidden" name="ajustes[]" value="{{ item|tojson }}">
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="d-flex justify-content-end mt-3">
+      <a href="{{ url_for('euro.ajuste_estoque') }}" class="btn btn-secondary me-2">Cancelar</a>
+      <button type="submit" class="btn btn-success">Confirmar Ajustes</button>
+    </div>
+  </form>
+  {% endif %}
+
+  <hr>
+  <h5>Formato do CSV esperado:</h5>
+  <pre class="bg-white p-2 border rounded">
+IDItem,Quantidade,EstoqueMinimo,NumeroLote,NumerodeSerie
+101,50,5,100,aaccdde112
+102,100,10,200,aabbcce200
+...</pre>
+</div>
+{% endblock %}

@@ -1,0 +1,148 @@
+{% extends "euromidia/base_euromidia.html" %}
+{% block title %}Curva de Giro{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+  <h2 class="mb-3">Curva de Giro</h2>
+
+  <!-- Pesquisa -->
+  <form method="get" action="{{ url_for('euro.curva_giro') }}" class="mb-3">
+    <div class="input-group">
+      <input type="text" name="search" class="form-control"
+             placeholder="Pesquisar por ID, Produto ou Referência"
+             value="{{ search }}">
+      <button class="btn btn-primary">Pesquisar</button>
+    </div>
+  </form>
+
+  <!-- Tabela -->
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>IDItem</th>
+          <th>Foto</th>
+          <th>Nome Produto</th>
+          <th>Referência Externa</th>
+          <th>Total Vendido</th>
+          <th>Estoque Atual</th>
+          <th>Giro</th>
+          <th>Consumo % Estoque/mês</th>
+          <th>Projeção até zerar (dias)</th>
+          <th>
+            Tempo até zerar<br>Estoque de Seg.
+            <a href="{{ url_for('euro.curva_giro',
+                                 search=search,
+                                 sort='tempo_seguro',
+                                 order='asc',
+                                 page=page) }}">▲</a>
+            <a href="{{ url_for('euro.curva_giro',
+                                 search=search,
+                                 sort='tempo_seguro',
+                                 order='desc',
+                                 page=page) }}">▼</a>
+            <a href="{{ url_for('euro.curva_giro', search=search) }}">✕</a>
+          </th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set params = {'search': search, 'sort': sort, 'order': order} %}
+        {% for row in results %}
+        <tr>
+          <td>{{ row.IDItem }}</td>
+          <td style="width:60px;">
+            {% if image_urls[row.IDItem] %}
+              <img
+                src="{{ image_urls[row.IDItem] }}"
+                width="40" height="40"
+                loading="lazy"
+                class="rounded"
+                onerror="this.onerror=null;
+                         this.src='https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif';"
+              >
+            {% else %}
+              <img
+                src="https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif"
+                width="40" height="40"
+                class="rounded"
+              >
+            {% endif %}
+          </td>
+          <td>{{ row.NomeProduto }}</td>
+          <td>{{ row.ReferenciaExterna }}</td>
+          <td>{{ row.total_vendido }}</td>
+          <td>{{ row.estoque_atual }}</td>
+          <td>
+            {% if row.estoque_atual > 0 %}
+              {{ (row.total_vendido / row.estoque_atual) | round(2) }}
+            {% else %}
+              N/A
+            {% endif %}
+          </td>
+          <td>{{ row.consumo_pct }}%</td>
+          <td>
+            {% if row.proj_dias is not none %}
+              {{ row.proj_dias }}
+            {% else %}
+              &mdash;
+            {% endif %}
+          </td>
+          <td>
+            {% if row.tempo_seguro is not none %}
+              {{ row.tempo_seguro }}
+            {% else %}
+              &mdash;
+            {% endif %}
+          </td>
+          <td>
+            <a href="{{ url_for('euro.ver_mais_curva_produto', item_id=row.IDItem) }}"
+               class="btn btn-sm btn-danger">Veja mais</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Paginação -->
+  <nav aria-label="Navegação de página">
+    <ul class="pagination justify-content-center mt-3">
+      {% if page > 1 %}
+        <li class="page-item">
+          <a class="page-link"
+             href="{{ url_for('euro.curva_giro', page=page-1, **params) }}">
+            Anterior
+          </a>
+        </li>
+      {% else %}
+        <li class="page-item disabled">
+          <span class="page-link">Anterior</span>
+        </li>
+      {% endif %}
+
+      {% for p in range(1, total_pages+1) %}
+        <li class="page-item{% if p==page %} active{% endif %}">
+          <a class="page-link"
+             href="{{ url_for('euro.curva_giro', page=p, **params) }}">
+            {{ p }}
+          </a>
+        </li>
+      {% endfor %}
+
+      {% if page < total_pages %}
+        <li class="page-item">
+          <a class="page-link"
+             href="{{ url_for('euro.curva_giro', page=page+1, **params) }}">
+            Próxima
+          </a>
+        </li>
+      {% else %}
+        <li class="page-item disabled">
+          <span class="page-link">Próxima</span>
+        </li>
+      {% endif %}
+    </ul>
+  </nav>
+</div>
+{% endblock %}

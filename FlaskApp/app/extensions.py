@@ -15,5 +15,7 @@ cache = Cache()
 socketio = SocketIO()
 
 
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), "imagensprodutos")

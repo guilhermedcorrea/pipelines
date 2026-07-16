@@ -1,0 +1,338 @@
+{# -------------------------------------------------------------------------
+  ativos_detalhes.html
+  (adicionado botão “🔄 Atualizar no Auvo” – nenhuma linha removida)
+------------------------------------------------------------------------- #}
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Detalhes do Ativo #{{ ativo.IDAtivo }}{% endblock %}
+
+{% block content %}
+<div class="container p-4">
+  <h2>Ativo #{{ ativo.IDAtivo }}</h2>
+
+ {# =============================================================
+  Botão dentro do card-header
+  Ícones ABSOLUTOS, mas ancorados logo **ABAIXO** do header
+  – não sobrepõem o botão.
+============================================================= #}
+
+<div class="position-relative">   {# Âncora para os ícones absolutos #}
+
+  {# ---------- CARTÃO COM O BOTÃO ---------- #}
+  <div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">Informações do Ativo</h5>
+
+      {# -------- BOTÃO DE SINCRONIZAÇÃO COM AUVO -------- #}
+      <button class="btn btn-warning btn-sm"
+        id="btn-sync-auvo"
+        data-url="{{ url_for('euro.ativos_atualizar', ativo_id=ativo.IDAtivo) }}">
+        🔄 Atualizar no Auvo
+      </button>
+    </div>
+  </div>
+
+
+
+
+  
+  {# ---------- ÍCONES ---------
+     * position:absolute          → flutuam sobre o layout
+     * top:100% + margem de 0.75rem → começam logo após o header
+     * right:0                    → alinhados à direita
+  -------------------------------- #}
+
+  
+  <div class="position-absolute end-0" style="top:calc(100% + 0.75rem);">
+    <div class="d-flex flex-column align-items-end" style="gap:2rem;">
+      {% if ativo.AuvoID  %}
+        <img
+          src="{{ url_for('static', filename='imagens/logo_auvo.png') }}"
+          alt="Auvo"
+          style="height:48px;">
+      {% endif %}
+
+      {% if ativo.CodigoContratoOmie %}
+        <img
+          src="{{ url_for('static', filename='imagens/omie_logo.png') }}"
+          alt="Omie"
+          style="height:48px;">
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+
+
+
+
+
+    <div class="card-body">
+      <dl class="row">
+        <dt class="col-sm-3">Referência Externa</dt>
+        <dd class="col-sm-9">{{ ativo.ReferenciaExterna or '—' }}</dd>
+
+        <dt class="col-sm-3">Chassi</dt>
+        <dd class="col-sm-9">{{ ativo.Chassi or '—' }}</dd>
+
+        <dt class="col-sm-3">Renavam</dt>
+        <dd class="col-sm-9">{{ ativo.Renavam or '—' }}</dd>
+
+        <dt class="col-sm-3">Projeto</dt>
+        <dd class="col-sm-9">
+          {{ projeto_obj.NomeProjeto if projeto_obj else '—' }}
+        </dd>
+
+        <dt class="col-sm-3">ID Empresa</dt>
+        <dd class="col-sm-9">{{ ativo.IDEmpresa or '—' }}</dd>
+
+        <dt class="col-sm-3">Empresa Proprietária (ID)</dt>
+        <dd class="col-sm-9">{{ ativo.IDEmpresaProprietaria or '—' }}</dd>
+
+        <dt class="col-sm-3">Nome Empresa Proprietária</dt>
+        <dd class="col-sm-9">
+          {{ proprietaria_empresa.NomeEmpresa if proprietaria_empresa else '—' }}
+        </dd>
+
+        <dt class="col-sm-3">Nome Empresa</dt>
+        <dd class="col-sm-9">
+          {{ empresa.NomeEmpresa if empresa else '—' }}
+        </dd>
+
+        <dt class="col-sm-3">ID Fabricante</dt>
+        <dd class="col-sm-9">{{ ativo.IDFabricante or '—' }}</dd>
+
+        <dt class="col-sm-3">ID Item</dt>
+        <dd class="col-sm-9">{{ ativo.IDItem or '—' }}</dd>
+
+        <dt class="col-sm-3">Nome do Ativo</dt>
+        <dd class="col-sm-9">{{ ativo.NomeAtivo or '—' }}</dd>
+
+        <dt class="col-sm-3">Placa Atual</dt>
+        <dd class="col-sm-9">
+          <input type="text"
+                 class="form-control editable-field"
+                 data-field="PlacaAtual"
+                 value="{{ ativo.PlacaAtual or '' }}"
+                 placeholder="—" />
+        </dd>
+
+        <dt class="col-sm-3">Endereço do Ativo</dt>
+        <dd class="col-sm-9">
+          <input type="text"
+                 class="form-control editable-field"
+                 data-field="EnderecoAtivo"
+                 value="{{ ativo.EnderecoAtivo or '' }}"
+                 placeholder="—" />
+        </dd>
+
+        <dt class="col-sm-3">CEP</dt>
+        <dd class="col-sm-9">
+          <input type="text"
+                 class="form-control editable-field"
+                 data-field="CEP"
+                 value="{{ ativo.CEP or '' }}"
+                 placeholder="—" />
+        </dd>
+
+        <dt class="col-sm-3">Cidade</dt>
+        <dd class="col-sm-9">
+          <input type="text"
+                 class="form-control editable-field"
+                 data-field="Cidade"
+                 value="{{ ativo.Cidade or '' }}"
+                 placeholder="—" />
+        </dd>
+
+        <dt class="col-sm-3">UF</dt>
+        <dd class="col-sm-9">
+          <input type="text"
+                 class="form-control editable-field"
+                 data-field="UF"
+                 value="{{ ativo.UF or '' }}"
+                 placeholder="—" />
+        </dd>
+
+        {# -------- NOVOS CAMPOS DO ATIVO AUVO -------- #}
+        {% if ativo_auvo %}
+        <dt class="col-sm-3">AuvoID</dt>
+        <dd class="col-sm-9">{{ ativo_auvo.AuvoID or '—' }}</dd>
+
+        <dt class="col-sm-3">GroupID</dt>
+        <dd class="col-sm-9">{{ ativo_auvo.GroupID or '—' }}</dd>
+
+        <dt class="col-sm-3">Status</dt>
+        <dd class="col-sm-9">
+          {% if ativo_auvo.BitAtivo %}
+            <span class="badge bg-success">Ativo</span>
+          {% else %}
+            <span class="badge bg-danger">Inativo</span>
+          {% endif %}
+        </dd>
+        {% endif %}
+
+
+
+        {# ─── Novo campo SELECT de Operação ──────────────────────── #}
+        <dt class="col-sm-3">Operação</dt>
+        <dd class="col-sm-9">
+          <form method="post"
+                action="{{ url_for('euro.atualizar_operacao', ativo_id=ativo.IDAtivo) }}">
+            <select name="IDOperacao"
+                    class="form-select w-auto d-inline-block"
+                    onchange="this.form.submit()">
+              <option value="">-- selecione --</option>
+              {% for op in operacoes_list %}
+                <option value="{{ op.IDOperacao }}"
+                  {% if op.IDOperacao == ativo.IDOperacao %}selected{% endif %}>
+                  {{ op.NomeOperacao }}
+                </option>
+              {% endfor %}
+            </select>
+          </form>
+        </dd>
+        {# ─────────────────────────────────────────────────────────── #}
+
+
+
+
+
+        <dt class="col-sm-3">Vincular Novo Pedido</dt>
+        <dd class="col-sm-9">
+          <form method="post"
+                action="{{ url_for('euro.vincular_pedido_ativo', ativo_id=ativo.IDAtivo) }}"
+                class="row g-2">
+            <div class="col-auto">
+              <input type="number" name="id_pedido"
+                     class="form-control"
+                     placeholder="Digite o ID do Pedido" required />
+            </div>
+            <div class="col-auto">
+              <button type="submit" class="btn btn-primary">Vincular</button>
+            </div>
+          </form>
+        </dd>
+      </dl>
+
+      {# -------- PEDIDOS VINCULADOS -------- #}
+      <div class="row mt-4">
+        <div class="col-12">
+          <h5>Pedidos Vinculados</h5>
+
+          {% if pedidos_vinculados %}
+            {% for pedido in pedidos_vinculados %}
+              <div class="mb-4">
+                <strong>Pedido #{{ pedido.IDPedido }}</strong>
+                <div class="table-responsive">
+                  <table class="table table-bordered table-hover table-sm align-middle mb-0">
+                    <thead class="table-light">
+                      <tr>
+                        <th>IDItem</th>
+                        <th>Foto</th>
+                        <th>Nome Produto</th>
+                        <th>Quantidade</th>
+                        <th>Lote</th>
+                        <th>Série</th>
+                        <th>Tipo Estoque</th>
+                        <th>CodPonto</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for item in pedido.itens %}
+                        <tr>
+                          <td>{{ item.id_item }}</td>
+                          <td style="width:60px;">
+                            <img src="{{ item.foto_url }}" width="40" height="40" alt="Foto">
+                          </td>
+                          <td style="white-space:pre-wrap;">{{ item.nome_produto }}</td>
+                          <td>{{ item.quantidade }}</td>
+                          <td>{{ item.lote }}</td>
+                          <td>{{ item.serie }}</td>
+                          <td>{{ item.tipo_estoque }}</td>
+                          <td>{{ item.codponto }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            {% endfor %}
+          {% else %}
+            <p class="text-muted">Nenhum pedido vinculado.</p>
+          {% endif %}
+        </div>
+      </div>
+
+      {# -------- MAPA -------- #}
+      <div class="mb-4" style="height: 300px; border: 1px solid #ddd;">
+        <iframe width="100%" height="100%"
+                frameborder="0" style="border:0"
+                src="https://maps.google.com/maps?q={{ map_query }}&output=embed"
+                allowfullscreen></iframe>
+      </div>
+
+      <a href="{{ url_for('euro.ativos') }}" class="btn btn-secondary">
+        ← Voltar à lista de Ativos
+      </a>
+    </div> {# /card-body #}
+  </div> {# /card #}
+</div> {# /container #}
+
+{# -------------------------------------------------------------------
+  SCRIPTS
+------------------------------------------------------------------- #}
+<script>
+  /* ---------- BOTÃO “Atualizar no Auvo” ---------- */
+  (() => {
+    const btn = document.getElementById('btn-sync-auvo');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = 'Sincronizando…';
+      try {
+        const r = await fetch(btn.dataset.url, {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'fetch' }
+        });
+        if (r.ok) {
+          alert('Sincronização concluída com sucesso!');
+          location.reload();
+        } else {
+          alert('Erro: ' + (await r.text()));
+          btn.disabled = false;
+          btn.textContent = prev;
+        }
+      } catch (e) {
+        alert('Falha de rede: ' + e);
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    });
+  })();
+
+  /* ---------- CAMPOS EDITÁVEIS JÁ EXISTENTES ---------- */
+  document.querySelectorAll('.editable-field').forEach(input => {
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        input.blur();
+      }
+    });
+    input.addEventListener('blur', () => {
+      fetch("{{ url_for('euro.atualizar_ativo') }}", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ativo_id: {{ ativo.IDAtivo }},
+          field: input.dataset.field,
+          value: input.value.trim()
+        })
+      }).then(resp => {
+        if (!resp.ok) alert('Erro ao salvar ' + input.dataset.field);
+      });
+    });
+  });
+</script>
+{% endblock %}

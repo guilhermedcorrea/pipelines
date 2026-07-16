@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block title %}Cadastrar Projetos{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+  <h2>Cadastrar Projeto</h2>
+  <form method="POST">
+    <div class="mb-3">
+      <label for="NomeProjeto" class="form-label">Nome do Projeto *</label>
+      <input type="text" class="form-control" id="NomeProjeto" name="NomeProjeto"
+             value="{{ NomeProjeto|default('') }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="CidadeProjeto" class="form-label">Cidade *</label>
+      <input type="text" class="form-control" id="CidadeProjeto" name="CidadeProjeto"
+             value="{{ CidadeProjeto|default('') }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="UF" class="form-label">UF *</label>
+      <input type="text" class="form-control" id="UF" name="UF"
+             value="{{ UF|default('') }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="ReferenciaExternaProjeto" class="form-label">Referência Externa</label>
+      <input type="text" class="form-control" id="ReferenciaExternaProjeto"
+             name="ReferenciaExternaProjeto"
+             value="{{ ReferenciaExternaProjeto|default('') }}">
+    </div>
+    <button type="submit" class="btn btn-primary">Cadastrar</button>
+  </form>
+  <p class="mt-2 text-muted">* Campos obrigatórios</p>
+</div>
+{% endblock %}
