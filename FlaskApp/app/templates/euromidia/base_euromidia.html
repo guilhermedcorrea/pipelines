@@ -1495,9 +1495,8 @@ input:disabled, select:disabled, textarea:disabled{
 
       <div class="top-actions">
 
-        <!-- =
-        {% if current_user.is_authenticated %}
-          <a class="icon-btn checkout-btn" href="{{ url_for('Paineis.checkout_view') }}" title="Checkout" aria-label="Checkout">
+        {% if current_user.is_authenticated and menu_paineis_catalogo_produtos %}
+          <a class="icon-btn checkout-btn" href="{{ url_for('euro.checkout') }}" title="Checkout de produtos" aria-label="Checkout de produtos">
             <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
               <path d="M6 6h15l-2 8H7L6 6z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
               <path d="M6 6l-2-2H2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -1506,12 +1505,12 @@ input:disabled, select:disabled, textarea:disabled{
             </svg>
             Checkout
             <span id="checkoutBadge"
-                  class="checkout-badge {% if (checkout_qtd|int) <= 0 %}hidden{% endif %}">
-              {{ checkout_qtd|int }}
+                  class="checkout-badge {% if (shempo_checkout_qtd|default(0)|int) <= 0 %}hidden{% endif %}">
+              {{ shempo_checkout_qtd|default(0)|int }}
             </span>
           </a>
         {% endif %}
--->
+
         {% if current_user.is_authenticated %}
           <div class="user-menu" id="userMenu">
             <a href="/admin/mensagens"
@@ -1693,12 +1692,17 @@ input:disabled, select:disabled, textarea:disabled{
     }
 
     async function refreshCheckoutBadge(){
+      if (!document.getElementById("checkoutBadge")) return;
+
       try{
-        const url = "{{ url_for('Paineis.checkout_status') }}";
+        const url = "{{ url_for('euro.checkout_status') }}";
         const resp = await fetch(url, {
           method: "GET",
-          credentials: "same-origin"
+          credentials: "same-origin",
+          cache: "no-store"
         });
+
+        if (!resp.ok) return;
 
         const data = await resp.json();
         if (data && data.ok){

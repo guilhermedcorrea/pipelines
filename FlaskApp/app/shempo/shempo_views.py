@@ -68,6 +68,33 @@ euro = Blueprint('euro', __name__, url_prefix='/admin/shempo/v1')
 SHEMPO_BIND_KEY = "shempo"
 
 
+def _quantidade_total_carrinho():
+    """Retorna a quantidade total de unidades guardadas no carrinho da sessão."""
+    cart = session.get('cart', {}) or {}
+    if not isinstance(cart, dict):
+        return 0
+
+    total = 0
+    for entrada in cart.values():
+        if isinstance(entrada, dict):
+            entrada = entrada.get('qty', 0)
+
+        try:
+            quantidade = int(entrada or 0)
+        except (TypeError, ValueError):
+            quantidade = 0
+
+        total += max(quantidade, 0)
+
+    return total
+
+
+@euro.app_context_processor
+def contexto_checkout_shempo():
+    """Disponibiliza o contador do carrinho no cabeçalho compartilhado."""
+    return {'shempo_checkout_qtd': _quantidade_total_carrinho()}
+
+
 def _shempo_engine():
     """Retorna a engine configurada exclusivamente para o banco Shempo."""
     return db.engines[SHEMPO_BIND_KEY]
@@ -116,7 +143,7 @@ def exigir_autenticacao_central():
     if not current_user.is_authenticated:
         proximo_destino = request.url
         if request.endpoint in {'euro.login', 'euro.logout'}:
-            proximo_destino = url_for('euro.index')
+            proximo_destino = url_for('euro.lista_produtos')
 
         login_url = url_for('Autenticacao.login', next=proximo_destino)
 
@@ -1364,6 +1391,7 @@ def familia_4600():
 
 @euro.route('/adicionar', methods=['POST'])
 @login_required
+@requer_acesso_catalogo_produtos
 def adicionar():
     item_id = request.form.get('item_id')
     quantity = request.form.get('quantity')
@@ -1387,7 +1415,7 @@ def adicionar():
     session['cart'] = cart
 
     
-    return redirect(url_for('euro.index'))
+    return redirect(url_for('euro.lista_produtos'))
 
 
 
@@ -2210,7 +2238,7 @@ def componentes_vinculados():
 @euro.route('/login', methods=['GET', 'POST'])
 def login():
     """Compatibilidade com links antigos; o login real pertence a Autenticacao."""
-    return redirect(url_for('euro.index'))
+    return redirect(url_for('euro.lista_produtos'))
 
 
 
@@ -5321,6 +5349,7 @@ def ver_mais_curva_produto(item_id: int):
 
 @euro.route('/add_to_cart/<int:item_id>')
 @login_required
+@requer_acesso_catalogo_produtos
 def add_to_cart(item_id):
     from sqlalchemy import func
 
@@ -5352,7 +5381,7 @@ def add_to_cart(item_id):
 
     if total_saldo <= 0:
         flash("Estoque não encontrado para esse item.", "error")
-        return redirect(url_for('euro.index'))
+        return redirect(url_for('euro.lista_produtos'))
 
     cart = session.get('cart', {})
     key = str(item_id)
@@ -5361,7 +5390,7 @@ def add_to_cart(item_id):
  
     if current_qty + 1 > total_saldo:
         flash("Estoque insuficiente.", "error")
-        return redirect(url_for('euro.index'))
+        return redirect(url_for('euro.lista_produtos'))
 
     cart[key] = current_qty + 1
     session['cart'] = cart
@@ -5375,6 +5404,7 @@ def add_to_cart(item_id):
 
 @euro.route('/remove_from_cart/<int:item_id>', methods=['POST'])
 @login_required
+@requer_acesso_catalogo_produtos
 def remove_from_cart(item_id):
     cart = session.get('cart', {})
     key  = str(item_id)
@@ -5417,12 +5447,21 @@ def remove_from_cart(item_id):
 
 @euro.route('/limpar_carrinho')
 @login_required
+@requer_acesso_catalogo_produtos
 def limpar_carrinho():
    
     session.pop('cart', None)
     flash("Carrinho esvaziado com sucesso.", "info")
   
     return redirect(url_for('euro.checkout'))
+
+
+@euro.route('/checkout/status', methods=['GET'])
+@login_required
+@requer_acesso_catalogo_produtos
+def checkout_status():
+    """Retorna a contagem usada pelo badge do checkout no cabeçalho."""
+    return jsonify(ok=True, qtd=_quantidade_total_carrinho())
 
 
 
@@ -5456,6 +5495,7 @@ def expandir_composicao(cart, db):
 
 @euro.route('/checkout', methods=['GET', 'POST'])
 @login_required
+@requer_acesso_catalogo_produtos
 def checkout():
     cart_raw = session.get('cart', {}) or {}
     cart, composition_children = expandir_composicao(cart_raw, db)
@@ -5463,7 +5503,7 @@ def checkout():
 
     if not cart:
         flash("Carrinho vazio. Adicione itens primeiro.", "warning")
-        return redirect(url_for('euro.index'))
+        return redirect(url_for('euro.lista_produtos'))
 
     tipo_ids = {
         'EstoqueMatriz': 1,
@@ -5826,7 +5866,7 @@ def checkout():
         print("DEBUG commit realizado")
         flash("Pedido realizado com sucesso!", "success")
         session.pop('cart', None)
-        return redirect(url_for('euro.index'))
+        return redirect(url_for('euro.lista_produtos'))
 
     lotes_data = {}
     series_data = {}
@@ -5910,6 +5950,7 @@ def checkout():
 
 @euro.route('/api/series', methods=['GET'])
 @login_required
+@requer_acesso_catalogo_produtos
 def api_series():
     item = request.args.get('item', type=int)
     lote = request.args.get('lote', type=str)
@@ -6475,4 +6516,3 @@ def formulario_retirada(pedido_id):
         observacao_retirada=observacao_retirada,
         responsavel_nome=responsavel_nome 
     )
-

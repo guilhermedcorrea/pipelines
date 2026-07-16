@@ -4,229 +4,990 @@
 {% block title %}Checkout – Peças e Componentes{% endblock %}
 
 {% block content %}
-<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0/dist/css/select2.min.css" rel="stylesheet"/>
+<link href="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/css/select2.min.css" rel="stylesheet"/>
 
-<div class="container my-5" style="max-width:900px;">
-  <h2 class="mb-4">Checkout</h2>
+<style>
+  .checkout-page{
+    --checkout-blue:#002884;
+    --checkout-blue-2:#0340a7;
+    --checkout-yellow:#ffb300;
+    --checkout-text:#0f172a;
+    --checkout-muted:#64748b;
+    --checkout-border:#dfe5ee;
+    --checkout-soft:#f7f9fc;
+    width:100%;
+    max-width:none;
+    margin:0;
+    padding:2px 0 26px;
+  }
+
+  .checkout-page *,
+  .checkout-page *::before,
+  .checkout-page *::after{
+    box-sizing:border-box;
+  }
+
+  .checkout-page [hidden]{
+    display:none !important;
+  }
+
+  .checkout-header{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:18px;
+    margin:0 0 18px;
+  }
+
+  .checkout-header h1{
+    margin:0;
+    color:var(--checkout-blue);
+    font-size:clamp(25px, 2vw, 34px);
+    line-height:1.1;
+    letter-spacing:-.03em;
+  }
+
+  .checkout-header p{
+    margin:7px 0 0;
+    color:var(--checkout-muted);
+    font-size:14px;
+  }
+
+  .checkout-back{
+    flex:0 0 auto;
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    min-height:42px;
+    padding:9px 13px;
+    border:1px solid rgba(0,40,132,.2);
+    border-radius:10px;
+    background:#fff;
+    color:var(--checkout-blue);
+    text-decoration:none;
+    font-size:13px;
+    font-weight:800;
+    transition:background .15s ease, border-color .15s ease;
+  }
+
+  .checkout-back:hover{
+    background:#f1f5ff;
+    border-color:rgba(0,40,132,.38);
+  }
+
+  .checkout-back svg,
+  .checkout-panel-title svg,
+  .checkout-primary-action svg,
+  .checkout-remove-button svg{
+    width:18px;
+    height:18px;
+    flex:0 0 auto;
+  }
+
+  .checkout-form-grid{
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) minmax(360px, 430px);
+    gap:18px;
+    align-items:start;
+    width:100%;
+  }
+
+  .checkout-panel{
+    min-width:0;
+    overflow:hidden;
+    border:1px solid var(--checkout-border);
+    border-radius:16px;
+    background:#fff;
+    box-shadow:0 8px 28px rgba(15,23,42,.07);
+  }
+
+  .checkout-panel-header{
+    min-height:76px;
+    padding:18px 20px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:14px;
+    border-bottom:1px solid var(--checkout-border);
+    background:linear-gradient(135deg, #fff 0%, #f7f9ff 100%);
+  }
+
+  .checkout-panel-title{
+    display:flex;
+    align-items:center;
+    gap:11px;
+    min-width:0;
+  }
+
+  .checkout-panel-title-icon{
+    width:40px;
+    height:40px;
+    border-radius:11px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:rgba(0,40,132,.09);
+    color:var(--checkout-blue);
+  }
+
+  .checkout-panel-title h2{
+    margin:0;
+    color:var(--checkout-text);
+    font-size:17px;
+    line-height:1.2;
+  }
+
+  .checkout-panel-title small{
+    display:block;
+    margin-top:4px;
+    color:var(--checkout-muted);
+    font-size:12px;
+    font-weight:600;
+  }
+
+  .checkout-count{
+    min-width:30px;
+    height:30px;
+    padding:0 9px;
+    border-radius:999px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:var(--checkout-blue);
+    color:#fff;
+    font-size:13px;
+    font-weight:900;
+  }
+
+  .checkout-table-wrap{
+    width:100%;
+    overflow-x:auto;
+    scrollbar-width:thin;
+  }
+
+  .checkout-items-table{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:fixed;
+    color:var(--checkout-text);
+  }
+
+  .checkout-items-table col.col-id{width:74px;}
+  .checkout-items-table col.col-product{width:auto;}
+  .checkout-items-table col.col-stock{width:90px;}
+  .checkout-items-table col.col-qty{width:92px;}
+  .checkout-items-table col.col-unit{width:138px;}
+  .checkout-items-table col.col-total{width:148px;}
+  .checkout-items-table col.col-actions{width:116px;}
+
+  .checkout-items-table > thead th{
+    padding:12px 14px;
+    border-bottom:1px solid var(--checkout-border);
+    background:#f3f6fb;
+    color:#475569;
+    font-size:11px;
+    font-weight:900;
+    letter-spacing:.045em;
+    text-align:left;
+    text-transform:uppercase;
+    white-space:nowrap;
+  }
+
+  .checkout-item + .checkout-item .checkout-main-row > td{
+    border-top:8px solid #f3f6fb;
+  }
+
+  .checkout-main-row > td{
+    padding:16px 14px;
+    border-bottom:1px solid #edf1f6;
+    background:#fff;
+    vertical-align:middle;
+  }
+
+  .checkout-mobile-label{
+    display:none;
+  }
+
+  .checkout-item-id{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:42px;
+    height:30px;
+    padding:0 8px;
+    border-radius:8px;
+    background:#eef3ff;
+    color:var(--checkout-blue);
+    font-size:13px;
+    font-weight:900;
+  }
+
+  .checkout-product-name{
+    color:var(--checkout-text);
+    font-size:14px;
+    font-weight:800;
+    line-height:1.35;
+    overflow-wrap:anywhere;
+  }
+
+  .checkout-product-meta{
+    margin-top:4px;
+    color:var(--checkout-muted);
+    font-size:11px;
+    font-weight:600;
+  }
+
+  .checkout-stock-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:45px;
+    height:30px;
+    padding:0 9px;
+    border-radius:999px;
+    background:#ecfdf3;
+    color:#087443;
+    font-size:13px;
+    font-weight:900;
+  }
+
+  .checkout-page .form-control,
+  .checkout-page .form-select{
+    display:block;
+    width:100%;
+    min-width:0;
+    height:43px;
+    padding:9px 11px;
+    border:1px solid #cfd7e3;
+    border-radius:9px;
+    background:#fff;
+    color:var(--checkout-text);
+    font:inherit;
+    font-size:14px;
+    outline:none;
+    transition:border-color .15s ease, box-shadow .15s ease;
+  }
+
+  .checkout-page .form-control:focus,
+  .checkout-page .form-select:focus{
+    border-color:var(--checkout-blue-2);
+    box-shadow:0 0 0 3px rgba(3,64,167,.12);
+  }
+
+  .checkout-page .form-control::placeholder{
+    color:#94a3b8;
+  }
+
+  .checkout-page .js-qtd{
+    text-align:center;
+    font-weight:800;
+  }
+
+  .checkout-remove-button{
+    width:100%;
+    min-height:39px;
+    padding:8px 10px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:7px;
+    border:1px solid #fecaca;
+    border-radius:9px;
+    background:#fff5f5;
+    color:#b91c1c;
+    cursor:pointer;
+    font-size:12px;
+    font-weight:900;
+    transition:background .15s ease, border-color .15s ease;
+  }
+
+  .checkout-remove-button:hover{
+    background:#fee2e2;
+    border-color:#fca5a5;
+  }
+
+  .checkout-detail-row > td{
+    padding:14px 16px 16px;
+    border-bottom:1px solid #edf1f6;
+    background:var(--checkout-soft);
+  }
+
+  .checkout-options-grid{
+    display:grid;
+    grid-template-columns:minmax(0, 1.6fr) minmax(240px, .8fr);
+    gap:14px;
+    align-items:end;
+  }
+
+  .checkout-options-grid .checkout-field:only-child{
+    grid-column:1 / -1;
+  }
+
+  .checkout-options-grid:has(.checkout-field[hidden]) > .checkout-field:not([hidden]){
+    grid-column:1 / -1;
+  }
+
+  .checkout-field{
+    min-width:0;
+  }
+
+  .checkout-field label{
+    display:block;
+    margin:0 0 6px;
+    color:#475569;
+    font-size:12px;
+    font-weight:800;
+  }
+
+  .checkout-field label small{
+    color:var(--checkout-muted);
+    font-weight:600;
+  }
+
+  .checkout-lot-grid{
+    display:grid;
+    grid-template-columns:minmax(220px, .55fr) minmax(0, 1.45fr);
+    gap:16px;
+    align-items:end;
+  }
+
+  .checkout-lot-title{
+    margin:0 0 7px;
+    color:#334155;
+    font-size:12px;
+    font-weight:900;
+    text-transform:uppercase;
+    letter-spacing:.035em;
+  }
+
+  .checkout-lots-table{
+    width:100%;
+    border-collapse:separate;
+    border-spacing:0;
+    overflow:hidden;
+    border:1px solid var(--checkout-border);
+    border-radius:9px;
+    background:#fff;
+  }
+
+  .checkout-lots-table th,
+  .checkout-lots-table td{
+    padding:8px 10px;
+    border-bottom:1px solid #edf1f6;
+    font-size:12px;
+    text-align:left;
+  }
+
+  .checkout-lots-table th{
+    background:#eef3f9;
+    color:#475569;
+    font-weight:900;
+  }
+
+  .checkout-lots-table tbody tr:last-child td{
+    border-bottom:0;
+  }
+
+  .checkout-series-container{
+    display:grid;
+    gap:8px;
+    margin-bottom:10px;
+  }
+
+  .serie-wrapper{
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) 40px;
+    gap:8px;
+    align-items:center;
+  }
+
+  .checkout-series-remove{
+    width:40px;
+    height:40px;
+    border:1px solid #fecaca;
+    border-radius:9px;
+    background:#fff5f5;
+    color:#b91c1c;
+    cursor:pointer;
+    font-size:20px;
+    line-height:1;
+  }
+
+  .checkout-secondary-button{
+    min-height:38px;
+    padding:8px 12px;
+    border:1px solid rgba(0,40,132,.22);
+    border-radius:9px;
+    background:#fff;
+    color:var(--checkout-blue);
+    cursor:pointer;
+    font-size:12px;
+    font-weight:900;
+  }
+
+  .checkout-secondary-button:hover{
+    background:#eef3ff;
+  }
+
+  .checkout-order-panel{
+    position:sticky;
+    top:102px;
+  }
+
+  .checkout-order-body{
+    padding:18px 20px 20px;
+  }
+
+  .checkout-order-body > .checkout-field{
+    margin-bottom:14px;
+  }
+
+  .checkout-conditional-grid{
+    display:grid;
+    grid-template-columns:minmax(0, 1fr);
+    gap:14px;
+  }
+
+  .checkout-order-actions{
+    margin-top:20px;
+    padding-top:18px;
+    border-top:1px solid var(--checkout-border);
+  }
+
+  .checkout-primary-action{
+    width:100%;
+    min-height:48px;
+    padding:11px 16px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:9px;
+    border:0;
+    border-radius:11px;
+    background:var(--checkout-yellow);
+    color:#14213d;
+    cursor:pointer;
+    font-size:14px;
+    font-weight:950;
+    box-shadow:0 8px 18px rgba(255,179,0,.22);
+    transition:filter .15s ease, transform .15s ease;
+  }
+
+  .checkout-primary-action:hover{
+    filter:brightness(.96);
+    transform:translateY(-1px);
+  }
+
+  .checkout-order-help{
+    margin:10px 0 0;
+    color:var(--checkout-muted);
+    font-size:11px;
+    line-height:1.45;
+    text-align:center;
+  }
+
+  .checkout-page .select2-container{
+    width:100% !important;
+  }
+
+  .checkout-page .select2-container .select2-selection--single{
+    height:43px;
+    border:1px solid #cfd7e3;
+    border-radius:9px;
+    background:#fff;
+  }
+
+  .checkout-page .select2-container--default .select2-selection--single .select2-selection__rendered{
+    padding:7px 36px 7px 11px;
+    color:var(--checkout-text);
+    font-size:14px;
+    line-height:27px;
+  }
+
+  .checkout-page .select2-container--default .select2-selection--single .select2-selection__arrow{
+    width:34px;
+    height:41px;
+  }
+
+  .checkout-page .select2-container--focus .select2-selection--single,
+  .checkout-page .select2-container--open .select2-selection--single{
+    border-color:var(--checkout-blue-2);
+    box-shadow:0 0 0 3px rgba(3,64,167,.12);
+  }
+
+  .select2-container--open{
+    z-index:21050;
+  }
+
+  @media (max-width:1320px){
+    .checkout-form-grid{
+      grid-template-columns:minmax(0, 1fr) 380px;
+    }
+
+    .checkout-items-table col.col-id{width:66px;}
+    .checkout-items-table col.col-stock{width:78px;}
+    .checkout-items-table col.col-qty{width:82px;}
+    .checkout-items-table col.col-unit{width:126px;}
+    .checkout-items-table col.col-total{width:134px;}
+    .checkout-items-table col.col-actions{width:104px;}
+  }
+
+  @media (max-width:1200px){
+    .checkout-form-grid{
+      grid-template-columns:minmax(0, 1fr);
+    }
+
+    .checkout-order-panel{
+      position:static;
+    }
+
+    .checkout-conditional-grid{
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width:900px){
+    .checkout-table-wrap{
+      overflow:visible;
+      padding:12px;
+      background:#f3f6fb;
+    }
+
+    .checkout-items-table,
+    .checkout-items-table > tbody{
+      display:block;
+      width:100%;
+    }
+
+    .checkout-items-table > colgroup,
+    .checkout-items-table > thead{
+      display:none;
+    }
+
+    .checkout-item{
+      overflow:hidden;
+      margin-bottom:12px;
+      border:1px solid var(--checkout-border);
+      border-radius:13px;
+      background:#fff;
+    }
+
+    .checkout-item:last-child{
+      margin-bottom:0;
+    }
+
+    .checkout-item + .checkout-item .checkout-main-row > td{
+      border-top:0;
+    }
+
+    .checkout-main-row{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:13px;
+      padding:15px;
+    }
+
+    .checkout-main-row > td{
+      display:block;
+      padding:0;
+      border:0;
+    }
+
+    .checkout-main-row > td::before{
+      content:attr(data-label);
+      display:block;
+      margin-bottom:5px;
+      color:#64748b;
+      font-size:10px;
+      font-weight:900;
+      letter-spacing:.045em;
+      text-transform:uppercase;
+    }
+
+    .checkout-main-row > .checkout-product-cell{
+      grid-column:1 / -1;
+      padding-bottom:12px;
+      border-bottom:1px solid #edf1f6;
+    }
+
+    .checkout-detail-row{
+      display:block;
+      width:100%;
+    }
+
+    .checkout-detail-row > td{
+      display:block;
+      width:100%;
+      padding:14px 15px;
+      border-top:1px solid #edf1f6;
+      border-bottom:0;
+    }
+
+    .checkout-options-grid,
+    .checkout-lot-grid{
+      grid-template-columns:minmax(0, 1fr);
+    }
+  }
+
+  @media (max-width:640px){
+    .checkout-page{
+      padding-bottom:16px;
+    }
+
+    .checkout-header{
+      align-items:flex-start;
+      flex-direction:column;
+      margin-bottom:14px;
+    }
+
+    .checkout-back{
+      width:100%;
+      justify-content:center;
+    }
+
+    .checkout-panel{
+      border-radius:13px;
+    }
+
+    .checkout-panel-header{
+      min-height:68px;
+      padding:14px 15px;
+    }
+
+    .checkout-panel-title-icon{
+      width:36px;
+      height:36px;
+    }
+
+    .checkout-main-row{
+      grid-template-columns:minmax(0, 1fr);
+    }
+
+    .checkout-main-row > .checkout-product-cell{
+      grid-column:auto;
+    }
+
+    .checkout-order-body{
+      padding:16px 15px 17px;
+    }
+
+    .checkout-conditional-grid{
+      grid-template-columns:minmax(0, 1fr);
+    }
+
+    .checkout-remove-button{
+      min-height:43px;
+    }
+  }
+</style>
+
+<div class="checkout-page">
+  <div class="checkout-header">
+    <div>
+      <h1>Checkout</h1>
+      <p>Revise os produtos, selecione o estoque e preencha os dados do pedido.</p>
+    </div>
+
+    <a class="checkout-back" href="{{ url_for('euro.lista_produtos') }}">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M19 12H5M11 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Continuar adicionando produtos
+    </a>
+  </div>
+
   <form method="POST" action="{{ url_for('euro.checkout') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-    <!-- Itens no Carrinho -->
-    <div class="card mb-4">
-      <div class="card-header"><h5 class="mb-0">Itens no Carrinho</h5></div>
-      <div class="card-body p-0">
-        <table class="table mb-0">
-          <thead class="table-light">
-            <tr>
-              <th>IDItem</th>
-              <th>Produto</th>
-              <th>Disp.</th>
-              <th style="width:110px;">Qtd.</th>
-              <th style="width:140px;">V. Unitário</th>   {# NOVO #}
-              <th style="width:160px;">V. Total</th>      {# NOVO #}
-              <th style="width:140px;">Ações</th>
-            </tr>
-          </thead>
-          <tbody>
+    <div class="checkout-form-grid">
+      <section class="checkout-panel" aria-labelledby="checkout-itens-title">
+        <div class="checkout-panel-header">
+          <div class="checkout-panel-title">
+            <span class="checkout-panel-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M6 6h15l-2 8H7L6 6z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                <path d="M6 6 4 4H2M9 20h.01M18 20h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <div>
+              <h2 id="checkout-itens-title">Itens no carrinho</h2>
+              <small>{{ items|length }} {{ 'produto' if items|length == 1 else 'produtos' }} para revisar</small>
+            </div>
+          </div>
+          <span class="checkout-count" aria-label="Quantidade de produtos">{{ items|length }}</span>
+        </div>
+
+        <div class="checkout-table-wrap">
+          <table class="checkout-items-table">
+            <colgroup>
+              <col class="col-id">
+              <col class="col-product">
+              <col class="col-stock">
+              <col class="col-qty">
+              <col class="col-unit">
+              <col class="col-total">
+              <col class="col-actions">
+            </colgroup>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Produto</th>
+                <th>Disponível</th>
+                <th>Quantidade</th>
+                <th>Valor unitário</th>
+                <th>Valor total</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+
             {% for entry in items %}
               {% set prod = entry.produto %}
-              <tr>
-                <td>{{ prod.IDItem }}</td>
-                <td>{{ prod.NomeProduto }}</td>
-                <td>{{ entry.estoques|map(attribute='Saldo')|sum }}</td>
-                <td>
-                  <input type="number"
-                         name="quantidade_{{ prod.IDItem }}"
-                         min="1"
-                         max="{{ entry.estoques|map(attribute='Saldo')|sum }}"
-                         value="{{ cart[prod.IDItem] }}"
-                         class="form-control form-control-sm js-qtd"
-                         data-item="{{ prod.IDItem }}"
-                         style="width:100px;">
-                </td>
+              {% set saldo_disponivel = entry.estoques|map(attribute='Saldo')|sum %}
+              <tbody class="checkout-item">
+                <tr class="checkout-main-row">
+                  <td data-label="ID">
+                    <span class="checkout-item-id">{{ prod.IDItem }}</span>
+                  </td>
+                  <td class="checkout-product-cell" data-label="Produto">
+                    <div class="checkout-product-name">{{ prod.NomeProduto }}</div>
+                    <div class="checkout-product-meta">Código do item: {{ prod.IDItem }}</div>
+                  </td>
+                  <td data-label="Disponível">
+                    <span class="checkout-stock-badge">{{ saldo_disponivel }}</span>
+                  </td>
+                  <td data-label="Quantidade">
+                    <input type="number"
+                           name="quantidade_{{ prod.IDItem }}"
+                           min="1"
+                           max="{{ saldo_disponivel }}"
+                           value="{{ cart.get(prod.IDItem|string, 1) }}"
+                           class="form-control js-qtd"
+                           data-item="{{ prod.IDItem }}"
+                           aria-label="Quantidade do item {{ prod.IDItem }}">
+                  </td>
+                  <td data-label="Valor unitário">
+                    <input type="text"
+                           inputmode="decimal"
+                           placeholder="0,00"
+                           name="valor_unitario_{{ prod.IDItem }}"
+                           class="form-control js-vunit"
+                           data-item="{{ prod.IDItem }}"
+                           autocomplete="off"
+                           aria-label="Valor unitário do item {{ prod.IDItem }}">
+                  </td>
+                  <td data-label="Valor total">
+                    <input type="text"
+                           inputmode="decimal"
+                           placeholder="0,00"
+                           name="valor_total_{{ prod.IDItem }}"
+                           class="form-control js-vtotal"
+                           data-item="{{ prod.IDItem }}"
+                           autocomplete="off"
+                           aria-label="Valor total do item {{ prod.IDItem }}">
+                  </td>
+                  <td data-label="Ações">
+                    <button type="submit"
+                            class="checkout-remove-button"
+                            formaction="{{ url_for('euro.remove_from_cart', item_id=prod.IDItem) }}"
+                            formmethod="post"
+                            formnovalidate>
+                      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                      Remover
+                    </button>
+                  </td>
+                </tr>
 
-                {# NOVO: Valor Unitário #}
-                <td>
-                  <input type="text"
-                         inputmode="decimal"
-                         placeholder="ex.: 1.234,56"
-                         name="valor_unitario_{{ prod.IDItem }}"
-                         class="form-control form-control-sm js-vunit"
-                         data-item="{{ prod.IDItem }}"
-                         autocomplete="off"
-                         style="width:130px;">
-                </td>
+                <tr class="checkout-detail-row checkout-stock-row">
+                  <td colspan="7">
+                    <div class="checkout-options-grid">
+                      <div class="checkout-field">
+                        <label for="estoque_{{ prod.IDItem }}">Estoque de retirada</label>
+                        <select id="estoque_{{ prod.IDItem }}"
+                                name="estoque_{{ prod.IDItem }}"
+                                class="form-select estoque-select"
+                                data-item="{{ prod.IDItem }}">
+                          {% for est in entry.estoques %}
+                            {% set key = prod.IDItem|string ~ ',' ~ est.IDEstoque %}
+                            <option value="{{ est.IDEstoque }}"
+                                    data-tipo="{{ est.IDTipoEstoque }}"
+                                    data-codponto="{{ est.CodPonto|default('') }}"
+                                    {% if (lotes_json.get(key, [])|length > 0) or loop.first %}selected{% endif %}>
+                              {{ tipo_est_map[est.IDTipoEstoque] }} — {{ est.Saldo }} unid.
+                            </option>
+                          {% endfor %}
+                        </select>
+                      </div>
 
-                {# NOVO: Valor Total #}
-                <td>
-                  <input type="text"
-                         inputmode="decimal"
-                         placeholder="preenche auto"
-                         name="valor_total_{{ prod.IDItem }}"
-                         class="form-control form-control-sm js-vtotal"
-                         data-item="{{ prod.IDItem }}"
-                         autocomplete="off"
-                         style="width:150px;">
-                </td>
+                      <div id="codponto_section_{{ prod.IDItem }}" class="checkout-field" hidden>
+                        <label for="codponto_select_{{ prod.IDItem }}">CodPonto</label>
+                        <select name="codponto_{{ prod.IDItem }}"
+                                id="codponto_select_{{ prod.IDItem }}"
+                                class="form-select">
+                          <option value="">Selecione um ponto</option>
+                        </select>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
 
-                <td>
-                  <button type="submit"
-                          class="btn btn-outline-danger btn-sm"
-                          formaction="{{ url_for('euro.remove_from_cart', item_id=prod.IDItem) }}"
-                          formmethod="post" formnovalidate>
-                    <i class="bi bi-trash"></i> Remover
-                  </button>
-                </td>
-              </tr>
+                {% if prod.ControlaLote %}
+                <tr id="lote_section_{{ prod.IDItem }}" class="checkout-detail-row lote-section" hidden>
+                  <td colspan="7">
+                    <div class="checkout-lot-grid">
+                      <div>
+                        <p class="checkout-lot-title">Lotes disponíveis</p>
+                        <table class="checkout-lots-table">
+                          <thead>
+                            <tr><th>Número do lote</th><th>Quantidade</th></tr>
+                          </thead>
+                          <tbody id="lote_body_{{ prod.IDItem }}" class="lote-body"></tbody>
+                        </table>
+                      </div>
 
-              <!-- Seletor de Estoque -->
-              <tr>
-                <td colspan="7" class="bg-light pt-2 pb-2">
-                  <label class="form-label">Selecione o Estoque:</label>
-                  <select name="estoque_{{ prod.IDItem }}"
-                          class="form-select form-select-sm estoque-select"
-                          data-item="{{ prod.IDItem }}">
-                    {% for est in entry.estoques %}
-                      {% set key = prod.IDItem|string ~ ',' ~ est.IDEstoque %}
-                      <option value="{{ est.IDEstoque }}"
-                              data-tipo="{{ est.IDTipoEstoque }}"
-                              data-codponto="{{ est.CodPonto|default('') }}"
-                              {% if (lotes_json.get(key, [])|length > 0) or loop.first %}selected{% endif %}>
-                        {{ tipo_est_map[est.IDTipoEstoque] }} ({{ est.Saldo }} unid.)
-                      </option>
-                    {% endfor %}
-                  </select>
+                      <div class="checkout-field">
+                        <label for="lote_{{ prod.IDItem }}">Lote utilizado</label>
+                        <select id="lote_{{ prod.IDItem }}"
+                                name="lote_{{ prod.IDItem }}"
+                                class="form-select lote-select"
+                                disabled>
+                          <option value="" disabled selected>Selecione um lote</option>
+                        </select>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+                {% endif %}
 
-                  <!-- CodPonto para EuroMatriz -->
-                  <div id="codponto_section_{{ prod.IDItem }}" style="display:none;" class="mt-2">
-                    <label class="form-label small text-muted">Selecione CodPonto</label>
-                    <select name="codponto_{{ prod.IDItem }}"
-                            id="codponto_select_{{ prod.IDItem }}"
-                            class="form-select form-select-sm">
-                      <option value="">-- selecione um ponto --</option>
-                    </select>
-                  </div>
-                </td>
-              </tr>
-
-              {# Bloco de Lotes — renderiza sempre; JS controla exibição #}
-              {% if prod.ControlaLote %}
-              <tr id="lote_section_{{ prod.IDItem }}" class="bg-white lote-section" style="display:none;">
-                <td colspan="7">
-                  <strong>Lotes disponíveis:</strong>
-                  <table class="table table-sm table-bordered mt-2 mb-2">
-                    <thead>
-                      <tr><th>Nº Lote</th><th>Qtd.</th></tr>
-                    </thead>
-                    <tbody id="lote_body_{{ prod.IDItem }}" class="lote-body"></tbody>
-                  </table>
-                  <div class="mt-2">
-                    <label for="lote_{{ prod.IDItem }}" class="form-label small text-muted">
-                      Selecione o Lote
-                    </label>
-                    <select id="lote_{{ prod.IDItem }}"
-                            name="lote_{{ prod.IDItem }}"
-                            class="form-select form-select-sm lote-select"
-                            disabled>
-                      <option value="" disabled selected>— escolha um lote —</option>
-                    </select>
-                  </div>
-                </td>
-              </tr>
-              {% endif %}
-
-              {# Bloco de Séries #}
-              {% if prod.ControlaNumerodeSerie %}
-              <tr id="serie_section_{{ prod.IDItem }}" class="bg-white serie-section" style="display:none;">
-                <td colspan="7">
-                  <label class="form-label">Selecione Série(s):</label>
-                  <div id="serie_container_{{ prod.IDItem }}" class="mb-2"></div>
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-outline-primary add-serie"
-                    data-item="{{ prod.IDItem }}"
-                  >
-                    + Selecionar mais
-                  </button>
-                </td>
-              </tr>
-              {% endif %}
-
+                {% if prod.ControlaNumerodeSerie %}
+                <tr id="serie_section_{{ prod.IDItem }}" class="checkout-detail-row serie-section" hidden>
+                  <td colspan="7">
+                    <div class="checkout-field">
+                      <label>Selecione os números de série</label>
+                      <div id="serie_container_{{ prod.IDItem }}" class="checkout-series-container"></div>
+                      <button type="button"
+                              class="checkout-secondary-button add-serie"
+                              data-item="{{ prod.IDItem }}">
+                        + Selecionar outra série
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                {% endif %}
+              </tbody>
             {% endfor %}
-          </tbody>
-        </table>
-      </div>
+          </table>
+        </div>
+      </section>
+
+      <aside class="checkout-panel checkout-order-panel" aria-labelledby="checkout-pedido-title">
+        <div class="checkout-panel-header">
+          <div class="checkout-panel-title">
+            <span class="checkout-panel-title-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M7 3h10v4H7V3zM5 5H3v16h18V5h-2M8 12h8M8 16h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+            <div>
+              <h2 id="checkout-pedido-title">Finalizar pedido</h2>
+              <small>Informe o destino da movimentação</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="checkout-order-body">
+          <div class="checkout-field">
+            <label for="tipo_pedido">Tipo de pedido</label>
+            <select class="form-select" id="tipo_pedido" name="tipo_pedido">
+              <option value="venda">Pedido de venda</option>
+              <option value="reserva">Reserva para técnico</option>
+            </select>
+          </div>
+
+          <div id="div_venda" class="checkout-conditional-grid" hidden>
+            <div class="checkout-field">
+              <label for="referencia_pedido">Referência do pedido <small>(opcional)</small></label>
+              <input type="number"
+                     id="referencia_pedido"
+                     name="referencia_pedido"
+                     class="form-control"
+                     placeholder="Informe a referência">
+            </div>
+
+            <div class="checkout-field">
+              <label for="id_projeto">Projeto</label>
+              <select id="id_projeto"
+                      name="id_projeto"
+                      class="form-select select2"
+                      data-placeholder="Selecione um projeto">
+                <option value=""></option>
+                {% for p in projetos %}
+                  <option value="{{ p.IDProjeto }}">{{ p.NomeProjeto }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="checkout-field">
+              <label for="id_empresa_compradora">Empresa compradora</label>
+              <select id="id_empresa_compradora"
+                      name="id_empresa_compradora"
+                      class="form-select select2"
+                      data-placeholder="Selecione uma empresa">
+                <option value=""></option>
+                {% for e in empresas %}
+                  <option value="{{ e.EmpresaID }}">{{ e.NomeEmpresa }}</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="checkout-field">
+              <label for="id_empresa_vendedora">Empresa vendedora</label>
+              <select id="id_empresa_vendedora"
+                      name="id_empresa_vendedora"
+                      class="form-select select2"
+                      data-placeholder="Selecione uma empresa">
+                <option value=""></option>
+                {% for e in empresas %}
+                  <option value="{{ e.EmpresaID }}">{{ e.NomeEmpresa }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div id="div_reserva" class="checkout-conditional-grid" hidden>
+            <div class="checkout-field">
+              <label for="os_auvo">OS Auvo <small>(opcional)</small></label>
+              <input type="number"
+                     id="os_auvo"
+                     name="os_auvo"
+                     class="form-control"
+                     placeholder="Informe a OS, se houver">
+            </div>
+
+            <div class="checkout-field">
+              <label for="tecnico">Técnico</label>
+              <select id="tecnico" name="tecnico" class="form-select">
+                <option value="" disabled selected>Selecione um técnico</option>
+                {% for func in funcionarios %}
+                  <option value="{{ func.IDFuncionario }}">{{ func.NomeFuncionario }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="checkout-order-actions">
+            <button type="submit" class="checkout-primary-action">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Finalizar pedido
+            </button>
+            <p class="checkout-order-help">Confira quantidades, estoque, lote e números de série antes de finalizar.</p>
+          </div>
+        </div>
+      </aside>
     </div>
-
-    <!-- Finalizar Pedido -->
-    <div class="card">
-      <div class="card-header"><h5 class="mb-0">Finalizar Pedido</h5></div>
-      <div class="card-body">
-        <div class="mb-3">
-          <label for="tipo_pedido" class="form-label">Tipo Pedido</label>
-          <select class="form-select" id="tipo_pedido" name="tipo_pedido">
-            <option value="venda">Pedido Venda</option>
-            <option value="reserva">Reserva Técnico</option>
-          </select>
-        </div>
-
-        <!-- Venda -->
-        <div id="div_venda" style="display:none;">
-          <div class="mb-3">
-            <label for="referencia_pedido" class="form-label">Referência do Pedido</label>
-            <input type="number" id="referencia_pedido" name="referencia_pedido" class="form-control">
-          </div>
-          <div class="mb-3">
-            <label for="id_projeto" class="form-label">Projeto</label>
-            <select id="id_projeto" name="id_projeto" class="form-select select2" data-placeholder="Selecione um projeto">
-              <option value="" disabled selected></option>
-              {% for p in projetos %}
-                <option value="{{ p.IDProjeto }}">{{ p.NomeProjeto }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="mb-3">
-            <label for="id_empresa_compradora" class="form-label">Empresa Compradora</label>
-            <select id="id_empresa_compradora" name="id_empresa_compradora" class="form-select select2" data-placeholder="Selecione uma empresa">
-              <option value="" disabled selected></option>
-              {% for e in empresas %}
-                <option value="{{ e.EmpresaID }}">{{ e.NomeEmpresa }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="mb-3">
-            <label for="id_empresa_vendedora" class="form-label">Empresa Vendedora</label>
-            <select id="id_empresa_vendedora" name="id_empresa_vendedora" class="form-select select2" data-placeholder="Selecione uma empresa">
-              <option value="" disabled selected></option>
-              {% for e in empresas %}
-                <option value="{{ e.EmpresaID }}">{{ e.NomeEmpresa }}</option>
-              {% endfor %}
-            </select>
-          </div>
-        </div>
-
-        <!-- Reserva -->
-        <div id="div_reserva" style="display:none;">
-          <div class="mb-3">
-            <label for="os_auvo" class="form-label">
-              OS Auvo <small class="text-muted">(opcional)</small>
-            </label>
-            <input type="number" id="os_auvo" name="os_auvo" class="form-control" placeholder="Opcional">
-          </div>
-          <div class="mb-3">
-            <label for="tecnico" class="form-label">Técnico</label>
-            <select id="tecnico" name="tecnico" class="form-select">
-              <option value="" disabled selected>Selecione</option>
-              {% for func in funcionarios %}
-                <option value="{{ func.IDFuncionario }}">{{ func.NomeFuncionario }}</option>
-              {% endfor %}
-            </select>
-          </div>
-        </div>
-
-        <button type="submit" class="btn btn-custom">Fechar Pedido</button>
-      </div>
-    </div>
-
   </form>
 </div>
 
@@ -253,8 +1014,8 @@
             divV = document.getElementById('div_venda'),
             divR = document.getElementById('div_reserva');
       function toggleVR() {
-        divV.style.display = tipo.value === 'venda'   ? 'block' : 'none';
-        divR.style.display = tipo.value === 'reserva' ? 'block' : 'none';
+        divV.hidden = tipo.value !== 'venda';
+        divR.hidden = tipo.value !== 'reserva';
       }
       tipo.addEventListener('change', toggleVR);
       toggleVR();
@@ -305,7 +1066,7 @@
       function hideSeries(itemId) {
         const sec  = document.getElementById(`serie_section_${itemId}`);
         const cont = document.getElementById(`serie_container_${itemId}`);
-        if (sec)  sec.style.display = 'none';
+        if (sec) sec.hidden = true;
         if (cont) cont.innerHTML = '';
       }
 
@@ -320,10 +1081,10 @@
         if (!remaining.length) return;
 
         const wrap = document.createElement('div');
-        wrap.className = 'd-flex align-items-center mb-2 serie-wrapper';
+        wrap.className = 'serie-wrapper';
         const sel = document.createElement('select');
         sel.name      = `serie_${itemId}[]`;
-        sel.className = 'form-select form-select-sm me-2';
+        sel.className = 'form-select';
         sel.innerHTML = '<option value="">Selecione a série</option>';
         remaining.forEach(numSerie => {
           sel.insertAdjacentHTML('beforeend',
@@ -334,8 +1095,9 @@
 
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'btn btn-sm btn-outline-danger';
+        btn.className = 'checkout-series-remove';
         btn.textContent = '×';
+        btn.setAttribute('aria-label', 'Remover seleção de série');
         btn.onclick = () => wrap.remove();
         wrap.appendChild(btn);
 
@@ -358,9 +1120,9 @@
               (codpontosData[key] || []).forEach(p =>
                 cpSel.insertAdjacentHTML('beforeend', `<option>${p}</option>`)
               );
-              cpSec.style.display = 'block';
+              cpSec.hidden = false;
             } else {
-              cpSec.style.display = 'none';
+              cpSec.hidden = true;
             }
           }
 
@@ -381,11 +1143,11 @@
                 );
               });
               loteSel.disabled      = false;
-              loteSec.style.display = 'table-row';
+              loteSec.hidden        = false;
             } else {
               loteSel.innerHTML     = '<option value="" disabled selected>— sem lotes —</option>';
               loteSel.disabled      = true;
-              loteSec.style.display = 'none';
+              loteSec.hidden        = true;
             }
           }
 
@@ -413,12 +1175,12 @@
                 const cont = document.getElementById(`serie_container_${itemId}`);
                 if (sec && cont && arr.length) {
                   cont.innerHTML = '';
-                  sec.style.display = 'table-row';
+                  sec.hidden = false;
                   const wrap = document.createElement('div');
-                  wrap.className = 'd-flex align-items-center mb-2 serie-wrapper';
+                  wrap.className = 'serie-wrapper';
                   const s = document.createElement('select');
                   s.name      = `serie_${itemId}[]`;
-                  s.className = 'form-select form-select-sm me-2';
+                  s.className = 'form-select';
                   s.innerHTML = '<option value="">Selecione a série</option>';
                   arr.forEach(numSerie =>
                     s.insertAdjacentHTML('beforeend',
@@ -428,8 +1190,9 @@
                   wrap.appendChild(s);
                   const b = document.createElement('button');
                   b.type = 'button';
-                  b.className = 'btn btn-sm btn-outline-danger';
+                  b.className = 'checkout-series-remove';
                   b.textContent = '×';
+                  b.setAttribute('aria-label', 'Remover seleção de série');
                   b.onclick = () => wrap.remove();
                   wrap.appendChild(b);
                   cont.appendChild(wrap);
