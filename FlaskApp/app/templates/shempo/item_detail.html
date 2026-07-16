@@ -1,668 +1,1252 @@
 {% extends "euromidia/base_euromidia.html" %}
-{% block title %}Detalhes do Item - {{ item.NomeProduto }}{% endblock %}
+
+{% block title %}Produto {{ item.IDItem }} — {{ item.NomeProduto }}{% endblock %}
 
 {% block content %}
-<h2>Detalhes do Item - {{ item.NomeProduto }}</h2>
-<div style="display: flex; justify-content: flex-end;">
-  {% if ativo_badge %}
-    <a href="{{ ativo_badge.url }}"
-       class="badge"
-       style="
-         background: #FFD700;
-         color: #000;
-         font-size: 2.5rem;
-         padding: 1.2rem 2.4rem;
-         border-radius: 0.5rem;
-       ">
-      Ativo – {{ ativo_badge.IDAtivo }}
-    </a>
-  {% endif %}
-</div>
+<style>
+  .container:has(> .product-detail-page){
+    width:100% !important;
+    max-width:none !important;
+    margin:18px 0 !important;
+    padding:0 clamp(12px,1.2vw,24px) !important;
+  }
 
+  .product-detail-page{
+    --pd-blue:#002884;
+    --pd-blue-2:#0340a7;
+    --pd-yellow:#ffb300;
+    --pd-text:#0f172a;
+    --pd-muted:#64748b;
+    --pd-border:#dfe5ee;
+    --pd-soft:#f6f8fc;
+    width:100%;
+    max-width:none;
+    padding-bottom:28px;
+  }
 
-{% if from_compat and firmware_selo %}
-<div class="alert alert-info">
-  <strong>Firmware:</strong> {{ firmware_selo }}
-</div>
-{% endif %}
+  .product-detail-page *,
+  .product-detail-page *::before,
+  .product-detail-page *::after{
+    box-sizing:border-box;
+  }
 
+  .product-detail-page .sr-only{
+    position:absolute !important;
+    width:1px !important;
+    height:1px !important;
+    padding:0 !important;
+    overflow:hidden !important;
+    clip:rect(0,0,0,0) !important;
+    white-space:nowrap !important;
+    border:0 !important;
+  }
 
-<div class="row mb-3">
+  .pd-page-header{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:18px;
+    margin-bottom:18px;
+  }
 
-  <!-- Coluna do carrossel / imagens (8 col) -->
-  <div class="col-md-8 d-flex justify-content-center">
-    {% if images and images|length > 0 %}
-      <div style="display:inline-block; width:auto; overflow:visible;">
-        <div id="itemImagesCarousel" class="carousel slide" data-bs-ride="carousel">
-          <div class="carousel-inner" style="width:auto; overflow:visible;">
-            {% for img in images %}
-              <div class="carousel-item {% if loop.first %}active{% endif %}" style="width:auto;">
-                <img src="{{ img.url }}"
-                     class="d-block mx-auto"
-                     style="max-height: 300px;"
-                     alt="Imagem {{ loop.index }}">
-                <div class="carousel-caption d-none d-md-block">
-                  <form method="POST"
-                        action="{{ url_for('euro.remover_imagem', item_id=item.IDItem) }}"
-                        style="display:inline;">
-                    <input type="hidden" name="filename" value="{{ img.NomeArquivo }}">
-                    <button type="submit" class="btn btn-sm btn-danger">Remover</button>
-                  </form>
+  .pd-page-header h1{
+    max-width:1000px;
+    margin:0;
+    color:var(--pd-blue);
+    font-size:clamp(24px,2vw,34px);
+    line-height:1.15;
+    letter-spacing:-.03em;
+    overflow-wrap:anywhere;
+  }
+
+  .pd-page-header p{
+    margin:7px 0 0;
+    color:var(--pd-muted);
+    font-size:13px;
+  }
+
+  .pd-actions{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:9px;
+    flex-wrap:wrap;
+  }
+
+  .pd-button{
+    min-height:42px;
+    padding:9px 14px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    border:1px solid rgba(0,40,132,.2);
+    border-radius:10px;
+    background:#fff;
+    color:var(--pd-blue);
+    text-decoration:none;
+    font-size:13px;
+    font-weight:850;
+    cursor:pointer;
+  }
+
+  .pd-button:hover{
+    border-color:rgba(0,40,132,.38);
+    background:#eef3ff;
+  }
+
+  .pd-button-primary{
+    border-color:var(--pd-yellow);
+    background:var(--pd-yellow);
+    color:#14213d;
+  }
+
+  .pd-button-primary:hover{
+    border-color:#f2aa00;
+    background:#f2aa00;
+  }
+
+  .pd-button-danger{
+    border-color:#fecaca;
+    color:#b91c1c;
+  }
+
+  .pd-button-danger:hover{
+    border-color:#fca5a5;
+    background:#fef2f2;
+  }
+
+  .pd-button-small{
+    min-height:34px;
+    padding:7px 10px;
+    font-size:11px;
+  }
+
+  .pd-button svg{
+    width:17px;
+    height:17px;
+    flex:0 0 auto;
+  }
+
+  .pd-card{
+    width:100%;
+    border:1px solid var(--pd-border);
+    border-radius:16px;
+    background:#fff;
+    box-shadow:0 8px 28px rgba(15,23,42,.06);
+  }
+
+  .pd-hero{
+    display:grid;
+    grid-template-columns:minmax(360px,.9fr) minmax(0,1.45fr);
+    gap:18px;
+    margin-bottom:18px;
+  }
+
+  .pd-media-card,
+  .pd-summary-card{
+    overflow:hidden;
+  }
+
+  .pd-card-head{
+    padding:15px 17px;
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    border-bottom:1px solid var(--pd-border);
+    background:linear-gradient(135deg,#fff 0%,#f7f9ff 100%);
+  }
+
+  .pd-card-head h2{
+    margin:0;
+    color:var(--pd-text);
+    font-size:16px;
+  }
+
+  .pd-card-head p{
+    margin:4px 0 0;
+    color:var(--pd-muted);
+    font-size:11px;
+    line-height:1.4;
+  }
+
+  .pd-image-grid{
+    padding:13px;
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:10px;
+    background:var(--pd-soft);
+  }
+
+  .pd-image-card{
+    position:relative;
+    min-height:190px;
+    overflow:hidden;
+    border:1px solid var(--pd-border);
+    border-radius:12px;
+    background:#fff;
+  }
+
+  .pd-image-card img{
+    width:100%;
+    height:210px;
+    padding:10px;
+    display:block;
+    object-fit:contain;
+  }
+
+  .pd-image-fallback,
+  .pd-empty-image{
+    min-height:250px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    color:#94a3b8;
+    font-size:12px;
+    font-weight:750;
+    text-align:center;
+  }
+
+  .pd-image-fallback svg,
+  .pd-empty-image svg{
+    width:42px;
+    height:42px;
+  }
+
+  .pd-image-remove{
+    position:absolute;
+    top:8px;
+    right:8px;
+  }
+
+  .pd-upload{
+    padding:14px;
+    border-top:1px solid var(--pd-border);
+  }
+
+  .pd-upload-row{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:10px;
+    align-items:end;
+  }
+
+  .pd-summary-content{
+    padding:18px;
+  }
+
+  .pd-badges{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    margin-bottom:15px;
+  }
+
+  .pd-badge{
+    min-height:31px;
+    padding:6px 10px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:999px;
+    background:#eef3ff;
+    color:var(--pd-blue);
+    text-decoration:none;
+    font-size:11px;
+    font-weight:900;
+  }
+
+  .pd-badge.success{
+    background:#ecfdf3;
+    color:#087443;
+  }
+
+  .pd-badge.warning{
+    background:#fff7dd;
+    color:#8a5a00;
+  }
+
+  .pd-badge.danger{
+    background:#fef2f2;
+    color:#b91c1c;
+  }
+
+  .pd-product-name{
+    margin:0;
+    color:var(--pd-text);
+    font-size:clamp(20px,1.6vw,28px);
+    line-height:1.25;
+    overflow-wrap:anywhere;
+  }
+
+  .pd-description{
+    margin:10px 0 17px;
+    color:#475569;
+    font-size:13px;
+    line-height:1.55;
+    white-space:pre-line;
+  }
+
+  .pd-meta-grid{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:10px;
+  }
+
+  .pd-meta{
+    min-height:68px;
+    padding:11px 12px;
+    border:1px solid var(--pd-border);
+    border-radius:10px;
+    background:var(--pd-soft);
+  }
+
+  .pd-meta span{
+    display:block;
+    color:var(--pd-muted);
+    font-size:9px;
+    font-weight:900;
+    letter-spacing:.04em;
+    text-transform:uppercase;
+  }
+
+  .pd-meta strong{
+    display:block;
+    margin-top:5px;
+    color:var(--pd-text);
+    font-size:13px;
+    overflow-wrap:anywhere;
+  }
+
+  .pd-section{
+    overflow:hidden;
+    margin-bottom:18px;
+  }
+
+  .pd-section-body{
+    padding:17px;
+  }
+
+  .pd-grid{
+    display:grid;
+    grid-template-columns:repeat(12,minmax(0,1fr));
+    gap:13px;
+  }
+
+  .pd-field{grid-column:span 3;}
+  .pd-field-wide{grid-column:span 6;}
+  .pd-field-full{grid-column:1 / -1;}
+
+  .pd-field label{
+    margin:0 0 6px;
+    display:block;
+    color:#52637a;
+    font-size:11px;
+    font-weight:850;
+  }
+
+  .pd-field input,
+  .pd-field select,
+  .pd-field textarea{
+    width:100%;
+    min-height:43px;
+    margin:0;
+    border:1px solid var(--pd-border);
+    border-radius:10px;
+    background:#fff;
+    color:var(--pd-text);
+    font-size:13px;
+  }
+
+  .pd-field textarea{
+    min-height:100px;
+    resize:vertical;
+  }
+
+  .pd-field input:focus,
+  .pd-field select:focus,
+  .pd-field textarea:focus{
+    border-color:var(--pd-blue-2);
+    box-shadow:0 0 0 3px rgba(3,64,167,.11);
+  }
+
+  .pd-form-actions{
+    margin-top:14px;
+    display:flex;
+    justify-content:flex-end;
+    gap:9px;
+    flex-wrap:wrap;
+  }
+
+  .pd-characteristic-list{
+    display:flex;
+    flex-direction:column;
+    gap:9px;
+  }
+
+  .pd-characteristic{
+    padding:10px;
+    display:grid;
+    grid-template-columns:minmax(180px,.7fr) minmax(0,1.3fr) auto;
+    gap:9px;
+    align-items:center;
+    border:1px solid var(--pd-border);
+    border-radius:11px;
+    background:var(--pd-soft);
+  }
+
+  .pd-characteristic-name{
+    color:#334155;
+    font-size:12px;
+    font-weight:850;
+    overflow-wrap:anywhere;
+  }
+
+  .pd-characteristic-actions{
+    display:flex;
+    gap:7px;
+    align-items:center;
+  }
+
+  .pd-characteristic-actions form{
+    margin:0;
+  }
+
+  .pd-filter-chip{
+    min-height:31px;
+    padding:6px 9px;
+    display:inline-flex;
+    align-items:center;
+    border-radius:999px;
+    background:#fff7dd;
+    color:#8a5a00;
+    font-size:10px;
+    font-weight:850;
+  }
+
+  .pd-new-characteristic{
+    margin-top:13px;
+    padding:13px;
+    border:1px dashed #b9c6d8;
+    border-radius:11px;
+    background:#fbfcff;
+  }
+
+  .pd-new-characteristic summary{
+    color:var(--pd-blue);
+    font-size:12px;
+    font-weight:900;
+    cursor:pointer;
+  }
+
+  .pd-new-characteristic[open] summary{
+    margin-bottom:12px;
+  }
+
+  .pd-table-wrap{
+    width:100%;
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+
+  .pd-table{
+    width:100%;
+    border-collapse:collapse;
+    color:var(--pd-text);
+  }
+
+  .pd-table th{
+    padding:11px 13px;
+    border-bottom:1px solid var(--pd-border);
+    background:#f3f6fb;
+    color:#475569;
+    font-size:10px;
+    font-weight:900;
+    letter-spacing:.04em;
+    text-align:left;
+    text-transform:uppercase;
+    white-space:nowrap;
+  }
+
+  .pd-table td{
+    padding:12px 13px;
+    border-bottom:1px solid #edf1f6;
+    font-size:12px;
+    vertical-align:middle;
+  }
+
+  .pd-table tbody tr:last-child td{
+    border-bottom:0;
+  }
+
+  .pd-component-image{
+    width:46px;
+    height:46px;
+    overflow:hidden;
+    border:1px solid var(--pd-border);
+    border-radius:9px;
+    background:var(--pd-soft);
+  }
+
+  .pd-component-image img{
+    width:100%;
+    height:100%;
+    display:block;
+    object-fit:contain;
+  }
+
+  .pd-empty{
+    padding:26px 17px;
+    color:var(--pd-muted);
+    font-size:12px;
+    text-align:center;
+  }
+
+  .pd-tech-grid{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:12px;
+  }
+
+  .pd-tech-item{
+    padding:16px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:14px;
+    border:1px solid var(--pd-border);
+    border-radius:12px;
+    background:var(--pd-soft);
+  }
+
+  .pd-tech-item h3{
+    margin:0;
+    color:var(--pd-text);
+    font-size:14px;
+  }
+
+  .pd-tech-item p{
+    margin:4px 0 0;
+    color:var(--pd-muted);
+    font-size:10px;
+  }
+
+  .pd-dialog{
+    width:min(1500px,calc(100vw - 32px));
+    max-width:none;
+    height:min(900px,calc(100vh - 32px));
+    max-height:none;
+    padding:0;
+    overflow:hidden;
+    border:0;
+    border-radius:16px;
+    background:#fff;
+    box-shadow:0 30px 90px rgba(15,23,42,.34);
+  }
+
+  .pd-dialog::backdrop{
+    background:rgba(15,23,42,.62);
+    backdrop-filter:blur(2px);
+  }
+
+  .pd-dialog-layout{
+    height:100%;
+    display:flex;
+    flex-direction:column;
+  }
+
+  .pd-dialog-head{
+    padding:13px 15px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    border-bottom:1px solid var(--pd-border);
+  }
+
+  .pd-dialog-head h2{
+    margin:0;
+    color:var(--pd-text);
+    font-size:16px;
+  }
+
+  .pd-dialog-body{
+    min-height:0;
+    flex:1;
+    overflow:auto;
+  }
+
+  .pd-dialog-close{
+    width:36px;
+    height:36px;
+    padding:0;
+    border:1px solid var(--pd-border);
+    border-radius:9px;
+    background:#fff;
+    color:#475569;
+    font-size:20px;
+    cursor:pointer;
+  }
+
+  .pd-diagram-toolbar{
+    padding:12px;
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:10px;
+    border-bottom:1px solid var(--pd-border);
+    background:var(--pd-soft);
+  }
+
+  .pd-diagram-container{
+    width:100%;
+    min-height:650px;
+    height:calc(100% - 76px);
+    overflow:auto;
+    background:#fff;
+  }
+
+  .pd-pdf-frame{
+    width:100%;
+    height:100%;
+    display:block;
+    border:0;
+  }
+
+  @media(max-width:1050px){
+    .pd-hero{grid-template-columns:1fr;}
+    .pd-field{grid-column:span 6;}
+  }
+
+  @media(max-width:760px){
+    .container:has(> .product-detail-page){
+      margin:12px 0 !important;
+      padding:0 12px !important;
+    }
+
+    .pd-page-header{
+      align-items:stretch;
+      flex-direction:column;
+    }
+
+    .pd-actions,
+    .pd-actions .pd-button{
+      width:100%;
+    }
+
+    .pd-image-grid{grid-template-columns:1fr;}
+
+    .pd-upload-row{grid-template-columns:1fr;}
+    .pd-upload-row .pd-button{width:100%;}
+
+    .pd-meta-grid,
+    .pd-tech-grid,
+    .pd-diagram-toolbar{grid-template-columns:1fr;}
+
+    .pd-grid{grid-template-columns:1fr;}
+    .pd-field,
+    .pd-field-wide,
+    .pd-field-full{grid-column:1;}
+
+    .pd-characteristic{
+      grid-template-columns:1fr;
+    }
+
+    .pd-characteristic-actions{
+      align-items:stretch;
+      flex-direction:column;
+    }
+
+    .pd-characteristic-actions form,
+    .pd-characteristic-actions .pd-button,
+    .pd-filter-chip{
+      width:100%;
+    }
+
+    .pd-form-actions,
+    .pd-form-actions .pd-button{
+      width:100%;
+    }
+
+    .pd-table-wrap.mobile-cards{
+      overflow:visible;
+      padding:10px;
+      background:var(--pd-soft);
+    }
+
+    .mobile-cards .pd-table,
+    .mobile-cards .pd-table tbody{
+      display:block;
+      width:100%;
+    }
+
+    .mobile-cards .pd-table thead{display:none;}
+
+    .mobile-cards .pd-table tr{
+      display:block;
+      overflow:hidden;
+      margin-bottom:10px;
+      border:1px solid var(--pd-border);
+      border-radius:11px;
+      background:#fff;
+    }
+
+    .mobile-cards .pd-table tr:last-child{margin-bottom:0;}
+
+    .mobile-cards .pd-table td{
+      min-height:43px;
+      padding:10px 12px;
+      display:grid;
+      grid-template-columns:minmax(105px,.75fr) minmax(0,1.25fr);
+      gap:10px;
+      align-items:center;
+      border-bottom:1px solid #edf1f6;
+      overflow-wrap:anywhere;
+      text-align:right;
+    }
+
+    .mobile-cards .pd-table td::before{
+      content:attr(data-label);
+      color:#64748b;
+      font-size:9px;
+      font-weight:900;
+      letter-spacing:.035em;
+      text-align:left;
+      text-transform:uppercase;
+    }
+
+    .mobile-cards .pd-component-image{margin-left:auto;}
+
+    .pd-tech-item{
+      align-items:stretch;
+      flex-direction:column;
+    }
+
+    .pd-tech-item .pd-button{width:100%;}
+
+    .pd-dialog{
+      width:calc(100vw - 16px);
+      height:calc(100vh - 16px);
+    }
+  }
+</style>
+
+<div class="product-detail-page">
+  <header class="pd-page-header">
+    <div>
+      <h1>{{ item.NomeProduto }}</h1>
+      <p>Cadastro e detalhes do produto · Item {{ item.IDItem }}</p>
+    </div>
+
+    <div class="pd-actions">
+      <a href="{{ url_for('euro.lista_produtos') }}" class="pd-button">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M19 12H5M11 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Voltar ao catálogo
+      </a>
+      <a href="{{ url_for('euro.ver_estoques', item_id=item.IDItem) }}" class="pd-button">Ver estoques</a>
+      <a href="{{ url_for('euro.movimentar_estoque', item_id=item.IDItem) }}" class="pd-button pd-button-primary">Movimentar estoque</a>
+    </div>
+  </header>
+
+  <div class="pd-hero">
+    <section class="pd-card pd-media-card">
+      <div class="pd-card-head">
+        <div>
+          <h2>Imagens do produto</h2>
+          <p>Até quatro imagens por cadastro.</p>
+        </div>
+        <span class="pd-badge">{{ images|length }}/4</span>
+      </div>
+
+      {% if images %}
+        <div class="pd-image-grid">
+          {% for img in images %}
+            <article class="pd-image-card">
+              <img src="{{ img.url }}" alt="Imagem {{ loop.index }} de {{ item.NomeProduto }}" loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false;">
+              <div class="pd-image-fallback" hidden>
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/>
+                  <path d="M7 15l3-3 3 3 2-2 3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                Imagem indisponível
+              </div>
+              <form method="POST" action="{{ url_for('euro.remover_imagem', item_id=item.IDItem) }}" class="pd-image-remove" onsubmit="return confirm('Remover esta imagem?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="filename" value="{{ img.NomeArquivo }}">
+                <button type="submit" class="pd-button pd-button-danger pd-button-small" aria-label="Remover imagem">Remover</button>
+              </form>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="pd-empty-image">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M7 15l3-3 3 3 2-2 3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Nenhuma imagem cadastrada
+        </div>
+      {% endif %}
+
+      <div class="pd-upload">
+        {% if next_position %}
+          <form method="POST" action="{{ url_for('euro.upload_imagem', item_id=item.IDItem) }}" enctype="multipart/form-data" class="pd-upload-row">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="pd-field pd-field-full">
+              <label for="imagem">Nova imagem · posição {{ next_position }}</label>
+              <input type="file" id="imagem" name="imagem" accept=".png,.jpg,.jpeg,.gif,.webp,image/*" required>
+            </div>
+            <button type="submit" class="pd-button pd-button-primary">Enviar imagem</button>
+          </form>
+        {% else %}
+          <p class="pd-empty">O limite de quatro imagens foi atingido.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="pd-card pd-summary-card">
+      <div class="pd-summary-content">
+        <div class="pd-badges">
+          <span class="pd-badge">Item {{ item.IDItem }}</span>
+          {% if item.BitAtivo %}
+            <span class="pd-badge success">Produto ativo</span>
+          {% else %}
+            <span class="pd-badge danger">Produto inativo</span>
+          {% endif %}
+          {% if firmware_selo %}
+            <span class="pd-badge success">Firmware {{ firmware_selo }}</span>
+          {% endif %}
+          {% if ativo_badge %}
+            <a href="{{ ativo_badge.url }}" class="pd-badge warning">Ativo {{ ativo_badge.IDAtivo }}</a>
+          {% endif %}
+        </div>
+
+        <h2 class="pd-product-name">{{ item.NomeProduto }}</h2>
+        <p class="pd-description">{{ item.Descricao or 'Nenhuma descrição cadastrada.' }}</p>
+
+        <div class="pd-meta-grid">
+          <div class="pd-meta"><span>Referência externa</span><strong>{{ item.ReferenciaExterna or '-' }}</strong></div>
+          <div class="pd-meta"><span>Unidade</span><strong>{{ item.unidade or 'UN' }}</strong></div>
+          <div class="pd-meta"><span>Categoria</span><strong>{{ item.NomeCategoria or '-' }}</strong></div>
+          <div class="pd-meta"><span>Departamento</span><strong>{{ item.NomeDepartamento or '-' }}</strong></div>
+          <div class="pd-meta"><span>Família</span><strong>{{ item.NomeFamilia or '-' }}</strong></div>
+          <div class="pd-meta"><span>Modelo</span><strong>{{ item.Modelo or '-' }}</strong></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section class="pd-card pd-section">
+    <div class="pd-card-head">
+      <div>
+        <h2>Editar informações do produto</h2>
+        <p>Atualize identificação, classificação e vínculo com PMV.</p>
+      </div>
+    </div>
+
+    <div class="pd-section-body">
+      <form method="POST" action="{{ url_for('euro.atualizar_produto_info', item_id=item.IDItem) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="pd-grid">
+          <div class="pd-field pd-field-wide">
+            <label for="nome_produto">Nome do produto</label>
+            <input type="text" id="nome_produto" name="nome_produto" value="{{ item.NomeProduto or '' }}" required>
+          </div>
+          <div class="pd-field pd-field-wide">
+            <label for="referencia_externa">Referência externa</label>
+            <input type="text" id="referencia_externa" name="referencia_externa" value="{{ item.ReferenciaExterna or '' }}" required>
+          </div>
+          <div class="pd-field">
+            <label for="category_select">Categoria</label>
+            <select id="category_select" name="category_id">
+              <option value="">Sem categoria</option>
+              {% for cat in categories %}
+                <option value="{{ cat.IDCategoria }}" {% if cat.IDCategoria == item.IDCategoriaProduto %}selected{% endif %}>{{ cat.NomeCategoria }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="pd-field">
+            <label for="department_select">Departamento</label>
+            <select id="department_select" name="department_id">
+              <option value="">Sem departamento</option>
+              {% for dep in departments %}
+                <option value="{{ dep.IDDepartamento }}" {% if dep.IDDepartamento == item.IDDepartamento %}selected{% endif %}>{{ dep.NomeDepartamento }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="pd-field">
+            <label for="family_select">Família</label>
+            <select id="family_select" name="family_id">
+              <option value="">Sem família</option>
+              {% for fam in families %}
+                <option value="{{ fam.FamiliaID }}" {% if fam.FamiliaID == item.FamiliaID %}selected{% endif %}>{{ fam.NomeFamilia }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="pd-field">
+            <label for="pmv_select">PMV</label>
+            <select id="pmv_select" name="pmv_id">
+              <option value="">Sem PMV</option>
+              {% for p in pmvs %}
+                <option value="{{ p.PmvID }}" {% if p.PmvID == item.PmvID %}selected{% endif %}>{{ p.NomePMV }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="pd-form-actions">
+          <button type="submit" class="pd-button pd-button-primary">Salvar informações</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="pd-card pd-section">
+    <div class="pd-card-head">
+      <div>
+        <h2>Características</h2>
+        <p>Edite os valores existentes ou cadastre uma nova característica.</p>
+      </div>
+    </div>
+
+    <div class="pd-section-body">
+      {% if caracteristicas %}
+        <form method="POST" action="{{ url_for('euro.atualizar_caracteristicas', item_id=item.IDItem) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="pd-characteristic-list">
+            {% for carac in caracteristicas %}
+              <div class="pd-characteristic">
+                <div class="pd-characteristic-name">{{ carac.Caracteristica }}</div>
+                <div class="pd-field pd-field-full">
+                  <label class="sr-only" for="valor_{{ carac.IDCaracteristica }}">Valor de {{ carac.Caracteristica }}</label>
+                  <input type="text" id="valor_{{ carac.IDCaracteristica }}" name="valor_{{ carac.IDCaracteristica }}" value="{{ carac.Valor or '' }}">
+                </div>
+                <div class="pd-characteristic-actions">
+                  {% if carac.BitFiltro %}
+                    <span class="pd-filter-chip">Usado como filtro</span>
+                  {% else %}
+                    <button type="submit" class="pd-button pd-button-small" formaction="{{ url_for('euro.marcar_filtro', item_id=item.IDItem, carac_id=carac.IDCaracteristica) }}" formmethod="POST">Marcar filtro</button>
+                  {% endif %}
+                  <button type="submit" class="pd-button pd-button-danger pd-button-small" formaction="{{ url_for('euro.remover_caracteristica', item_id=item.IDItem, carac_id=carac.IDCaracteristica) }}" formmethod="POST" onclick="return confirm('Remover esta característica?');">Remover</button>
                 </div>
               </div>
             {% endfor %}
           </div>
-          <button class="carousel-control-prev" type="button"
-                  data-bs-target="#itemImagesCarousel" data-bs-slide="prev">
-            <span class="carousel-control-prev-icon"></span>
-            <span class="visually-hidden">Anterior</span>
-          </button>
-          <button class="carousel-control-next" type="button"
-                  data-bs-target="#itemImagesCarousel" data-bs-slide="next">
-            <span class="carousel-control-next-icon"></span>
-            <span class="visually-hidden">Próximo</span>
-          </button>
-        </div>
+          <div class="pd-form-actions">
+            <button type="submit" class="pd-button pd-button-primary">Salvar características</button>
+          </div>
+        </form>
+      {% else %}
+        <div class="pd-empty">Nenhuma característica cadastrada.</div>
+      {% endif %}
+
+      <details class="pd-new-characteristic">
+        <summary>Adicionar nova característica</summary>
+        <form method="POST" action="{{ url_for('euro.nova_caracteristica', item_id=item.IDItem) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="pd-grid">
+            <div class="pd-field pd-field-wide">
+              <label for="nova_caracteristica">Característica</label>
+              <input type="text" id="nova_caracteristica" name="nova_caracteristica" required>
+            </div>
+            <div class="pd-field pd-field-wide">
+              <label for="novo_valor">Valor</label>
+              <input type="text" id="novo_valor" name="novo_valor" required>
+            </div>
+          </div>
+          <div class="pd-form-actions">
+            <button type="submit" class="pd-button pd-button-primary">Adicionar característica</button>
+          </div>
+        </form>
+      </details>
+    </div>
+  </section>
+
+  <section class="pd-card pd-section">
+    <div class="pd-card-head">
+      <div>
+        <h2>Recursos técnicos</h2>
+        <p>Consulte o diagrama de componentes e o documento técnico vinculado ao PMV.</p>
+      </div>
+    </div>
+
+    <div class="pd-section-body">
+      <div class="pd-tech-grid">
+        <article class="pd-tech-item">
+          <div><h3>Diagrama de componentes</h3><p>Árvore de composição e ligações do produto.</p></div>
+          <button type="button" class="pd-button" data-dialog-open="diagramDialog">Abrir diagrama</button>
+        </article>
+        <article class="pd-tech-item">
+          <div><h3>Documento técnico</h3><p>PDF de componentes e peças vinculado ao PMV.</p></div>
+          {% if pdf_url %}
+            <button type="button" class="pd-button" data-dialog-open="pdfDialog">Abrir PDF</button>
+          {% else %}
+            <span class="pd-badge danger">PDF não vinculado</span>
+          {% endif %}
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="pd-card pd-section">
+    <div class="pd-card-head">
+      <div>
+        <h2>Componentes vinculados</h2>
+        <p>Itens encontrados em pedidos concluídos para a composição deste produto.</p>
+      </div>
+      <span class="pd-badge">{{ components|length }}</span>
+    </div>
+
+    {% if components %}
+      <div class="pd-table-wrap mobile-cards">
+        <table class="pd-table">
+          <thead>
+            <tr>
+              <th>Foto</th>
+              <th>ID Item</th>
+              <th>Produto</th>
+              <th>Quantidade</th>
+              <th>Lote</th>
+              <th>Série</th>
+              <th>Estoque</th>
+              <th>CodPonto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for comp in components %}
+              <tr>
+                <td data-label="Foto">
+                  <div class="pd-component-image">
+                    {% if image_urls.get(comp.IDItem) %}
+                      <img src="{{ image_urls.get(comp.IDItem) }}" alt="{{ comp.NomeProduto }}" loading="lazy">
+                    {% endif %}
+                  </div>
+                </td>
+                <td data-label="ID Item">{{ comp.IDItem }}</td>
+                <td data-label="Produto">{{ comp.NomeProduto }}</td>
+                <td data-label="Quantidade">{{ comp.Quantidade }}</td>
+                <td data-label="Lote">{{ comp.NumeroLote or '-' }}</td>
+                <td data-label="Série">{{ comp.NumerodeSerie or '-' }}</td>
+                <td data-label="Estoque">{{ tipo_est_map.get(comp.IDTipoEstoque, comp.IDTipoEstoque) }}</td>
+                <td data-label="CodPonto">{{ comp.CodPonto or '-' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
     {% else %}
-      <img src="https://via.placeholder.com/500x300?text=Sem+Imagem"
-           alt="Sem imagem cadastrada"
-           class="img-fluid rounded mx-auto d-block">
+      <div class="pd-empty">Nenhum componente vinculado foi encontrado.</div>
     {% endif %}
-  </div>
-
-  <!-- Coluna do selo (4 col) alinhado ao topo da imagem -->
-  <div class="col-md-4 d-flex justify-content-center">
-    {% if firmware_selo %}
-      <span class="badge bg-success fs-5 align-self-start"
-            style="padding:1rem 1.5rem;">
-        Firmware: {{ firmware_selo }}
-      </span>
-    {% endif %}
-  </div>
-
+  </section>
 </div>
 
-<!-- ------------------------------------------------------------------------>
-
-<!-- Formulário de Upload de nova imagem -->
-<div class="row mb-3">
-  <div class="col-md-12">
-    {% if next_position %}
-      <form method="POST"
-            action="{{ url_for('euro.upload_imagem', item_id=item.IDItem) }}"
-            enctype="multipart/form-data">
-        <label class="form-label">
-          Anexar imagem (posição {{ next_position }} de 4)
-        </label>
-        <input class="form-control"
-               type="file"
-               name="imagem"
-               accept="image/*"
-               required>
-        <button type="submit" class="btn btn-primary mt-2">Enviar</button>
-      </form>
-    {% else %}
-      <div class="alert alert-warning">
-        Já existem 4 imagens cadastradas para este item.
-      </div>
-    {% endif %}
-  </div>
-</div>
-
-
-
-<!-- Dados do Item -->
-<div class="row">
-  <div class="col-md-12">
-    <h4>{{ item.NomeProduto }}</h4>
-    <p>
-      <strong>Referência Externa:</strong> {{ item.ReferenciaExterna }}<br>
-      <strong>Unidade:</strong> {{ item.unidade or '-' }}<br>
-      <strong>Categoria:</strong> {{ item.NomeCategoria or '-' }}<br>
-       <strong>Modelo:</strong> {{ item.Modelo or '-' }}<br>
-     
-      <strong>Família:</strong> {{ item.NomeFamilia or '-' }}<br>
-    </p>
-    <p>  {{ item.Descricao or '—' }}</p>
-  </div>
-</div>
-
-<hr>
-
-<!-- Botão para Ver Diagrama -->
-<div class="row mb-3">
-  <div class="col-md-12 text-center">
-    <button id="verDiagramaBtn" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#diagramModal">
-      Ver Diagrama
-    </button>
-  </div>
-</div>
-
-<!-- Modal do Diagrama -->
-<div class="modal fade" id="diagramModal" tabindex="-1" aria-labelledby="diagramModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-xl" style="max-width: 1400px;">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="diagramModalLabel">Diagrama de Componentes</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
-      </div>
-      <div class="modal-body">
-        <!-- Filtros (opcional) -->
-        <div class="row mb-3">
-          <div class="col-md-6">
-            <label for="filterCategory" class="form-label">Filtrar por Categoria</label>
-            <select class="form-select" id="filterCategory">
-              <option value="">Todos</option>
-              {% for cat in categories %}
-                <option value="{{ cat.NomeCategoria }}">{{ cat.NomeCategoria }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          <div class="col-md-6">
-            <label for="filterDepartment" class="form-label">Filtrar por Departamento</label>
-            <select class="form-select" id="filterDepartment">
-              <option value="">Todos</option>
-              {% for dep in departments %}
-                <option value="{{ dep.NomeDepartamento }}">{{ dep.NomeDepartamento }}</option>
-              {% endfor %}
-            </select>
-          </div>
+<dialog class="pd-dialog" id="diagramDialog">
+  <div class="pd-dialog-layout">
+    <header class="pd-dialog-head">
+      <h2>Diagrama de componentes</h2>
+      <button type="button" class="pd-dialog-close" data-dialog-close aria-label="Fechar">×</button>
+    </header>
+    <div class="pd-dialog-body">
+      <div class="pd-diagram-toolbar">
+        <div class="pd-field pd-field-full">
+          <label for="filterCategory">Filtrar por categoria</label>
+          <select id="filterCategory">
+            <option value="">Todas</option>
+            {% for cat in categories %}<option value="{{ cat.NomeCategoria }}">{{ cat.NomeCategoria }}</option>{% endfor %}
+          </select>
         </div>
-        <!-- Container do Diagrama: aumentado a altura -->
-        <div id="diagramContainer" style="width: 100%; height: 900px; border: 1px solid #ccc;"></div>
+        <div class="pd-field pd-field-full">
+          <label for="filterDepartment">Filtrar por departamento</label>
+          <select id="filterDepartment">
+            <option value="">Todos</option>
+            {% for dep in departments %}<option value="{{ dep.NomeDepartamento }}">{{ dep.NomeDepartamento }}</option>{% endfor %}
+          </select>
+        </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-      </div>
+      <div id="diagramContainer" class="pd-diagram-container"></div>
     </div>
   </div>
-</div>
+</dialog>
 
-<hr>
-
-<!-- Diagrama Técnico -->
-<div class="row mb-4">
-  <div class="col-12 d-flex justify-content-center">
-    <h5>Diagrama Técnico</h5>
-  </div>
-
-  <!-- botão que você já tem -->
-<!-- botão que dispara o modal (permanece igual) -->
-<div class="col-md-6 text-center mb-2">
-  <button class="btn btn-secondary"
-          data-bs-toggle="modal"
-          data-bs-target="#componentesModal">
-    Ver Diagrama Componentes e Peças
-  </button>
-</div>
-
-<!-- modal com estilos inline para largura/altura -->
-<div class="modal fade" id="componentesModal" tabindex="-1"
-     aria-labelledby="componentesModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-xl"
-       style="max-width: 90vw; width: 90vw; height: 95vh; margin: auto;">
-    <div class="modal-content"
-         style="height: 100%; display: flex; flex-direction: column;">
-      <div class="modal-header">
-        <h5 class="modal-title" id="componentesModalLabel">
-          Diagrama Componentes e Peças
-        </h5>
-        <button type="button" class="btn-close"
-                data-bs-dismiss="modal" aria-label="Fechar"></button>
-      </div>
-      <div class="modal-body p-0"
-           style="height: calc(100% - 56px); padding: 0;">
-        <iframe
-          src="{{ pdf_url }}#toolbar=1&amp;navpanes=0&amp;view=FitH"
-          style="width: 100%; height: 100%; border: none;"
-          frameborder="0">
-        </iframe>
+{% if pdf_url %}
+  <dialog class="pd-dialog" id="pdfDialog">
+    <div class="pd-dialog-layout">
+      <header class="pd-dialog-head">
+        <h2>Diagrama de componentes e peças</h2>
+        <button type="button" class="pd-dialog-close" data-dialog-close aria-label="Fechar">×</button>
+      </header>
+      <div class="pd-dialog-body">
+        <iframe class="pd-pdf-frame" src="{{ pdf_url }}#toolbar=1&amp;navpanes=0&amp;view=FitH" title="Documento técnico do produto"></iframe>
       </div>
     </div>
-  </div>
-</div>
-
-
-
-  <div class="col-md-6 text-center mb-2">
-    <button class="btn btn-secondary"
-            data-bs-toggle="modal"
-            data-bs-target="#eletronicoModal">
-      Ver Diagrama Eletrônico
-    </button>
-  </div>
-</div>
-
-<!-- Modal Diagrama Componentes e Peças -->
-<div class="modal fade" id="componentesModal" tabindex="-1" aria-labelledby="componentesModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-xl">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="componentesModalLabel">Diagrama Componentes e Peças</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <!-- Aqui vai o conteúdo ou <img> do diagrama de componentes -->
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Modal Diagrama Eletrônico -->
-<div class="modal fade" id="eletronicoModal" tabindex="-1" aria-labelledby="eletronicoModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-xl">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="eletronicoModalLabel">Diagrama Eletrônico</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <!-- Aqui vai o conteúdo ou <img> do diagrama eletrônico -->
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-
-<!-- Edição de Informações do Produto -->
-<h4>Editar Informações de Produto</h4>
-<form method="POST" action="{{ url_for('euro.atualizar_produto_info', item_id=item.IDItem) }}">
-  <div class="row">
-    <div class="col-md-3 mb-3">
-      <label for="category_select" class="form-label">Categorias</label>
-      <select class="form-select" id="category_select" name="category_id">
-        {% for cat in categories %}
-          <option value="{{ cat.IDCategoria }}" {% if cat.IDCategoria == item.IDCategoriaProduto %}selected{% endif %}>
-            {{ cat.NomeCategoria }}
-          </option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-md-3 mb-3">
-      <label for="department_select" class="form-label">Departamentos Produtos</label>
-      <select class="form-select" id="department_select" name="department_id">
-        {% for dep in departments %}
-          <option value="{{ dep.IDDepartamento }}" {% if dep.IDDepartamento == item.IDDepartamento %}selected{% endif %}>
-            {{ dep.NomeDepartamento }}
-          </option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-md-3 mb-3">
-      <label for="family_select" class="form-label">Família Produto</label>
-      <select class="form-select" id="family_select" name="family_id">
-        {% for fam in families %}
-          <option value="{{ fam.FamiliaID }}" {% if fam.FamiliaID == item.FamiliaID %}selected{% endif %}>
-            {{ fam.NomeFamilia }}
-          </option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-md-3 mb-3">
-      <label for="pmv_select" class="form-label">PMV</label>
-      <select class="form-select" id="pmv_select" name="pmv_id">
-        {% for p in pmvs %}
-          <option value="{{ p.PmvID }}" {% if p.PmvID == item.PmvID %}selected{% endif %}>
-            {{ p.NomePMV }}
-          </option>
-        {% endfor %}
-      </select>
-    </div>
-  </div>
-  <button type="submit" class="btn btn-primary mt-2">Salvar Informações</button>
-</form>
-
-<hr>
-
-<!-- Características -->
-<h4>Características</h4>
-<div id="caracteristicas-list">
-  <form method="POST" action="{{ url_for('euro.atualizar_caracteristicas', item_id=item.IDItem) }}">
-    {% for carac in caracteristicas %}
-      <div class="input-group mb-2">
-        <span class="input-group-text">{{ carac.Caracteristica }}:</span>
-        <input type="text" name="valor_{{ carac.IDCaracteristica }}" value="{{ carac.Valor or '' }}"
-               class="form-control" onchange="this.form.submit()">
-        <a href="{{ url_for('euro.remover_caracteristica', item_id=item.IDItem, carac_id=carac.IDCaracteristica) }}"
-           class="btn btn-danger" style="margin-left: 4px;">X</a>
-        <a href="{{ url_for('euro.marcar_filtro', item_id=item.IDItem, carac_id=carac.IDCaracteristica) }}"
-           class="btn btn-warning" style="margin-left: 4px;">Filtro</a>
-      </div>
-    {% endfor %}
-  </form>
-</div>
-
-<!-- Tabela de Componentes -->
-{% if components %}
-<div class="container my-4">
-  <h4>Componentes</h4>
-  <div class="table-responsive">
-    <table class="table table-striped align-middle">
-      <thead>
-        <tr>
-          <th>Foto</th>
-          <th>ID Item</th>
-          <th>Nome Produto</th>
-          <th>Quantidade</th>
-          <th>Lote</th>
-          <th>Série</th>
-          <th>Tipo Estoque</th>
-          <th>CodPonto</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for comp in components %}
-        <tr>
-          <td style="width:60px;">
-            {% if image_urls[comp.IDItem] %}
-              <img
-                src="{{ image_urls[comp.IDItem] }}"
-                width="40" height="40"
-                loading="lazy"
-                onerror="this.onerror=null;
-                  this.src='https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif';"
-              >
-            {% else %}
-              <img
-                src="https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif"
-                width="40" height="40"
-              >
-            {% endif %}
-          </td>
-          <td>{{ comp.IDItem }}</td>
-          <td>{{ comp.NomeProduto }}</td>
-          <td>{{ comp.Quantidade }}</td>
-          <td>{{ comp.NumeroLote or '-' }}</td>
-          <td>{{ comp.NumerodeSerie or '-' }}</td>
-          <td>
-            {{ tipo_est_map.get(comp.IDTipoEstoque, comp.IDTipoEstoque) }}
-          </td>
-          <td>{{ comp.CodPonto or '-' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
+  </dialog>
 {% endif %}
 
-
-
-
-<button class="btn btn-sm btn-success mt-3" onclick="document.getElementById('nova-caracteristica').style.display='block'">
-  Nova Característica
-</button>
-<div id="nova-caracteristica" style="display:none; margin-top: 1rem;">
-  <form method="POST" action="{{ url_for('euro.nova_caracteristica', item_id=item.IDItem) }}">
-    <div class="row g-2">
-      <div class="col-md-5">
-        <input type="text" name="nova_caracteristica" placeholder="Característica" class="form-control" required>
-      </div>
-      <div class="col-md-5">
-        <input type="text" name="novo_valor" placeholder="Valor" class="form-control" required>
-      </div>
-      <div class="col-md-2">
-        <button type="submit" class="btn btn-primary">Salvar</button>
-      </div>
-    </div>
-  </form>
-</div>
-
-
-
-
-<hr>
-<a href="{{ url_for('euro.index') }}" class="btn btn-secondary">Voltar</a>
-
-<!-- Tooltip (opcional) -->
-<style>
-  #tooltip {
-    position: absolute;
-    visibility: hidden;
-    background: #f9f9f9;
-    border: 1px solid #d3d3d3;
-    padding: 8px;
-    font-size: 14px;
-    border-radius: 4px;
-    pointer-events: none;
-    z-index: 999999;
-  }
-</style>
-<div id="tooltip"></div>
-
-<!-- Script do Diagrama D3 -->
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
-  document.getElementById("diagramModal").addEventListener("shown.bs.modal", function() {
-    var container = document.getElementById("diagramContainer");
-    var width = container.clientWidth;
-    var height = container.clientHeight;
+  (function(){
+    "use strict";
 
-    // Margens para o diagrama
-    var margin = { top: 20, right: 60, bottom: 40, left: 60 };
+    const diagramData = {{ diagram_data|tojson }};
+    const diagramDialog = document.getElementById("diagramDialog");
+    const diagramContainer = document.getElementById("diagramContainer");
+    const categoryFilter = document.getElementById("filterCategory");
+    const departmentFilter = document.getElementById("filterDepartment");
+    let diagramRendered = false;
 
-    // Remove qualquer SVG existente (ao reabrir modal)
-    d3.select(container).select("svg").remove();
-
-    // Dados do diagrama (passados pelo backend)
-    var treeData = {{ diagram_data|tojson }};
-    console.log("treeData:", treeData);
-
-    // Cria hierarquia
-    var root = d3.hierarchy(treeData, d => d.children);
-
-    // Aumenta o tamanho do nó e o espaçamento
-    var treemap = d3.tree()
-      .nodeSize([300, 250])  // Largura e altura entre nós
-      .separation((a, b) => a.parent === b.parent ? 2 : 3);
-
-    treemap(root);
-
-    // Salva coords calculadas em x0,y0
-    root.each(d => {
-      d.x0 = d.x;
-      d.y0 = d.y;
-    });
-
-    // Descobre min/max pra calcular bounding box
-    var allNodes = root.descendants();
-    var minX = d3.min(allNodes, d => d.x0);
-    var maxX = d3.max(allNodes, d => d.x0);
-    var minY = d3.min(allNodes, d => d.y0);
-    var maxY = d3.max(allNodes, d => d.y0);
-
-    // "padding" e deslocamento
-    var pad = 80;
-    var shiftX = -minX + pad;
-    var shiftY = -minY + pad;
-
-    // Largura/Altura totais do diagrama
-    var diagramWidth = (maxX - minX) + 2 * pad;
-    var diagramHeight = (maxY - minY) + 2 * pad;
-
-    // Cria SVG fixo (sem zoom global pra não mover o fundo)
-    var svg = d3.select(container).append("svg")
-      .attr("width", "100%")
-      .attr("height", "100%")
-      .attr("viewBox", [0, 0, diagramWidth + margin.left + margin.right, diagramHeight + margin.top + margin.bottom].join(" "));
-
-    // Grupo principal
-    var mainG = svg.append("g")
-      .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
-
-    // Marker (seta) nos links
-    mainG.append("defs").append("marker")
-      .attr("id", "arrow")
-      .attr("viewBox", "0 -5 10 10")
-      .attr("refX", 15)
-      .attr("refY", 0)
-      .attr("markerWidth", 6)
-      .attr("markerHeight", 6)
-      .attr("orient", "auto")
-      .append("path")
-        .attr("d", "M0,-5L10,0L0,5")
-        .attr("fill", "#999");
-
-    // Dados dos links
-    var linksData = root.links();
-
-    // Desenha links
-    // Desenha links (sem alteração)
-// Desenha links (unaltered)
-var link = mainG.selectAll(".link")
-  .data(linksData)
-  .enter().append("path")
-    .attr("class", "link")
-    .attr("fill", "none")
-    .attr("stroke", "#999")
-    .attr("stroke-width", 3)
-    .attr("marker-end", "url(#arrow)")
-    .attr("d", linkPathCalc);
-
-// Labels dos cabos / ligação direta
-mainG.selectAll(".link-label")
-  .data(linksData)
-  .enter().append("text")
-    .attr("class", "link-label")
-    .attr("x", d => (d.source.x0 + d.target.x0) / 2 + shiftX)
-    .attr("y", d => (d.source.y0 + d.target.y0) / 2 + shiftY - 5)  // menor offset pra ficar na linha
-    .attr("text-anchor", "middle")
-    .style("font-size", "14px")   // fonte um pouco maior
-    .style("fill", "#222")
-    .text(d => {
-      // cada d.target.data.cabos é agora um array de {id, name}
-      return d.target.data.cabos
-        .map(c => c.id
-                  ? `${c.name} (${c.id})`
-                  : c.name
-        )
-        .join(" | ");
-    });
-
-
-
-    // Função de path "angular"
-    function linkPathCalc(d) {
-      var sx = d.source.x0 + shiftX;
-      var sy = d.source.y0 + shiftY;
-      var tx = d.target.x0 + shiftX;
-      var ty = d.target.y0 + shiftY;
-      return "M" + sx + "," + sy
-           + "V" + ((sy + ty) / 2)
-           + "H" + tx
-           + "V" + ty;
-    }
-    link.attr("d", linkPathCalc);
-
-    // Cria nós
-    var node = mainG.selectAll(".node")
-      .data(allNodes)
-      .enter().append("g")
-        .attr("class", d => "node" + (d.children ? " node--internal" : " node--leaf"))
-        .attr("transform", d => "translate(" + (d.x0 + shiftX) + "," + (d.y0 + shiftY) + ")")
-        .call(d3.drag()
-          .on("start", dragStart)
-          .on("drag", dragging)
-          .on("end", dragEnd)
-        );
-
-    // Texto do nó
-    var textEl = node.append("text")
-      .attr("text-anchor", "middle")
-      .style("fill", "#fff")
-      .style("font-size", "16px");
-
-    textEl.append("tspan")
-      .attr("x", 0)
-      .attr("dy", "0em")
-      .text(d => d.data.name || "Sem Nome");
-    textEl.append("tspan")
-      .attr("x", 0)
-      .attr("dy", "1.2em")
-      .text(d => d.data.category || "-");
-    textEl.append("tspan")
-      .attr("x", 0)
-      .attr("dy", "1.2em")
-      .text(d => d.data.department || "-");
-
-    textEl.append("tspan")
-      .attr("x", 0)
-      .attr("dy", "1.2em")
-      .text(d => d.data.reference || "");
-
-    // Retângulo de fundo do nó
-    node.each(function(d) {
-      var bbox = d3.select(this).select("text").node().getBBox();
-      d3.select(this).insert("rect", "text")
-        .attr("width", bbox.width + 30)
-        .attr("height", bbox.height + 50)
-        .attr("x", -(bbox.width / 2 + 15))
-        .attr("y", -(bbox.height / 2 + 15))
-        .attr("fill", d.data.bitPrincipal ? "#ff5733" : "#3498db");
-    });
-
-    // Cria um retângulo de fundo bem grande para sobrar espaço
-    var bigRectWidth = diagramWidth + margin.left + margin.right + 1000;
-    var bigRectHeight = diagramHeight + margin.top + margin.bottom + 800;
-
-    mainG.append("rect")
-      .attr("x", -200)
-      .attr("y", -200)
-      .attr("width", bigRectWidth)
-      .attr("height", bigRectHeight)
-      .attr("fill", "none")
-      .attr("stroke", "#aaa")
-      .attr("stroke-width", 3)
-      .lower();
-
-    // Drag: evitando "pulo" ao iniciar
-    function dragStart(event, d) {
-      d3.select(this).raise().classed("active", true);
-      // Guardamos a diferença entre o mouse e a posição atual do nó
-      d.offsetX = event.x - (d.x0 + shiftX);
-      d.offsetY = event.y - (d.y0 + shiftY);
-    }
-
-    function dragging(event, d) {
-      // Novas coords = posição do mouse - offset
-      var newX = event.x - d.offsetX;
-      var newY = event.y - d.offsetY;
-
-      // Atualiza x0,y0 do nó
-      d.x0 = newX - shiftX;
-      d.y0 = newY - shiftY;
-
-      // Move o <g> do nó
-      d3.select(this).attr("transform", "translate(" + newX + "," + newY + ")");
-
-      // Atualiza links conectados a esse nó
-      updateLinksOneNode(d);
-    }
-
-    function dragEnd(event, d) {
-      d3.select(this).classed("active", false);
-    }
-
-    // Atualiza só os links ligados ao nó
-    function updateLinksOneNode(d) {
-      if (d.parent) {
-        link.filter(l => l.source === d.parent && l.target === d)
-            .attr("d", linkPathCalc);
+    function openDialog(dialog){
+      if (!dialog){ return; }
+      if (typeof dialog.showModal === "function"){
+        dialog.showModal();
+      } else {
+        dialog.setAttribute("open", "open");
       }
-      if (d.children) {
-        d.children.forEach(ch => {
-          link.filter(l => l.source === d && l.target === ch)
-              .attr("d", linkPathCalc);
+
+      if (dialog === diagramDialog && !diagramRendered){
+        renderDiagram();
+      }
+    }
+
+    function closeDialog(dialog){
+      if (!dialog){ return; }
+      if (typeof dialog.close === "function"){
+        dialog.close();
+      } else {
+        dialog.removeAttribute("open");
+      }
+    }
+
+    document.querySelectorAll("[data-dialog-open]").forEach(function(button){
+      button.addEventListener("click", function(){
+        openDialog(document.getElementById(button.dataset.dialogOpen));
+      });
+    });
+
+    document.querySelectorAll("[data-dialog-close]").forEach(function(button){
+      button.addEventListener("click", function(){
+        closeDialog(button.closest("dialog"));
+      });
+    });
+
+    document.querySelectorAll("dialog").forEach(function(dialog){
+      dialog.addEventListener("click", function(event){
+        if (event.target === dialog){
+          closeDialog(dialog);
+        }
+      });
+    });
+
+    function truncate(value, limit){
+      const text = String(value || "-");
+      return text.length > limit ? text.slice(0, limit - 1) + "…" : text;
+    }
+
+    function renderDiagram(){
+      if (!window.d3){
+        diagramContainer.innerHTML = '<div class="pd-empty">Não foi possível carregar o componente do diagrama.</div>';
+        return;
+      }
+
+      diagramRendered = true;
+      diagramContainer.innerHTML = "";
+
+      const root = d3.hierarchy(diagramData, function(node){ return node.children || []; });
+      const tree = d3.tree().nodeSize([190, 235]);
+      tree(root);
+
+      const nodes = root.descendants();
+      const links = root.links();
+      const minX = d3.min(nodes, function(node){ return node.x; }) || 0;
+      const maxX = d3.max(nodes, function(node){ return node.x; }) || 0;
+      const maxY = d3.max(nodes, function(node){ return node.y; }) || 0;
+      const padding = 125;
+      const width = Math.max(900, maxX - minX + padding * 2);
+      const height = Math.max(620, maxY + padding * 2);
+
+      const svg = d3.select(diagramContainer)
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height)
+        .attr("viewBox", [0, 0, width, height].join(" "));
+
+      const group = svg.append("g")
+        .attr("transform", "translate(" + (padding - minX) + "," + padding + ")");
+
+      const link = group.selectAll("path.pd-diagram-link")
+        .data(links)
+        .enter()
+        .append("path")
+        .attr("class", "pd-diagram-link")
+        .attr("fill", "none")
+        .attr("stroke", "#94a3b8")
+        .attr("stroke-width", 2)
+        .attr("d", d3.linkVertical().x(function(node){ return node.x; }).y(function(node){ return node.y; }));
+
+      group.selectAll("text.pd-diagram-link-label")
+        .data(links)
+        .enter()
+        .append("text")
+        .attr("class", "pd-diagram-link-label")
+        .attr("x", function(item){ return (item.source.x + item.target.x) / 2; })
+        .attr("y", function(item){ return (item.source.y + item.target.y) / 2 - 7; })
+        .attr("text-anchor", "middle")
+        .attr("font-size", 10)
+        .attr("fill", "#475569")
+        .text(function(item){
+          const cables = item.target.data.cabos || [];
+          return truncate(cables.map(function(cable){ return cable.name; }).join(" | "), 34);
+        });
+
+      const node = group.selectAll("g.pd-diagram-node")
+        .data(nodes)
+        .enter()
+        .append("g")
+        .attr("class", "pd-diagram-node")
+        .attr("transform", function(item){ return "translate(" + item.x + "," + item.y + ")"; });
+
+      node.append("rect")
+        .attr("x", -82)
+        .attr("y", -42)
+        .attr("width", 164)
+        .attr("height", 84)
+        .attr("rx", 10)
+        .attr("fill", function(item){ return item.data.bitPrincipal ? "#ffb300" : "#0340a7"; })
+        .attr("stroke", function(item){ return item.data.bitPrincipal ? "#d99500" : "#002884"; });
+
+      node.append("text")
+        .attr("text-anchor", "middle")
+        .attr("fill", function(item){ return item.data.bitPrincipal ? "#14213d" : "#fff"; })
+        .attr("font-size", 11)
+        .attr("font-weight", 800)
+        .each(function(item){
+          const text = d3.select(this);
+          text.append("tspan").attr("x", 0).attr("dy", "-1.1em").text(truncate(item.data.name, 24));
+          text.append("tspan").attr("x", 0).attr("dy", "1.35em").attr("font-size", 9).text("Item " + item.data.id);
+          text.append("tspan").attr("x", 0).attr("dy", "1.35em").attr("font-size", 9).text(truncate(item.data.category, 26));
+          text.append("tspan").attr("x", 0).attr("dy", "1.35em").attr("font-size", 9).text(truncate(item.data.department, 26));
+        });
+
+      function applyFilters(){
+        const category = categoryFilter.value;
+        const department = departmentFilter.value;
+        node.attr("opacity", function(item){
+          const categoryMatch = !category || item.data.category === category;
+          const departmentMatch = !department || item.data.department === department;
+          return categoryMatch && departmentMatch ? 1 : .16;
+        });
+        link.attr("opacity", function(item){
+          const categoryMatch = !category || item.target.data.category === category;
+          const departmentMatch = !department || item.target.data.department === department;
+          return categoryMatch && departmentMatch ? 1 : .12;
         });
       }
+
+      categoryFilter.addEventListener("change", applyFilters);
+      departmentFilter.addEventListener("change", applyFilters);
     }
-  });
+  })();
 </script>
-{% endblock %}
+{% endblock content %}

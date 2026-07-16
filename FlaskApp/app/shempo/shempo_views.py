@@ -342,18 +342,47 @@ def _normalizar_nome_arquivo_imagem(valor):
     return os.path.basename(caminho.rstrip('/'))
 
 
+_EXTENSOES_IMAGEM_PRODUTO = {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
+
+
+def _pasta_imagens_produtos():
+    """Resolve a pasta real das imagens de produtos dentro de app/static."""
+    pasta = current_app.config.get('PRODUTOS_UPLOAD_FOLDER')
+
+    if not pasta:
+        pasta = os.path.join(
+            current_app.root_path,
+            'static',
+            'imagens',
+            'produtos',
+        )
+    elif not os.path.isabs(pasta):
+        pasta = os.path.join(current_app.root_path, pasta)
+
+    return os.path.realpath(pasta)
+
+
+def _caminho_imagem_produto(valor):
+    """Monta um caminho seguro dentro da pasta exclusiva de imagens de produtos."""
+    filename = _normalizar_nome_arquivo_imagem(valor)
+    if not filename:
+        return None
+
+    return os.path.join(_pasta_imagens_produtos(), filename)
+
+
 
 
 
 @euro.route('/imagensprodutos/<path:filename>')
 @login_required
+@requer_acesso_catalogo_produtos
 def imagem_produto(filename):
     filename = _normalizar_nome_arquivo_imagem(filename)
     if not filename:
         abort(404)
 
-    pasta = os.path.join(current_app.root_path, 'imagensprodutos')
-    return send_from_directory(pasta, filename)
+    return send_from_directory(_pasta_imagens_produtos(), filename)
 
 
 
@@ -580,18 +609,20 @@ def componentes_pdf(pmv_id):
 
 @euro.route('/imagensprodutos/<filename>')
 @login_required
+@requer_acesso_catalogo_produtos
 def imagensprodutos(filename):
     filename = _normalizar_nome_arquivo_imagem(filename)
     if not filename:
         abort(404)
 
-    return send_from_directory(current_app.config['UPLOAD_FOLDER'], filename)
+    return send_from_directory(_pasta_imagens_produtos(), filename)
 
 
 
 
 @euro.route('/item/<int:item_id>')
 @login_required
+@requer_acesso_catalogo_produtos
 def item_detail(item_id):    
     resultado = (
         db.session.query(
@@ -654,7 +685,7 @@ def item_detail(item_id):
         )
         if not filename:
             continue
-        url = url_for('euro.imagensprodutos', filename=filename)
+        url = url_for('euro.imagem_produto', filename=filename)
         images.append({
             'url': url,
             'NomeArquivo': filename,
@@ -808,7 +839,7 @@ def item_detail(item_id):
     )
     image_urls = {
         iid: url_for(
-            'euro.imagensprodutos',
+            'euro.imagem_produto',
             filename=_normalizar_nome_arquivo_imagem(fn),
         )
         for iid, fn in im_rows
@@ -816,8 +847,6 @@ def item_detail(item_id):
     }
     for iid in component_item_ids:
         image_urls.setdefault(iid, None)
-
-    print(item)
 
     return render_template(
         'shempo/item_detail.html',
@@ -888,14 +917,35 @@ def get_estoque(item_id):
 
 @euro.route('/item/<int:item_id>/atualizar_produto_info', methods=['POST'])
 @login_required
+@requer_acesso_catalogo_produtos
 def atualizar_produto_info(item_id):
-    item = db.session.query(Produto).get(item_id)
+    item = db.session.query(Produto).filter_by(IDItem=item_id).first()
     if not item:
         flash('Item não encontrado.', 'error')
         return redirect(url_for('euro.item_detail', item_id=item_id))
 
-    nome  = request.form.get('nome_produto', item.NomeProduto)
-    ref  = request.form.get('referencia_externa',item.ReferenciaExterna)
+    nome = str(request.form.get('nome_produto') or item.NomeProduto or '').strip()
+    ref = str(
+        request.form.get('referencia_externa')
+        or item.ReferenciaExterna
+        or ''
+    ).strip()
+
+    if not nome or not ref:
+        flash('Nome e referência externa são obrigatórios.', 'error')
+        return redirect(url_for('euro.item_detail', item_id=item_id))
+
+    referencia_existente = (
+        db.session.query(Produto.IDItem)
+        .filter(
+            func.lower(cast(Produto.ReferenciaExterna, String)) == ref.lower(),
+            Produto.IDItem != item_id,
+        )
+        .first()
+    )
+    if referencia_existente:
+        flash('A referência externa já pertence a outro produto.', 'error')
+        return redirect(url_for('euro.item_detail', item_id=item_id))
 
     cat_id = request.form.get('category_id',    type=int)
     department_id= request.form.get('department_id',  type=int)
@@ -915,8 +965,14 @@ def atualizar_produto_info(item_id):
     if pmv_id is not None:
         item.PmvID = pmv_id
 
-    db.session.commit()
-    flash('Informações do produto atualizadas com sucesso.', 'success')
+    try:
+        db.session.commit()
+        flash('Informações do produto atualizadas com sucesso.', 'success')
+    except SQLAlchemyError:
+        db.session.rollback()
+        current_app.logger.exception('Falha ao atualizar o produto %s.', item_id)
+        flash('Não foi possível atualizar as informações do produto.', 'error')
+
     return redirect(url_for('euro.item_detail', item_id=item_id))
 
 
@@ -1115,6 +1171,7 @@ def atualizar_saldo(item_id):
 
 @euro.route('/atualizar_caracteristicas/<int:item_id>', methods=['POST'])
 @login_required
+@requer_acesso_catalogo_produtos
 def atualizar_caracteristicas(item_id):
     for key, value in request.form.items():
         if key.startswith("valor_"):
@@ -1129,6 +1186,7 @@ def atualizar_caracteristicas(item_id):
 
 @euro.route('/nova_caracteristica/<int:item_id>', methods=['POST'])
 @login_required
+@requer_acesso_catalogo_produtos
 def nova_caracteristica(item_id):
     nova_caracteristica = request.form.get('nova_caracteristica')
     novo_valor = request.form.get('novo_valor')
@@ -1152,8 +1210,9 @@ def nova_caracteristica(item_id):
 
 
 
-@euro.route('/Admin/Shempo/V1/remover_caracteristica/<int:item_id>/<int:carac_id>', methods=['GET'])
+@euro.route('/Admin/Shempo/V1/remover_caracteristica/<int:item_id>/<int:carac_id>', methods=['GET', 'POST'])
 @login_required
+@requer_acesso_catalogo_produtos
 def remover_caracteristica(item_id, carac_id):
    
     carac = db.session.query(Caracteristica).filter_by(IDCaracteristica=carac_id, IDItem=item_id).first()
@@ -1168,8 +1227,9 @@ def remover_caracteristica(item_id, carac_id):
 
 
 
-@euro.route('/marcar_filtro/<int:item_id>/<int:carac_id>', methods=['GET'])
+@euro.route('/marcar_filtro/<int:item_id>/<int:carac_id>', methods=['GET', 'POST'])
 @login_required
+@requer_acesso_catalogo_produtos
 def marcar_filtro(item_id, carac_id):
 
     carac = db.session.query(Caracteristica).filter_by(IDCaracteristica=carac_id, IDItem=item_id).first()
@@ -2088,130 +2148,193 @@ def estoque_shempo_detail(item_id):
 
 @euro.route('/criar_componente', methods=['GET', 'POST'])
 @login_required
+@requer_acesso_catalogo_produtos
 def criar_componente():
     if request.method == 'POST':
-     
-        nome_produto = request.form.get('nome_produto').strip()
-        referencia_externa = request.form.get('referencia_externa').strip()
+        nome_produto = str(request.form.get('nome_produto') or '').strip()
+        referencia_externa = str(
+            request.form.get('referencia_externa') or ''
+        ).strip()
+        id_departamento = request.form.get('id_departamento', type=int)
+        familia_id = request.form.get('familia_id', type=int)
+        id_categoria = request.form.get('id_categoria', type=int)
 
-     
-        existente = db.session.query(Produto).filter_by(ReferenciaExterna=referencia_externa).first()
-        if existente:
-            flash("Referência Externa já existe.", "error")
+        if not all(
+            (
+                nome_produto,
+                referencia_externa,
+                id_departamento,
+                familia_id,
+                id_categoria,
+            )
+        ):
+            flash('Preencha os campos obrigatórios do produto.', 'error')
             return redirect(url_for('euro.criar_componente'))
 
-        bit_ativo = 1 if request.form.get('bit_ativo') == '1' else 0
-        classifica_ativo = 1 if request.form.get('classifica_ativo') == '1' else 0
-        chassi = request.form.get('chassi').strip() if request.form.get('chassi') else None
-        renavam = request.form.get('renavam').strip() if request.form.get('renavam') else None
-        bit_pmv = 1 if request.form.get('bit_pmv') == '1' else 0
-        id_departamento = request.form.get('id_departamento')
-        familia_id = request.form.get('familia_id')
-        id_categoria = request.form.get('id_categoria')
-        
- 
-        novo_produto = Produto(
-            NomeProduto=nome_produto,
-            ReferenciaExterna=referencia_externa,
-            BitAtivo=bit_ativo,
-            ClassificaAtivo=classifica_ativo,
-            Chassi=chassi,
-            Renavam=renavam,
-            BitPMV=bit_pmv,
-            IDDepartamento=id_departamento,
-            FamiliaID=familia_id,
-            IDCategoriaProduto=id_categoria
+        existente = (
+            db.session.query(Produto.IDItem)
+            .filter(
+                func.lower(cast(Produto.ReferenciaExterna, String))
+                == referencia_externa.lower()
+            )
+            .first()
         )
-        db.session.add(novo_produto)
-        db.session.commit() 
+        if existente:
+            flash('Referência Externa já existe.', 'error')
+            return redirect(url_for('euro.criar_componente'))
 
-       
-        saldo_entrada = request.form.get('saldo_entrada')
-        saldo_saida = request.form.get('saldo_saida')
         try:
-            entrada = int(saldo_entrada) if saldo_entrada else 0
-        except ValueError:
-            entrada = 0
-        try:
-            saida = int(saldo_saida) if saldo_saida else 0
-        except ValueError:
-            saida = 0
+            entrada = max(int(request.form.get('saldo_entrada') or 0), 0)
+            saida = max(int(request.form.get('saldo_saida') or 0), 0)
+        except (TypeError, ValueError):
+            flash('Informe valores válidos para o saldo inicial.', 'error')
+            return redirect(url_for('euro.criar_componente'))
+
+        if saida > entrada:
+            flash(
+                'A saída inicial não pode ser maior que a entrada inicial.',
+                'error',
+            )
+            return redirect(url_for('euro.criar_componente'))
+
+        bit_ativo = request.form.get('bit_ativo') == '1'
+        classifica_ativo = request.form.get('classifica_ativo') == '1'
+        bit_pmv = request.form.get('bit_pmv') == '1'
+        chassi = str(request.form.get('chassi') or '').strip() or None
+        renavam = str(request.form.get('renavam') or '').strip() or None
         saldo_inicial = entrada - saida
-        novo_estoque = EstoqueMatriz(
-            IDItem=novo_produto.IDItem,
-            CodPonto=0,
-            Saldo=saldo_inicial
+        id_usuario = session.get('user_id') or _id_usuario_compatibilidade_euro()
+
+        try:
+            novo_produto = Produto(
+                NomeProduto=nome_produto,
+                ReferenciaExterna=referencia_externa,
+                BitAtivo=bit_ativo,
+                ClassificaAtivo=classifica_ativo,
+                Chassi=chassi,
+                Renavam=renavam,
+                BitPMV=bit_pmv,
+                IDDepartamento=id_departamento,
+                FamiliaID=familia_id,
+                IDCategoriaProduto=id_categoria,
+            )
+            db.session.add(novo_produto)
+            db.session.flush()
+
+            novo_estoque = EstoqueMatriz(
+                IDItem=novo_produto.IDItem,
+                CodPonto=0,
+                Saldo=saldo_inicial,
+            )
+            db.session.add(novo_estoque)
+            db.session.flush()
+
+            if entrada > 0:
+                db.session.add(
+                    Movimentacao(
+                        IDUsuario=id_usuario,
+                        IDItem=novo_produto.IDItem,
+                        Quantidade=entrada,
+                        IDProprietarioOrigem=None,
+                        CodPontoOrigem=None,
+                        IDProprietarioDestino=novo_estoque.IDEstoque,
+                        CodPontoDestino=0,
+                        NomeMovimentacao='Entrada',
+                        DataMovimentacao=datetime.now(),
+                    )
+                )
+
+            if saida > 0:
+                db.session.add(
+                    Movimentacao(
+                        IDUsuario=id_usuario,
+                        IDItem=novo_produto.IDItem,
+                        Quantidade=saida,
+                        IDProprietarioOrigem=novo_estoque.IDEstoque,
+                        CodPontoOrigem=0,
+                        IDProprietarioDestino=None,
+                        CodPontoDestino=None,
+                        NomeMovimentacao='Saida',
+                        DataMovimentacao=datetime.now(),
+                    )
+                )
+
+            caracteristicas = request.form.getlist('nova_caracteristica')
+            valores = request.form.getlist('novo_valor')
+            for carac, valor in zip(caracteristicas, valores):
+                carac = str(carac or '').strip()
+                valor = str(valor or '').strip()
+                if carac and valor:
+                    db.session.add(
+                        Caracteristica(
+                            IDItem=novo_produto.IDItem,
+                            FamiliaID=familia_id,
+                            Caracteristica=carac,
+                            Valor=valor,
+                            BitAtivo=True,
+                            IDCategoria=None,
+                        )
+                    )
+
+            pmvs_informados = set()
+            for pmv in request.form.getlist('pmv_compat'):
+                try:
+                    pmv_id = int(pmv)
+                except (TypeError, ValueError):
+                    continue
+                if pmv_id in pmvs_informados:
+                    continue
+                pmvs_informados.add(pmv_id)
+                db.session.add(
+                    GruposCompativeis(
+                        IDItem=novo_produto.IDItem,
+                        PmvID=pmv_id,
+                    )
+                )
+
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
+            current_app.logger.exception('Falha ao cadastrar produto.')
+            flash('Não foi possível cadastrar o produto.', 'error')
+            return redirect(url_for('euro.criar_componente'))
+
+        flash('Produto cadastrado com sucesso.', 'success')
+        return redirect(
+            url_for('euro.item_detail', item_id=novo_produto.IDItem)
         )
-        db.session.add(novo_estoque)
-        db.session.commit() 
 
-        import datetime
-        if entrada > 0:
-            mov_entrada = Movimentacao(
-                IDUsuario=1,  
-                IDItem=novo_produto.IDItem,
-                Quantidade=entrada,
-                IDProprietarioOrigem=0,
-                CodPontoOrigem=0,
-                IDProprietarioDestino=novo_estoque.IDEstoque,
-                CodPontoDestino=0,
-                NomeMovimentacao="Entrada",
-                DataMovimentacao=datetime.datetime.now()
-            )
-            db.session.add(mov_entrada)
-        if saida > 0:
-            mov_saida = Movimentacao(
-                IDUsuario=1,
-                IDItem=novo_produto.IDItem,
-                Quantidade=saida,
-                IDProprietarioOrigem=0,
-                CodPontoOrigem=0,
-                IDProprietarioDestino=novo_estoque.IDEstoque,
-                CodPontoDestino=0,
-                NomeMovimentacao="Saida",
-                DataMovimentacao=datetime.datetime.now()
-            )
-            db.session.add(mov_saida)
-
-        
-        caracteristicas = request.form.getlist('nova_caracteristica')
-        valores = request.form.getlist('novo_valor')
-        for carac, valor in zip(caracteristicas, valores):
-            if carac.strip() and valor.strip():
-                nova = Caracteristica(
-                    IDItem=novo_produto.IDItem,
-                    FamiliaID=familia_id,
-                    Caracteristica=carac.strip(),
-                    Valor=valor.strip(),
-                    BitAtivo=True,
-                    IDCategoria=None
-                )
-                db.session.add(nova)
-
-    
-        pmv_compat_list = request.form.getlist('pmv_compat')
-        for pmv in pmv_compat_list:
-            if pmv.strip():
-                novo_grupo = GruposCompativeis(
-                    IDItem=novo_produto.IDItem,
-                    PmvID=pmv.strip()
-                )
-                db.session.add(novo_grupo)
-
-        db.session.commit()
-        flash("Componente cadastrado com sucesso.", "success")
-        return redirect(url_for('euro.item_detail', item_id=novo_produto.IDItem))
-    else:
-        
-        departamentos = db.session.query(Departamento).all()
-        familias = db.session.query(Familia).all()
-        categorias = db.session.query(CategoriasProdutos).all()
-        pmvs = db.session.query(Pmv).all()
-        return render_template('shempo/novo_componente.html', 
-                               departamentos=departamentos, 
-                               familias=familias, 
-                               categorias=categorias,
-                               pmvs=pmvs)
+    departamentos = (
+        db.session.query(Departamento)
+        .filter(Departamento.BitAtivo == 1)
+        .order_by(Departamento.NomeDepartamento)
+        .all()
+    )
+    familias = (
+        db.session.query(Familia)
+        .filter(Familia.BitAtivo == 1)
+        .order_by(Familia.NomeFamilia)
+        .all()
+    )
+    categorias = (
+        db.session.query(CategoriasProdutos)
+        .filter(CategoriasProdutos.BitAtivo == 1)
+        .order_by(CategoriasProdutos.NomeCategoria)
+        .all()
+    )
+    pmvs = (
+        db.session.query(Pmv)
+        .filter(Pmv.BitAtivo == 1)
+        .order_by(Pmv.NomePMV)
+        .all()
+    )
+    return render_template(
+        'shempo/novo_componente.html',
+        departamentos=departamentos,
+        familias=familias,
+        categorias=categorias,
+        pmvs=pmvs,
+    )
 
 
 
@@ -4020,25 +4143,38 @@ def vincular_pedido_ativo(ativo_id):
 
 @euro.route('/item/<int:item_id>/remover_imagem', methods=['POST'])
 @login_required
+@requer_acesso_catalogo_produtos
 def remover_imagem(item_id):
-    filename = request.form.get('filename')
+    filename = _normalizar_nome_arquivo_imagem(request.form.get('filename'))
     if not filename:
         flash('Nenhum arquivo especificado para remoção.', 'danger')
         return redirect(url_for('euro.item_detail', item_id=item_id))
 
-
-    img = db.session.query(ImagensProdutos)\
-            .filter_by(IDItem=item_id, NomeArquivo=filename)\
-            .first()
+    imagens_item = (
+        db.session.query(ImagensProdutos)
+        .filter_by(IDItem=item_id)
+        .all()
+    )
+    img = next(
+        (
+            registro
+            for registro in imagens_item
+            if _normalizar_nome_arquivo_imagem(
+                registro.NomeArquivo or registro.CaminhoArquivo
+            ) == filename
+        ),
+        None,
+    )
 
     if not img:
         flash('Registro de imagem não encontrado.', 'warning')
         return redirect(url_for('euro.item_detail', item_id=item_id))
 
-
-    full_path = os.path.normpath(os.path.join(current_app.root_path, img.CaminhoArquivo))
+    full_path = _caminho_imagem_produto(
+        img.NomeArquivo or img.CaminhoArquivo
+    )
     try:
-        if os.path.exists(full_path):
+        if full_path and os.path.isfile(full_path):
             os.remove(full_path)
         else:
             flash('Arquivo não encontrado no sistema de arquivos.', 'warning')
@@ -4060,7 +4196,7 @@ def remover_imagem(item_id):
 
 
 def get_item_images(item_id):
-    upload_folder = current_app.config['UPLOAD_FOLDER']
+    upload_folder = _pasta_imagens_produtos()
     imagens = []
     try:
         for fname in os.listdir(upload_folder):
@@ -4082,6 +4218,17 @@ def get_next_position(item_id):
             except ValueError:
                 pass
 
+    ordens_banco = (
+        db.session.query(ImagensProdutos.Ordem)
+        .filter(ImagensProdutos.IDItem == item_id)
+        .all()
+    )
+    used.update(
+        int(ordem)
+        for (ordem,) in ordens_banco
+        if ordem is not None
+    )
+
     for pos in range(1, 5):
         if pos not in used:
             return pos
@@ -4093,9 +4240,10 @@ def get_next_position(item_id):
 
 @euro.route('/item/<int:item_id>/upload_imagem', methods=['POST'])
 @login_required
+@requer_acesso_catalogo_produtos
 def upload_imagem(item_id):
     imagem = request.files.get('imagem')
-    if not imagem:
+    if not imagem or not imagem.filename:
         flash('Nenhuma imagem enviada.', 'danger')
         return redirect(url_for('euro.item_detail', item_id=item_id))
 
@@ -4108,23 +4256,45 @@ def upload_imagem(item_id):
 
     original = secure_filename(imagem.filename)
     _, ext = os.path.splitext(original)
+    ext = ext.lower()
+    if ext not in _EXTENSOES_IMAGEM_PRODUTO:
+        flash('Formato inválido. Envie PNG, JPG, JPEG, GIF ou WEBP.', 'danger')
+        return redirect(url_for('euro.item_detail', item_id=item_id))
+
     novo_nome = f"{item_id}-{ordem}{ext}"
 
-    upload_folder = current_app.config['UPLOAD_FOLDER']
+    upload_folder = _pasta_imagens_produtos()
     os.makedirs(upload_folder, exist_ok=True)
     caminho_absoluto = os.path.join(upload_folder, novo_nome)
     imagem.save(caminho_absoluto)
 
-
-    caminho_relativo = os.path.relpath(caminho_absoluto, current_app.root_path)
+    caminho_relativo = os.path.join(
+        'static',
+        'imagens',
+        'produtos',
+        novo_nome,
+    ).replace(os.sep, '/')
     registro = ImagensProdutos(
         NomeArquivo=novo_nome,
         CaminhoArquivo=caminho_relativo,
         IDItem=item_id,
         Ordem=ordem
     )
-    db.session.add(registro)
-    db.session.commit()
+    try:
+        db.session.add(registro)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        try:
+            if os.path.isfile(caminho_absoluto):
+                os.remove(caminho_absoluto)
+        except OSError:
+            current_app.logger.exception(
+                'Não foi possível remover a imagem após falha no banco.'
+            )
+        current_app.logger.exception('Falha ao registrar imagem do produto.')
+        flash('Não foi possível registrar a imagem enviada.', 'danger')
+        return redirect(url_for('euro.item_detail', item_id=item_id))
 
     flash('Imagem anexada com sucesso.', 'success')
     return redirect(url_for('euro.item_detail', item_id=item_id))

@@ -4,6 +4,15 @@
 
 {% block content %}
 <style>
+  /* Remove qualquer limite de largura aplicado pelo template-base nesta página. */
+  .container:has(> .balance-page){
+    width:100% !important;
+    max-width:none !important;
+    margin:18px 0 !important;
+    padding-right:clamp(12px,1.2vw,24px) !important;
+    padding-left:clamp(12px,1.2vw,24px) !important;
+  }
+
   .balance-page{
     --balance-blue:#002884;
     --balance-blue-2:#0340a7;
@@ -14,6 +23,8 @@
     --balance-soft:#f6f8fc;
     width:100%;
     max-width:none;
+    min-height:calc(100vh - 170px);
+    margin:0;
     padding:2px 0 28px;
   }
 
@@ -92,6 +103,8 @@
   }
 
   .balance-card{
+    width:100%;
+    max-width:none;
     overflow:hidden;
     border:1px solid var(--balance-border);
     border-radius:16px;
@@ -326,6 +339,17 @@
   }
 
   @media(max-width:700px){
+    .container:has(> .balance-page){
+      margin:12px 0 !important;
+      padding-right:12px !important;
+      padding-left:12px !important;
+    }
+
+    .balance-page{
+      min-height:calc(100vh - 130px);
+      padding-bottom:18px;
+    }
+
     .balance-header{
       align-items:flex-start;
       flex-direction:column;
