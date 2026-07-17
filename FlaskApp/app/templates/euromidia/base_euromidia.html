@@ -1053,6 +1053,22 @@ input:disabled, select:disabled, textarea:disabled{
             )
           )
         ) %}
+        {#
+          Ver Pedidos: mesma regra empresarial do catálogo.
+          Só aparece para IDEmpresaProprietaria = 1 ou BitFullEmpresas = 1.
+          O endpoint também é protegido no Python para impedir acesso direto.
+        #}
+        {% set menu_paineis_ver_pedidos = (
+          pode_acessar_menu_paineis('ver_pedidos')
+          if pode_acessar_menu_paineis is defined
+          else (
+            current_user.is_authenticated
+            and (
+              (current_user.IDEmpresaProprietaria|default(0, true)|int) == 1
+              or (current_user.BitFullEmpresas|default(0, true)|int) == 1
+            )
+          )
+        ) %}
         {% set menu_paineis_lista_ocupacao = False %}
         {% set menu_paineis_preferencia_reservas = False %}
         {% set menu_paineis_reserva_ocupacao = (current_user.is_authenticated and (current_user.IDEmpresaProprietaria|default(0, true)|int) == 3) %}
@@ -1123,7 +1139,8 @@ input:disabled, select:disabled, textarea:disabled{
         {#
           Revalidação final do ACL depois dos ajustes por perfil.
           É necessária porque um Admin/Coordenador da IDEmpresaProprietaria = 1
-          também não pode enxergar Estoques, Check-in, Atendimento ou Financeiro.
+          não pode enxergar os estoques de painéis, Check-in, Atendimento ou
+          Financeiro. A opção Adicionar Saldo Produtos é tratada separadamente.
           O ACL Python consulta a Silver.DimUsuarios e tem prioridade sobre o perfil.
         #}
         {% if pode_acessar_menu_paineis is defined %}
@@ -1137,12 +1154,26 @@ input:disabled, select:disabled, textarea:disabled{
           {% set menu_paineis_atendimento = menu_paineis_atendimento and pode_acessar_menu_paineis('atendimento') %}
           {% set menu_paineis_health_check = menu_paineis_health_check and pode_acessar_menu_paineis('health_check_comercial') %}
           {% set menu_paineis_historico_atendimento = menu_paineis_historico_atendimento and pode_acessar_menu_paineis('historico_atendimento') %}
+          {% set menu_paineis_ver_pedidos = menu_paineis_ver_pedidos and pode_acessar_menu_paineis('ver_pedidos') %}
 
           {% set menu_paineis_contratos = menu_paineis_contratos and pode_acessar_menu_paineis('contratos') %}
           {% set menu_paineis_mov_fin = menu_paineis_mov_fin and pode_acessar_menu_paineis('movimentacao_financeira') %}
           {% set menu_paineis_inadimplentes = menu_paineis_inadimplentes and pode_acessar_menu_paineis('inadimplentes') %}
           {% set menu_paineis_aprovacao_contratos = menu_paineis_aprovacao_contratos and pode_acessar_menu_paineis('aprovacao_contratos') %}
         {% endif %}
+
+        {#
+          Mantém o comportamento atual para quem já enxerga o submenu Estoques
+          e libera somente Adicionar Saldo Produtos para IDEmpresaProprietaria = 1.
+          menu_paineis_catalogo_produtos usa a consulta centralizada do ACL e,
+          portanto, não depende de o campo da empresa existir no current_user.
+        #}
+        {% set menu_paineis_adicionar_saldos = (
+          menu_paineis_catalogo_produtos
+          or menu_paineis_disponibilidades
+          or menu_paineis_reserva_ocupacao
+          or menu_paineis_vencimentos_campanhas
+        ) %}
 
         {% set menu_admin = (
           current_user.is_authenticated
@@ -1181,6 +1212,7 @@ input:disabled, select:disabled, textarea:disabled{
           or menu_paineis_lista_checkins
           or menu_paineis_health_check
           or menu_paineis_historico_atendimento
+          or menu_paineis_ver_pedidos
           or menu_paineis_vencimentos_campanhas
           or menu_paineis_reserva_ocupacao
           or menu_paineis_contratos
@@ -1190,6 +1222,7 @@ input:disabled, select:disabled, textarea:disabled{
           or menu_paineis_tickets_auvo
           or menu_paineis_criar_os_auvo
           or menu_paineis_aprovacao_contratos
+          or menu_paineis_adicionar_saldos
         %}
 
         {% if exibir_menu_paineis %}
@@ -1202,7 +1235,7 @@ input:disabled, select:disabled, textarea:disabled{
           <div class="menu-dropdown">
             <div class="desc">Consulta e gestão do inventário</div>
 
-            {% if menu_paineis_disponibilidades or menu_paineis_reserva_ocupacao or menu_paineis_vencimentos_campanhas %}
+            {% if menu_paineis_disponibilidades or menu_paineis_reserva_ocupacao or menu_paineis_vencimentos_campanhas or menu_paineis_adicionar_saldos %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Estoques</span>
@@ -1231,10 +1264,12 @@ input:disabled, select:disabled, textarea:disabled{
                     </a>
                   {% endif %}
 
-                  <a href="{{ url_for('euro.adicionar_saldos') }}"
-                     class="{% if request.endpoint == 'euro.adicionar_saldos' %}menu-link-current{% endif %}">
-                    Adicionar Saldo Produtos
-                  </a>
+                  {% if menu_paineis_adicionar_saldos %}
+                    <a href="{{ url_for('euro.adicionar_saldos') }}"
+                       class="{% if request.endpoint == 'euro.adicionar_saldos' %}menu-link-current{% endif %}">
+                      Adicionar Saldo Produtos
+                    </a>
+                  {% endif %}
 
                 </div>
               </div>
@@ -1281,7 +1316,7 @@ input:disabled, select:disabled, textarea:disabled{
               </div>
             {% endif %}
 
-            {% if menu_paineis_atendimento or menu_paineis_health_check or menu_paineis_historico_atendimento %}
+            {% if menu_paineis_atendimento or menu_paineis_health_check or menu_paineis_historico_atendimento or menu_paineis_ver_pedidos %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Atendimento</span>
@@ -1289,6 +1324,13 @@ input:disabled, select:disabled, textarea:disabled{
                 </a>
 
                 <div class="submenu-dropdown">
+                  {% if menu_paineis_ver_pedidos %}
+                    <a href="{{ url_for('euro.ver_pedidos') }}"
+                       class="{% if request.endpoint in ['euro.ver_pedidos', 'euro.ver_pedido', 'euro.espelho_pedido', 'euro.editar_pedido', 'euro.formulario_retirada'] %}menu-link-current{% endif %}">
+                      Ver Pedidos
+                    </a>
+                  {% endif %}
+
                   {% if menu_paineis_atendimento %}
                     <a href="{{ url_for('kanban.atendimento_redirect') }}"
                        class="{% if request.path == url_for('kanban.atendimento_redirect') %}menu-link-current{% endif %}">

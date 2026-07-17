@@ -1,109 +1,123 @@
-{% extends 'base.html' %}
-{% block title %}Detalhes do Pedido {{ pedido.IDPedido }}{% endblock %}
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}{% if modo_espelho %}Espelho do Pedido{% else %}Pedido{% endif %} #{{ pedido.IDPedido }}{% endblock %}
 
 {% block content %}
-<div class="container-fluid">
-  <h2 class="mb-4">Pedido #{{ pedido.IDPedido }}</h2>
+<style>
+  .container:has(> .order-detail-page){width:100%!important;max-width:none!important;margin:18px 0!important;padding:0 clamp(12px,1.2vw,24px)!important}
+  .order-detail-page{--od-blue:#002884;--od-yellow:#ffb300;--od-text:#0f172a;--od-muted:#64748b;--od-border:#dde5ef;--od-soft:#f5f7fb;width:100%;padding-bottom:28px;color:var(--od-text)}.order-detail-page *{box-sizing:border-box}
+  .od-header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px}.od-header h1{margin:0;color:var(--od-blue);font-size:clamp(24px,2vw,34px);letter-spacing:-.03em}.od-header p{margin:6px 0 0;color:var(--od-muted);font-size:13px}.od-actions{display:flex;gap:8px;flex-wrap:wrap}.od-btn{min-height:40px;padding:9px 13px;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(0,40,132,.22);border-radius:10px;background:#fff;color:var(--od-blue);font-size:12px;font-weight:850;text-decoration:none;cursor:pointer}.od-btn:hover{background:#eef3ff}.od-btn-primary{background:var(--od-yellow);border-color:var(--od-yellow);color:#15213d}.od-btn-primary:hover{background:#f1aa00}
+  .od-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}.od-card{border:1px solid var(--od-border);border-radius:15px;background:#fff;box-shadow:0 8px 28px rgba(15,23,42,.055);overflow:hidden}.od-span-12{grid-column:span 12}.od-span-8{grid-column:span 8}.od-span-4{grid-column:span 4}.od-card-head{padding:14px 16px;border-bottom:1px solid var(--od-border);background:linear-gradient(135deg,#fff,#f7f9ff)}.od-card-head h2{margin:0;font-size:15px}.od-card-head p{margin:4px 0 0;color:var(--od-muted);font-size:10px}.od-card-body{padding:16px}
+  .od-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.od-meta{min-height:70px;padding:11px;border:1px solid var(--od-border);border-radius:10px;background:var(--od-soft)}.od-meta span{display:block;color:var(--od-muted);font-size:9px;font-weight:900;letter-spacing:.04em;text-transform:uppercase}.od-meta strong{display:block;margin-top:5px;font-size:12px;overflow-wrap:anywhere}.od-status{display:inline-flex;padding:6px 9px;border-radius:999px;background:#eef3ff;color:var(--od-blue);font-size:10px;font-weight:900}.od-money{color:#047857;font-size:17px!important}
+  .od-table-wrap{width:100%;overflow-x:auto}.od-table{width:100%;min-width:950px;border-collapse:collapse}.od-table th{padding:10px 12px;background:#f2f5fa;border-bottom:1px solid var(--od-border);color:#52637a;font-size:9px;font-weight:950;text-align:left;text-transform:uppercase}.od-table td{padding:12px;border-bottom:1px solid #edf1f6;font-size:11px;vertical-align:middle}.od-table tbody tr:last-child td{border-bottom:0}.od-product{display:flex;align-items:center;gap:10px;min-width:260px}.od-product-image{width:52px;height:52px;flex:0 0 52px;border:1px solid var(--od-border);border-radius:9px;background:var(--od-soft);object-fit:contain}.od-product-placeholder{width:52px;height:52px;flex:0 0 52px;display:flex;align-items:center;justify-content:center;border:1px solid var(--od-border);border-radius:9px;background:var(--od-soft);color:#94a3b8;font-size:9px}.od-product strong{display:block;font-size:12px}.od-product small{display:block;margin-top:3px;color:var(--od-muted)}.od-chip-list{display:flex;gap:5px;flex-wrap:wrap}.od-chip{padding:4px 7px;border-radius:999px;background:#eef2f7;color:#475569;font-size:9px;font-weight:800}
+  .od-note{padding:11px 0;border-bottom:1px solid #edf1f6}.od-note:last-child{border-bottom:0}.od-note-head{display:flex;justify-content:space-between;gap:10px;color:var(--od-muted);font-size:9px;font-weight:800}.od-note p{margin:6px 0 0;white-space:pre-wrap;font-size:11px;line-height:1.5}.od-empty{color:var(--od-muted);font-size:11px}.od-files{display:flex;flex-direction:column;gap:8px}.od-file{padding:10px 11px;display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--od-border);border-radius:10px;background:var(--od-soft)}.od-file a{color:var(--od-blue);font-size:11px;font-weight:850;text-decoration:none;overflow-wrap:anywhere}.od-file small{color:var(--od-muted);font-size:9px;white-space:nowrap}
+  @media(max-width:1050px){.od-span-8,.od-span-4{grid-column:span 12}.od-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media(max-width:720px){.container:has(> .order-detail-page){margin:12px 0!important;padding:0 12px!important}.od-header{align-items:stretch;flex-direction:column}.od-actions,.od-actions .od-btn{width:100%}.od-summary{grid-template-columns:1fr}.od-table{min-width:0}.od-table thead{display:none}.od-table,.od-table tbody,.od-table tr,.od-table td{display:block;width:100%}.od-table-wrap{padding:10px;background:var(--od-soft);overflow:visible}.od-table tr{margin-bottom:10px;border:1px solid var(--od-border);border-radius:11px;background:#fff;overflow:hidden}.od-table td{display:grid;grid-template-columns:105px minmax(0,1fr);gap:10px;text-align:right}.od-table td::before{content:attr(data-label);color:#64748b;font-size:9px;font-weight:950;text-align:left;text-transform:uppercase}.od-product{justify-content:flex-end;min-width:0}.od-chip-list{justify-content:flex-end}}
+  @media print{
+    @page{size:A4;margin:12mm}
+    body{background:#fff!important}
+    body>header,body>nav,body>aside,.sidebar,.app-sidebar,.topbar,.navbar,.od-actions{display:none!important}
+    .container:has(> .order-detail-page){width:100%!important;max-width:none!important;margin:0!important;padding:0!important}
+    .order-detail-page{padding:0!important}
+    .od-header{margin-bottom:12px!important}
+    .od-header h1{font-size:24px!important}
+    .od-card{box-shadow:none!important;break-inside:avoid}
+    .od-table{min-width:0!important}
+    .od-table th,.od-table td{padding:7px!important;font-size:9px!important}
+    .od-product-image,.od-product-placeholder{width:38px!important;height:38px!important;flex-basis:38px!important}
+  }
+</style>
 
-  <div class="card mb-4">
-    <div class="card-body">
-      <dl class="row">
-        <dt class="col-sm-3">Tipo do Pedido:</dt>
-        <dd class="col-sm-9">{{ pedido.TipoPedido or '-' }}</dd>
-
-        <dt class="col-sm-3">Referência:</dt>
-        <dd class="col-sm-9">{{ pedido.ReferenciaPedido or '-' }}</dd>
-
-        <dt class="col-sm-3">Projeto:</dt>
-        <dd class="col-sm-9">{{ pedido.IDProjeto or '-' }}</dd>
-
-        <dt class="col-sm-3">Empresa Compradora:</dt>
-        <dd class="col-sm-9">{{ pedido.IDEmpresaCompradora or '-' }}</dd>
-
-        <dt class="col-sm-3">Empresa Vendedora:</dt>
-        <dd class="col-sm-9">{{ pedido.IDEmpresaVendedora or '-' }}</dd>
-
-        <dt class="col-sm-3">Técnico:</dt>
-        <dd class="col-sm-9">{{ pedido.IDFuncionario or '-' }}</dd>
-
-        <dt class="col-sm-3">OS Auvo:</dt>
-        <dd class="col-sm-9">{{ pedido.OSAuvo or '-' }}</dd>
-
-        <dt class="col-sm-3">Data do Pedido:</dt>
-        <dd class="col-sm-9">
-          {{ pedido.DataPedido.strftime('%d/%m/%Y %H:%M') if pedido.DataPedido else '-' }}
-        </dd>
-
-        <dt class="col-sm-3">Valor Total:</dt>
-        <dd class="col-sm-9">R$ {{ '%.2f'|format(pedido.Valor or 0) }}</dd>
-      </dl>
+<div class="order-detail-page">
+  <header class="od-header">
+    <div>
+      {% if modo_espelho %}
+        <h1>Espelho do Pedido #{{ pedido.IDPedido }}</h1>
+        <p>Versão completa e preparada para impressão.</p>
+      {% else %}
+        <h1>Pedido #{{ pedido.IDPedido }}</h1>
+        <p>Visualização completa e somente leitura do pedido.</p>
+      {% endif %}
     </div>
-  </div>
+    <div class="od-actions">
+      {% if modo_espelho %}
+        <a class="od-btn" href="{{ url_for('euro.ver_pedido', pedido_id=pedido.IDPedido) }}">Voltar ao pedido</a>
+        <button class="od-btn od-btn-primary" type="button" onclick="window.print()">Imprimir espelho</button>
+      {% else %}
+        <a class="od-btn" href="{{ url_for('euro.ver_pedidos') }}">Voltar aos pedidos</a>
+        <a class="od-btn" href="{{ url_for('euro.espelho_pedido', pedido_id=pedido.IDPedido) }}" target="_blank" rel="noopener">Espelho</a>
+        <a class="od-btn od-btn-primary" href="{{ url_for('euro.editar_pedido', pedido_id=pedido.IDPedido) }}">Editar Pedido</a>
+      {% endif %}
+    </div>
+  </header>
 
-  <h4 class="mb-3">Itens do Pedido</h4>
-  <div class="table-responsive">
-    <table class="table table-bordered align-middle">
-      <thead class="table-light">
-        <tr>
-          <th>IDItem</th>
-          <th>Produto</th>
-          <th>Quantidade</th>
-          <th>Valor Unitário</th>
-          <th style="width: 50px;"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in itens %}
-        <!-- Linha principal -->
-        <tr>
-          <td>{{ item.IDItem }}</td>
-          <td>{{ item.NomeProduto }}</td>
-          <td>{{ item.Quantidade }}</td>
-          <td>R$ {{ '%.2f'|format(item.ValorUnitario or 0) }}</td>
-          <td class="text-center">
-            {% if item.IDPedidoIten in lotes_por_item %}
-              <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#lotes-{{ item.IDPedidoIten }}">
-                +
-              </button>
-            {% endif %}
-          </td>
-        </tr>
+  <div class="od-grid">
+    <section class="od-card od-span-12">
+      <div class="od-card-head"><h2>Resumo do pedido</h2><p>Dados principais, responsáveis e empresas envolvidas.</p></div>
+      <div class="od-card-body od-summary">
+        <div class="od-meta"><span>Situação</span><strong><span class="od-status">{{ nome_status or '-' }}</span></strong></div>
+        <div class="od-meta"><span>Tipo</span><strong>{{ pedido.TipoPedido or '-' }}</strong></div>
+        <div class="od-meta"><span>Referência</span><strong>{{ pedido.ReferenciaPedido or '-' }}</strong></div>
+        <div class="od-meta"><span>Valor total</span><strong class="od-money">R$ {{ ('%.2f' % ((total_pedido or 0)|float)).replace('.', ',') }}</strong></div>
+        <div class="od-meta"><span>OP inicial</span><strong>{{ pedido.OPInicial or '-' }}</strong></div>
+        <div class="od-meta"><span>OS Auvo</span><strong>{{ pedido.OSAuvo or '-' }}</strong></div>
+        <div class="od-meta"><span>Data do pedido</span><strong>{{ pedido.DataPedido.strftime('%d/%m/%Y %H:%M') if pedido.DataPedido else '-' }}</strong></div>
+        <div class="od-meta"><span>Data prometida</span><strong>{{ pedido.DataPrometido.strftime('%d/%m/%Y') if pedido.DataPrometido else '-' }}</strong></div>
+        <div class="od-meta"><span>Responsável</span><strong>{{ funcionario.NomeFuncionario if funcionario else '-' }}</strong></div>
+        <div class="od-meta"><span>Projeto</span><strong>{{ projeto.NomeProjeto if projeto else '-' }}</strong></div>
+        <div class="od-meta"><span>Empresa compradora</span><strong>{{ compradora_empresa.NomeEmpresa if compradora_empresa else '-' }}</strong></div>
+        <div class="od-meta"><span>Empresa vendedora</span><strong>{{ vendedora_empresa.NomeEmpresa if vendedora_empresa else '-' }}</strong></div>
+      </div>
+    </section>
 
-        {% if item.IDPedidoIten in lotes_por_item %}
-        <!-- Lotes expandíveis -->
-        <tr class="collapse bg-light" id="lotes-{{ item.IDPedidoIten }}">
-          <td colspan="5" style="padding: 15px;">
-            <strong>Lotes para o Produto (IDItem={{ item.IDItem }}):</strong>
-            <div class="table-responsive mt-2">
-              <table class="table table-bordered small">
-                <thead class="table-light">
-                  <tr>
-                    <th>IDPedido</th>
-                    <th>IDItem</th>
-                    <th>NomeProduto</th>
-                    <th>Número do Lote</th>
-                    <th>Quantidade</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for lote in lotes_por_item[item.IDPedidoIten] %}
-                  <tr>
-                    <td>{{ lote.IDPedido }}</td>
-                    <td>{{ lote.IDItem }}</td>
-                    <td>{{ lote.NomeProduto }}</td>
-                    <td>{{ lote.NumeroLote }}</td>
-                    <td>{{ lote.Quantidade }}</td>
-                  </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </td>
-        </tr>
-        {% endif %}
-        {% endfor %}
-      </tbody>
-    </table>
+    <section class="od-card od-span-12">
+      <div class="od-card-head"><h2>Itens do pedido</h2><p>Produtos, quantidades, estoques, lotes e números de série.</p></div>
+      {% if dados_por_item %}
+        <div class="od-table-wrap">
+          <table class="od-table">
+            <thead><tr><th>Produto</th><th>Quantidade</th><th>Valor unitário</th><th>Total</th><th>Estoque</th><th>Lotes</th><th>Séries</th></tr></thead>
+            <tbody>
+              {% for dados in dados_por_item.values() %}
+                {% set pitem = dados.pitem %}{% set produto = dados.produto %}
+                <tr>
+                  <td data-label="Produto">
+                    <div class="od-product">
+                      {% if image_urls.get(pitem.IDItem) %}<img class="od-product-image" src="{{ image_urls.get(pitem.IDItem) }}" alt="{{ produto.NomeProduto }}">
+                      {% else %}<div class="od-product-placeholder">Sem imagem</div>{% endif %}
+                      <div><strong>{{ produto.NomeProduto }}</strong><small>IDItem {{ pitem.IDItem }}</small></div>
+                    </div>
+                  </td>
+                  <td data-label="Quantidade">{{ pitem.Quantidade or 0 }}</td>
+                  <td data-label="Valor unitário">R$ {{ ('%.2f' % ((pitem.ValorUnitario or 0)|float)).replace('.', ',') }}</td>
+                  <td data-label="Total">R$ {{ ('%.2f' % (((pitem.Quantidade or 0)|float) * ((pitem.ValorUnitario or 0)|float))).replace('.', ',') }}</td>
+                  <td data-label="Estoque">{{ tipo_est_map.get(pitem.IDTipoEstoque, '-') }}{% if pitem.CodPonto %} · {{ pitem.CodPonto }}{% endif %}</td>
+                  <td data-label="Lotes"><div class="od-chip-list">{% for lote in dados.lotes %}<span class="od-chip">{{ lote.NumeroLote }}{% if lote.Quantidade is defined and lote.Quantidade is not none %} ({{ lote.Quantidade }}){% endif %}</span>{% else %}<span>-</span>{% endfor %}</div></td>
+                  <td data-label="Séries"><div class="od-chip-list">{% for serie in dados.series %}<span class="od-chip">{{ serie.NumeroSerie }}</span>{% else %}<span>-</span>{% endfor %}</div></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}<div class="od-card-body od-empty">Este pedido não possui itens.</div>{% endif %}
+    </section>
+
+    <section class="od-card od-span-8">
+      <div class="od-card-head"><h2>Observações</h2><p>Histórico registrado no pedido.</p></div>
+      <div class="od-card-body">
+        {% for observacao in observacoes %}
+          <article class="od-note"><div class="od-note-head"><span>{{ observacao.usuario }}</span><span>{{ observacao.data.strftime('%d/%m/%Y %H:%M') if observacao.data else '-' }}</span></div><p>{{ observacao.texto }}</p></article>
+        {% else %}<div class="od-empty">Nenhuma observação registrada.</div>{% endfor %}
+      </div>
+    </section>
+
+    <section class="od-card od-span-4">
+      <div class="od-card-head"><h2>Anexos</h2><p>Arquivos vinculados ao pedido.</p></div>
+      <div class="od-card-body od-files">
+        {% for anexo in anexos %}
+          <div class="od-file"><a href="{{ url_for('euro.serve_anexo', subpath=anexo.CaminhoArquivo) }}" target="_blank" rel="noopener">{{ anexo.NomeArquivo }}</a><small>{{ anexo.DataUpload.strftime('%d/%m/%Y') if anexo.DataUpload else '' }}</small></div>
+        {% else %}<div class="od-empty">Nenhum anexo registrado.</div>{% endfor %}
+      </div>
+    </section>
   </div>
 </div>
 {% endblock %}

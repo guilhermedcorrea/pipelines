@@ -410,6 +410,18 @@ def usuario_pode_acessar_catalogo_produtos() -> bool:
     return id_empresa == 1 or possui_acesso_total_empresas
 
 
+def usuario_pode_acessar_ver_pedidos() -> bool:
+    """Autoriza a consulta de pedidos pela mesma regra empresarial do catálogo.
+
+    O usuário precisa estar autenticado e ativo e atender pelo menos uma destas
+    condições:
+
+    - IDEmpresaProprietaria = 1; ou
+    - BitFullEmpresas = 1.
+    """
+    return usuario_pode_acessar_catalogo_produtos()
+
+
 def _perfil_usuario_logado() -> str:
     """_perfil_usuario_logado
     - Eu tento descobrir o perfil do usuário logado de forma tolerante.
@@ -640,6 +652,17 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
 
     if chave in {"catalogo_produtos", "catalogo_de_produtos", "lista_produtos"}:
         return usuario_pode_acessar_catalogo_produtos()
+
+    if chave in {
+        "ver_pedidos",
+        "pedidos",
+        "lista_pedidos",
+        "pedidos_detalhes",
+        "espelho_pedido",
+        "editar_pedido",
+        "formulario_retirada",
+    }:
+        return usuario_pode_acessar_ver_pedidos()
 
     # Esta regra empresarial tem prioridade sobre perfil e permissões, inclusive
     # ADMIN_TUDO. Assim, usuários da empresa 1 não conseguem abrir as rotas por

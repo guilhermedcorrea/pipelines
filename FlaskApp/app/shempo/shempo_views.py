@@ -14,7 +14,7 @@ from ..models.euro_models import (Produto,Caracteristica,CategoriasProdutos,Sald
                                  ,EmpresaProprietaria,LogMedicoes,VendedoresOmie,CategoriafinanceiraOmie,ProjetosOmie)
 
 from ..extensions import db,ALLOWED_EXTENSIONS
-from ..autenticacao.acl_menu_paineis import requer_acesso_catalogo_produtos
+from ..autenticacao.acl_menu_paineis import requer_acesso_catalogo_produtos, requer_item_menu_paineis
 
 
 from sqlalchemy import or_, cast, String,func,text,bindparam,literal_column,Date as SQLDate,literal
@@ -6221,6 +6221,7 @@ def get_page_links(current, total, delta=2):
 
 @euro.route('/ver_pedidos')
 @login_required
+@requer_item_menu_paineis('ver_pedidos')
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def ver_pedidos():
     page = request.args.get('page', 1, type=int)
@@ -6330,93 +6331,146 @@ def ver_pedidos():
 
 
 
+@euro.route(
+    '/pedido/<int:pedido_id>/espelho',
+    endpoint='espelho_pedido',
+)
 @euro.route('/pedidos_detalhes/<int:pedido_id>')
 @login_required
+@requer_item_menu_paineis('ver_pedidos')
+@retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def ver_pedido(pedido_id):
+    """
+    Exibe o pedido em modo somente leitura.
+
+    A rota /pedidos_detalhes/<id> abre a tela "Ver Pedido".
+    A rota /pedido/<id>/espelho abre o espelho imprimível do mesmo pedido.
+    """
+    modo_espelho = request.endpoint == 'euro.espelho_pedido'
     pedido = db.session.query(Pedidos).filter_by(IDPedido=pedido_id).first()
     if not pedido:
         flash("Pedido não encontrado.", "danger")
         return redirect(url_for('euro.ver_pedidos'))
 
-    
-    nome_status = None
-    if pedido.IDStatusPedido:
-        status = db.session.query(StatusPedido).get(pedido.IDStatusPedido)
-        nome_status = status.NomeStatusPedido if status else None
+    status = (
+        db.session.query(StatusPedido)
+        .filter_by(IDStatusPedido=pedido.IDStatusPedido)
+        .first()
+        if pedido.IDStatusPedido else None
+    )
+    nome_status = status.NomeStatusPedido if status else None
 
-   
     observacoes = []
     obs_rows = (
         db.session.query(ObservacoesPedidos)
         .filter_by(IDPedido=pedido_id)
-        .order_by(ObservacoesPedidos.DataObservacao)
+        .order_by(ObservacoesPedidos.DataObservacao.desc())
         .all()
     )
-    for o in obs_rows:
-        usuario = db.session.query(Usuario).get(o.IDUsuario)
-        nome_usuario = usuario.NomeUsuario if usuario else "Desconhecido"
+    usuarios_observacoes = {}
+    ids_usuarios = {o.IDUsuario for o in obs_rows if o.IDUsuario}
+    if ids_usuarios:
+        usuarios_observacoes = {
+            u.IDUsuario: u.NomeUsuario
+            for u in db.session.query(Usuario).filter(Usuario.IDUsuario.in_(ids_usuarios)).all()
+        }
+    for observacao in obs_rows:
         observacoes.append({
-            "usuario": nome_usuario,
-            "data": o.DataObservacao,
-            "texto": o.Observacao
+            "usuario": usuarios_observacoes.get(observacao.IDUsuario, "Desconhecido"),
+            "data": observacao.DataObservacao,
+            "texto": observacao.Observacao,
         })
 
- 
     projeto = db.session.query(Projeto).get(pedido.IDProjeto) if pedido.IDProjeto else None
     funcionario = db.session.query(Funcionario).get(pedido.IDFuncionario) if pedido.IDFuncionario else None
-    compradora_empresa = db.session.query(Empresa).filter_by(EmpresaID=pedido.IDEmpresaCompradora).first()
-    vendedora_empresa  = db.session.query(Empresa).filter_by(EmpresaID=pedido.IDEmpresaVendedora).first()
+    compradora_empresa = (
+        db.session.query(Empresa).filter_by(EmpresaID=pedido.IDEmpresaCompradora).first()
+        if pedido.IDEmpresaCompradora else None
+    )
+    vendedora_empresa = (
+        db.session.query(Empresa).filter_by(EmpresaID=pedido.IDEmpresaVendedora).first()
+        if pedido.IDEmpresaVendedora else None
+    )
 
-   
     tipo_est_map = {
-        t.IDTipoEstoque: t.NomeEstoque
-        for t in db.session.query(TipoEstoque).all()
+        tipo.IDTipoEstoque: tipo.NomeEstoque
+        for tipo in db.session.query(TipoEstoque).all()
     }
 
-   
     itens = (
         db.session.query(PedidoItens, Produto, PedidoLotes, PedidoItemSerie)
         .join(Produto, Produto.IDItem == PedidoItens.IDItem)
-        .outerjoin(PedidoLotes,  PedidoLotes.IDPedidoIten == PedidoItens.IDPedidoIten)
+        .outerjoin(PedidoLotes, PedidoLotes.IDPedidoIten == PedidoItens.IDPedidoIten)
         .outerjoin(PedidoItemSerie, PedidoItemSerie.IDPedidoIten == PedidoItens.IDPedidoIten)
         .filter(PedidoItens.IDPedido == pedido_id)
+        .order_by(PedidoItens.IDPedidoIten)
         .all()
     )
 
     dados_por_item = {}
+    lotes_vistos = defaultdict(set)
+    series_vistas = defaultdict(set)
     for pitem, produto, lote, serie in itens:
-        if pitem.IDPedidoIten not in dados_por_item:
-            dados_por_item[pitem.IDPedidoIten] = {
-                "pitem":  pitem,
+        chave = pitem.IDPedidoIten
+        if chave not in dados_por_item:
+            dados_por_item[chave] = {
+                "pitem": pitem,
                 "produto": produto,
-                "lotes":  [],
-                "series": []
+                "lotes": [],
+                "series": [],
             }
-        if lote and lote.NumeroLote:
-            dados_por_item[pitem.IDPedidoIten]["lotes"].append(lote)
-        if serie and serie.NumeroSerie:
-            dados_por_item[pitem.IDPedidoIten]["series"].append(serie)
 
-   
-    item_ids = [dados["pitem"].IDItem for dados in dados_por_item.values()]
-    imagens = (
-        db.session.query(ImagensProdutos.IDItem, ImagensProdutos.NomeArquivo)
-        .filter(
-            ImagensProdutos.IDItem.in_(item_ids),
-            ImagensProdutos.Ordem == 1
+        if lote and lote.NumeroLote:
+            chave_lote = (
+                lote.NumeroLote,
+                getattr(lote, 'Quantidade', None),
+                getattr(lote, 'IDEstoque', None),
+            )
+            if chave_lote not in lotes_vistos[chave]:
+                lotes_vistos[chave].add(chave_lote)
+                dados_por_item[chave]["lotes"].append(lote)
+
+        if serie and serie.NumeroSerie:
+            chave_serie = (
+                serie.NumeroSerie,
+                getattr(serie, 'NumeroLote', None),
+                getattr(serie, 'IDEstoque', None),
+            )
+            if chave_serie not in series_vistas[chave]:
+                series_vistas[chave].add(chave_serie)
+                dados_por_item[chave]["series"].append(serie)
+
+    item_ids = list({dados["pitem"].IDItem for dados in dados_por_item.values()})
+    image_urls = {}
+    if item_ids:
+        imagens = (
+            db.session.query(
+                ImagensProdutos.IDItem,
+                ImagensProdutos.NomeArquivo,
+                ImagensProdutos.CaminhoArquivo,
+            )
+            .filter(
+                ImagensProdutos.IDItem.in_(item_ids),
+                ImagensProdutos.Ordem == 1,
+            )
+            .all()
         )
+        for item_id, nome_arquivo, caminho_arquivo in imagens:
+            arquivo = _normalizar_nome_arquivo_imagem(nome_arquivo or caminho_arquivo)
+            if arquivo:
+                image_urls[item_id] = url_for('euro.imagem_produto', filename=arquivo)
+    for item_id in item_ids:
+        image_urls.setdefault(item_id, None)
+
+    anexos = (
+        db.session.query(AnexosPedidos)
+        .filter_by(IDPedido=pedido_id)
+        .order_by(AnexosPedidos.Ordem, AnexosPedidos.DataUpload)
         .all()
     )
-    image_urls = {iid: url_for('euro.imagensprodutos', filename=fn) for iid, fn in imagens}
-    for iid in item_ids:
-        image_urls.setdefault(iid, None)
-
-   
-    total_pedido = _calcular_total_pedido(pedido_id)
-  
 
     return render_template(
-        'shempo/editar_pedido.html',
+        'shempo/pedidos_detalhes.html',
         pedido=pedido,
         nome_status=nome_status,
         observacoes=observacoes,
@@ -6427,9 +6481,711 @@ def ver_pedido(pedido_id):
         dados_por_item=dados_por_item,
         tipo_est_map=tipo_est_map,
         image_urls=image_urls,
-        anexos=[],                 
-        total_pedido=total_pedido  
+        anexos=anexos,
+        total_pedido=_calcular_total_pedido(pedido_id),
+        is_edicao=False,
+        modo_espelho=modo_espelho,
     )
+
+
+_ANEXO_EXTENSOES = {
+    'excel': {'xlsx', 'xlsm', 'csv'},
+    'img': {'png', 'jpg', 'jpeg', 'gif', 'webp'},
+    'word': {'doc', 'docx'},
+    'pdf': {'pdf'},
+}
+
+
+def _save_anexo(file, pedido_id, user_id):
+    """Salva um anexo do pedido em app/anexos e registra o arquivo no banco."""
+    filename = secure_filename(file.filename or '')
+    if not filename or '.' not in filename:
+        return None
+
+    extensao = filename.rsplit('.', 1)[-1].lower()
+    tipo = None
+    subpasta = None
+    for grupo, extensoes in _ANEXO_EXTENSOES.items():
+        if extensao in extensoes:
+            tipo = 'imagem' if grupo == 'img' else grupo
+            subpasta = grupo
+            break
+    if not subpasta:
+        return None
+
+    pasta = os.path.join(current_app.root_path, 'anexos', subpasta)
+    os.makedirs(pasta, exist_ok=True)
+
+    nome_salvo = f"{datetime.now():%Y%m%d%H%M%S}_{uuid4().hex[:8]}_{filename}"
+    caminho_completo = os.path.join(pasta, nome_salvo)
+    file.save(caminho_completo)
+
+    ordem = (
+        db.session.query(func.count(AnexosPedidos.IDAnexo))
+        .filter(AnexosPedidos.IDPedido == pedido_id)
+        .scalar()
+        or 0
+    ) + 1
+
+    anexo = AnexosPedidos(
+        NomeArquivo=filename,
+        CaminhoArquivo=f"{subpasta}/{nome_salvo}",
+        TipoArquivo=tipo,
+        DataUpload=datetime.now(),
+        IDUsuario=user_id,
+        Ordem=ordem,
+        IDPedido=pedido_id,
+    )
+    db.session.add(anexo)
+    return anexo
+
+
+AUVO_BASE_URL = os.getenv('AUVO_BASE_URL', 'https://api.auvo.com.br/v2').rstrip('/')
+try:
+    AUVO_TIMEOUT = int(os.getenv('AUVO_TIMEOUT', '150'))
+except (TypeError, ValueError):
+    AUVO_TIMEOUT = 150
+
+_AUVO_TOKEN_CACHE = {'token': None, 'expires_at': 0.0}
+
+
+def obter_access_token_auvo():
+    """Obtém o token Auvo somente quando alguma rotina realmente precisa dele."""
+    import requests
+
+    agora = time.time()
+    if _AUVO_TOKEN_CACHE['token'] and _AUVO_TOKEN_CACHE['expires_at'] > agora:
+        return _AUVO_TOKEN_CACHE['token']
+
+    api_key = os.getenv('API_KEY')
+    api_token = os.getenv('API_TOKEN')
+    if not api_key or not api_token:
+        raise RuntimeError('API_KEY/API_TOKEN da Auvo não configurados no ambiente.')
+
+    resposta = requests.get(
+        f"{AUVO_BASE_URL}/login/",
+        params={'apiKey': api_key, 'apiToken': api_token},
+        timeout=AUVO_TIMEOUT,
+    )
+    resposta.raise_for_status()
+    token = resposta.json().get('result', {}).get('accessToken')
+    if not token:
+        raise RuntimeError("A Auvo não retornou o campo 'accessToken'.")
+
+    _AUVO_TOKEN_CACHE['token'] = token
+    _AUVO_TOKEN_CACHE['expires_at'] = agora + (55 * 60)
+    return token
+
+
+@euro.route('/pedido/<int:pedido_id>/editar', methods=['GET', 'POST'])
+@euro.route('/editar_pedido/<int:pedido_id>', methods=['GET', 'POST'])
+@login_required
+@requer_item_menu_paineis('ver_pedidos')
+@retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
+def editar_pedido(pedido_id):
+
+    import os, base64, mimetypes
+    from uuid import uuid4
+    from flask import current_app
+    from sqlalchemy import func  # <-- agregado para somar quantidades
+
+    pedido = db.session.query(Pedidos).get(pedido_id)
+    if not pedido:
+        flash("Pedido não encontrado.", "error")
+        return redirect(url_for('euro.ver_pedidos'))
+
+    user_id = session.get('user_id')
+
+    def _resolver_item_pai(id_pedido: int) -> int:
+        itens = (db.session.query(PedidoItens.IDItem, PedidoItens.IDPedidoIten)
+                           .filter_by(IDPedido=id_pedido)
+                           .order_by(PedidoItens.IDPedidoIten)
+                           .all())
+        lista = [iid for iid, _ in itens]
+        if len(set(lista)) == 1:
+            return lista[0]
+
+        candidatos = (db.session.query(ProdutoComposicao.IDProdutoPai)
+                                  .filter(ProdutoComposicao.IDProdutoPai.in_(lista))
+                                  .distinct()
+                                  .all())
+        for (pai,) in candidatos:
+            filhos_pai = [x.IDItem for x in
+                          db.session.query(ProdutoComposicao.IDItem)
+                                    .filter_by(IDProdutoPai=pai)]
+
+            if all(i in filhos_pai or i == pai for i in lista):
+                return pai
+
+        return lista[0]
+
+    def _specs_do_item(item_id: int):
+        rows = (db.session.query(Caracteristica.Caracteristica,
+                                 Caracteristica.Valor)
+                         .filter_by(IDItem=item_id)
+                         .filter(Caracteristica.Caracteristica.isnot(None),
+                                 Caracteristica.Valor.isnot(None))
+                         .all())
+        vistos, specs = set(), []
+        for c, v in rows:
+            k = (c.strip().lower(), v.strip().lower())
+            if k not in vistos:
+                vistos.add(k)
+                specs.append({"name": c, "specification": v})
+        return specs
+
+    def _imagem_base64(item_id: int):
+        img = (db.session.query(ImagensProdutos)
+                         .filter_by(IDItem=item_id, Ordem=1)
+                         .first())
+        if not img:
+            return None
+        arq_path = _caminho_imagem_produto(img.NomeArquivo or img.CaminhoArquivo)
+        if not arq_path or not os.path.exists(arq_path):
+            return None
+        mime, _ = mimetypes.guess_type(arq_path)
+        if not mime:
+            mime = 'image/jpeg'
+        with open(arq_path, 'rb') as f:
+            b64 = base64.b64encode(f.read()).decode()
+        return f"data:{mime};base64,{b64}"
+
+    if request.method == 'POST' and 'nova_observacao' in request.form:
+        texto = request.form.get('nova_observacao', '').strip()
+        if texto:
+            obs = ObservacoesPedidos(
+                IDPedido = pedido_id,
+                Observacao= texto,
+                IDUsuario = user_id,
+                DataObservacao= datetime.now()
+            )
+            db.session.add(obs)
+            db.session.commit()
+            flash("Observação adicionada com sucesso.", "success")
+        return redirect(url_for('euro.editar_pedido', pedido_id=pedido_id))
+
+    if request.method == 'POST' and 'anexo' in request.files:
+        file = request.files['anexo']
+        if file and file.filename:
+            anexo = _save_anexo(file, pedido_id, user_id)
+            if anexo:
+                db.session.commit()
+                flash("Arquivo anexado com sucesso.", "success")
+            else:
+                flash("Tipo de arquivo não permitido.", "error")
+        return redirect(url_for('euro.editar_pedido', pedido_id=pedido_id))
+
+    if request.method == 'POST' and 'status_id' in request.form:
+        novo_status = int(request.form['status_id'])
+        original_status  = pedido.IDStatusPedido
+        pedido.IDStatusPedido = novo_status
+        db.session.add(pedido)
+
+        if original_status != 9 and novo_status == 9:
+
+            try:
+                with db.session.begin_nested():
+
+                    item_pai_id = _resolver_item_pai(pedido_id)
+
+                    produto_pai = db.session.query(Produto).get(item_pai_id)
+                    nome_produto = produto_pai.NomeProduto if produto_pai else f"Ativo {item_pai_id}"
+
+                    ativo = Ativo(
+                        ReferenciaExterna = pedido.ReferenciaPedido,
+                        Chassi = None,
+                        Renavam = None,
+                        IDProjeto = pedido.IDProjeto,
+                        IDEmpresa= pedido.IDEmpresaCompradora,
+                        NomeAtivo= nome_produto,
+                        IDItem = item_pai_id,
+                        PlacaAtual = None,
+                        IDEmpresaProprietaria = pedido.IDEmpresaCompradora,
+                        IDFabricante = pedido.IDFuncionario,
+                        EnderecoAtivo = None,
+                        CEP= None,
+                        Cidade = None,
+                        UF = None,
+                        IDPedidoAtivo = pedido.IDPedido
+                    )
+                    db.session.add(ativo)
+                    db.session.flush()
+
+                    filhos = db.session.query(PedidoItens).filter_by(IDPedido=pedido_id).all()
+                    for f in filhos:
+                        db.session.add(ComposicaoAtivo(
+                            IDAtivo = ativo.IDAtivo,
+                            IDItem= f.IDItem,
+                            Quantidade= f.Quantidade or 0,
+                            NumeroLote = f.NumeroLote,
+                            NumeroSerie  = f.NumerodeSerie,
+                            CodPonto = f.CodPonto,
+                            IDTipoEstoque = f.IDTipoEstoque,
+                            IDProdutoPai = item_pai_id
+                        ))
+
+                    mov_ativo = MovimentacaoAtivo(
+                        IDProjetoOrigem = None,
+                        IDProjetoDestino = pedido.IDProjeto,
+                        IDAtivo= ativo.IDAtivo,
+                        DataMovimento = int(datetime.now().strftime('%Y%m%d')),
+                        IDUsuario= user_id,
+                        IDOperacaoOrigem= None,
+                        IDOperacaoDestino = 6
+                    )
+                    db.session.add(mov_ativo)
+
+                    db.session.add(PedidoAtivo(IDAtivo=ativo.IDAtivo, IDPedido=pedido_id))
+
+                    empresa_local = db.session.query(Empresa).get(ativo.IDEmpresa)
+                    if not empresa_local or not empresa_local.CNPJ:
+                        emp_id = empresa_local.EmpresaID if empresa_local else "Desconhecido"
+                        emp_nome = empresa_local.NomeEmpresa if empresa_local else "Desconhecido"
+                        raise RuntimeError(
+                            f"Empresa (ID: {emp_id}, Nome: {emp_nome}) sem CNPJ – integração Auvo abortada."
+                        )
+
+                    endereco_bruto = empresa_local.ENDERECO or ""
+                    cidade_emp = empresa_local.CidadeEmpresa or ""
+                    uf_emp = empresa_local.UF or ""
+                    cep_emp= empresa_local.CEP or ""
+
+                    endereco_envio = ""
+                    if endereco_bruto:
+                        endereco_envio = endereco_bruto
+                        if cidade_emp and uf_emp and cep_emp:
+                            endereco_envio += f" {cidade_emp} {uf_emp} {cep_emp}"
+
+                    access_token = obter_access_token_auvo()
+                    headers_auvo = {
+                        "Accept": "application/json",
+                        "Content-Type":  "application/json",
+                        "Authorization": f"Bearer {access_token}"
+                    }
+                    cnpj_numeros = "".join(filter(str.isdigit, empresa_local.CNPJ))
+
+                    cliente_auvo_reg = (
+                        db.session.query(ClienteAuvo)
+                            .filter_by(CNPJ=cnpj_numeros)
+                            .first()
+                    )
+                    if cliente_auvo_reg:
+                        group_id = cliente_auvo_reg.IDGrupoAuvo
+                    else:
+                        payload_grupo = {
+                            "description": empresa_local.NomeEmpresa,
+                            "clientsId":   []
+                        }
+                        resp_grupo = requests.post(
+                            f"{AUVO_BASE_URL}/customerGroups/",
+                            headers=headers_auvo,
+                            json=payload_grupo,
+                            timeout=AUVO_TIMEOUT
+                        )
+                        if resp_grupo.status_code not in (200, 201):
+                            raise RuntimeError(f"Auvo criar grupo: HTTP {resp_grupo.status_code}")
+                        group_id = (
+                            resp_grupo
+                                .json()
+                                .get("result", {})
+                                .get("clientGroupSearchReturn", {})
+                                .get("id")
+                        )
+                        if not group_id:
+                            raise RuntimeError("Auvo: falta 'id' no grupo.")
+
+                        db.session.add(ClienteAuvo(
+                            IDGrupoAuvo = group_id,
+                            CNPJ = cnpj_numeros,
+                            NomeGrupo = empresa_local.NomeEmpresa,
+                            IDProjeto = ativo.IDProjeto,
+                            EmpresaID = empresa_local.EmpresaID,
+                            BitAtivo  = 1
+                        ))
+
+                    novo_ativo_auvo = AtivoAuvo(
+                        IDAtivo = ativo.IDAtivo,
+                        Endereco = endereco_bruto,
+                        CEP = cep_emp,
+                        Cidade = cidade_emp,
+                        UF = uf_emp,
+                        GroupID = group_id,
+                        EmpresaID = empresa_local.EmpresaID,
+                        BitAtivo = 1,
+                        DataAlterado= datetime.now()
+                    )
+                    db.session.add(novo_ativo_auvo)
+                    db.session.flush()
+                    ativo.IDAtivoAuvo = novo_ativo_auvo.IDAtivoAuvo
+                    db.session.add(ativo)
+
+                    payload_cliente = {
+                        "cpfCnpj":cnpj_numeros,
+                        "name":empresa_local.NomeEmpresa,
+                        "externalId": str(novo_ativo_auvo.IDAtivoAuvo),
+                        "creationDate": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+                        "groupsId": [group_id]
+                    }
+                    if endereco_envio:
+                        payload_cliente["address"] = endereco_envio
+
+                    resp_cliente = requests.post(
+                        f"{AUVO_BASE_URL}/customers/",
+                        headers=headers_auvo,
+                        json=payload_cliente,
+                        timeout=AUVO_TIMEOUT
+                    )
+                    if resp_cliente.status_code not in (200, 201):
+                        raise RuntimeError(f"Auvo criar cliente: HTTP {resp_cliente.status_code}")
+
+                    res_cli = resp_cliente.json().get("result", {})
+                    customer_id = res_cli.get("id")
+                    if not customer_id:
+                        raise RuntimeError("Auvo: falta 'id' no cliente.")
+                    novo_ativo_auvo.AuvoID = customer_id
+                    novo_ativo_auvo.Latitude  = res_cli.get("latitude")
+                    novo_ativo_auvo.Longitude = res_cli.get("longitude")
+
+                    specs_pai = _specs_do_item(item_pai_id)
+                    img_b64   = _imagem_base64(item_pai_id)
+
+                    payload_equip = {
+                        "name": f"{ativo.IDAtivo} - {ativo.NomeAtivo}"[:100],
+                        "identifier": f"{ativo.IDAtivo}-{uuid4().hex[:6]}",
+                        "associatedCustomerId": customer_id,
+                        "active": True,
+                        "categoryId":0
+                    }
+                    if img_b64:
+                        payload_equip["base64Image"] = img_b64
+
+                    resp_equip = requests.post(
+                        f"{AUVO_BASE_URL}/equipments/",
+                        headers=headers_auvo,
+                        json=payload_equip,
+                        timeout=AUVO_TIMEOUT
+                    )
+                    if resp_equip.status_code not in (200, 201):
+                        raise RuntimeError(f"Auvo criar equipamento: HTTP {resp_equip.status_code} → {resp_equip.text}")
+
+                    equipment_id = resp_equip.json().get("result", {}).get("id")
+                    if not equipment_id:
+                        raise RuntimeError("Auvo: falta 'id' no equipamento.")
+
+                    novo_ativo_auvo.EmpresaAuvo = equipment_id
+                    ativo.AuvoID               = customer_id
+                    db.session.add_all([novo_ativo_auvo, ativo])
+
+                    itens_info = (
+                        db.session.query(PedidoItens, Produto)
+                            .join(Produto, Produto.IDItem == PedidoItens.IDItem)
+                            .filter(PedidoItens.IDPedido == pedido_id)
+                            .all()
+                    )
+                    desc_parts = []
+                    for p_it, prod in itens_info:
+                        series = (
+                            db.session.query(PedidoItemSerie.NumeroSerie)
+                                .filter_by(IDPedidoIten=p_it.IDPedidoIten)
+                                .all()
+                        )
+                        series_txt = ",".join(s[0] for s in series) if series else ""
+                        desc_parts.append(
+                            f"IDItem: {p_it.IDItem} | NomeProduto: {prod.NomeProduto} | "
+                            f"Quantidade: {p_it.Quantidade or 0} | NumeroLote: {p_it.NumeroLote or ''} | "
+                            f"NumeroSerie: {series_txt} | IDPedidoReferencia: {pedido_id}"
+                        )
+
+                    patch_ops = []
+                    if specs_pai:
+                        patch_ops.append({
+                            "op":   "replace",
+                            "path": "/equipmentSpecifications",
+                            "value": specs_pai
+                        })
+                    if desc_parts:
+                        patch_ops.append({
+                            "op":   "replace",
+                            "path": "/description",
+                            "value": "\n".join(desc_parts)
+                        })
+                    if patch_ops:
+                        resp_patch = requests.patch(
+                            f"{AUVO_BASE_URL}/equipments/{equipment_id}",
+                            headers=headers_auvo,
+                            json=patch_ops,
+                            timeout=AUVO_TIMEOUT
+                        )
+                        if resp_patch.status_code not in (200, 201):
+                            raise RuntimeError(f"Auvo atualizar equip.: HTTP {resp_patch.status_code} → {resp_patch.text}")
+
+                db.session.commit()
+                flash("Ativo criado e integrado ao Auvo com sucesso.", "success")
+
+            except Exception as e:
+                db.session.rollback()
+                flash(f"Erro – operação cancelada sem alterações. Detalhes: {e}", "error")
+
+        if novo_status == 3:
+            tipo_ids = {'EstoqueMatriz': 1,
+                        'EstoqueContainer': 6,
+                        'EstoqueEuroMatriz': 10}
+            itens = db.session.query(PedidoItens).filter_by(IDPedido=pedido_id).all()
+            for pitem in itens:
+                pid = pitem.IDTipoEstoque
+                est_id = pitem.IDEstoque
+                cp = pitem.CodPonto
+                qtd= pitem.Quantidade or 0
+
+                if pid == tipo_ids['EstoqueMatriz']:
+                    estoque_reg = db.session.query(EstoqueMatriz).get(est_id)
+                elif pid == tipo_ids['EstoqueContainer']:
+                    estoque_reg = db.session.query(EstoqueContainer).get(est_id)
+                elif pid == tipo_ids['EstoqueEuroMatriz']:
+                    estoque_reg = db.session.query(EstoqueEuroMatriz).get(est_id)
+                else:
+                    continue
+
+                series_vinc = db.session.query(PedidoItemSerie).filter_by(
+                    IDPedidoIten=pitem.IDPedidoIten, IDPedido=pedido_id
+                ).all()
+                for ps in series_vinc:
+                    db.session.add(EstoqueSerie(
+                        IDItem  = ps.IDItem,
+                        NumeroSerie  = ps.NumeroSerie,
+                        NumeroLote = ps.NumeroLote,
+                        IDEstoque = est_id,
+                        TipoEstoque = ps.TipoEstoque,
+                        CodPonto = cp,
+                        DataEntrada= datetime.now(),
+                        DataSaida = None,
+                        IDTipoEstoque = pid
+                    ))
+                db.session.query(PedidoItemSerie).filter_by(
+                    IDPedidoIten=pitem.IDPedidoIten, IDPedido=pedido_id
+                ).delete(synchronize_session=False)
+
+                if pitem.NumeroLote:
+                    lote_input = pitem.NumeroLote
+                    lote_reg   = db.session.query(EstoqueLotes).filter_by(
+                        IDItem=pitem.IDItem,
+                        IDEstoque=est_id,
+                        NumeroLote=lote_input,
+                        IDTipoEstoque=pid
+                    ).first()
+                    if lote_reg:
+                        lote_reg.Quantidade += qtd
+                    else:
+                        db.session.add(EstoqueLotes(
+                            IDItem = pitem.IDItem,
+                            IDEstoque = est_id,
+                            NumeroLote = lote_input,
+                            NumerodeSerie = None,
+                            Quantidade = qtd,
+                            IDTipoEstoque = pid,
+                            CodPonto = cp
+                        ))
+                    db.session.query(PedidoLotes).filter_by(
+                        IDPedidoIten=pitem.IDPedidoIten,
+                        IDPedido=pedido_id
+                    ).delete(synchronize_session=False)
+
+                estoque_reg.Saldo = (estoque_reg.Saldo or 0) + qtd
+                db.session.add(estoque_reg)
+
+                db.session.add(Movimentacao(
+                    IDUsuario = user_id,
+                    IDItem = pitem.IDItem,
+                    Quantidade = qtd,
+                    IDProprietarioOrigem  = None,
+                    CodPontoOrigem = None,
+                    DataMovimentacao = datetime.now(),
+                    NomeMovimentacao  = f"Devolução Pedido {pedido_id}",
+                    IDTipoEstoqueOrigem  = pid,
+                    IDTipoEstoqueDestino = pid,
+                    NumeroLoteOrigem = pitem.NumeroLote
+                ))
+
+                pitem.Quantidade = 0
+                pitem.NumeroLote = None
+                pitem.NumerodeSerie = None
+                pitem.CodPonto = None
+                pitem.IDEstoque  = None
+                pitem.IDTipoEstoque = None
+                db.session.add(pitem)
+
+        db.session.commit()
+        flash("Situação atualizada com sucesso.", "success")
+        return redirect(url_for('euro.editar_pedido', pedido_id=pedido_id))
+
+    status_model = db.session.query(StatusPedido).get(pedido.IDStatusPedido) if pedido.IDStatusPedido else None
+    nome_status = status_model.NomeStatusPedido if status_model else None
+    status_list = db.session.query(StatusPedido).order_by(StatusPedido.NomeStatusPedido).all()
+
+    obs_entries = (
+        db.session.query(ObservacoesPedidos)
+            .filter_by(IDPedido=pedido_id)
+            .order_by(ObservacoesPedidos.DataObservacao)
+            .all()
+    )
+    observacoes = []
+    for o in obs_entries:
+        usuario = db.session.query(Usuario).get(o.IDUsuario)
+        observacoes.append({
+            'usuario':usuario.NomeUsuario if usuario else 'Desconhecido',
+            'data':o.DataObservacao,
+            'texto':o.Observacao
+        })
+
+    anexos = (
+        db.session.query(AnexosPedidos)
+            .filter_by(IDPedido=pedido_id)
+            .order_by(AnexosPedidos.Ordem)
+            .all()
+    )
+
+    funcionario = db.session.query(Funcionario).get(pedido.IDFuncionario) if pedido.IDFuncionario else None
+    projeto = db.session.query(Projeto).get(pedido.IDProjeto)  if pedido.IDProjeto else None
+    compradora_empresa = db.session.query(Empresa).get(pedido.IDEmpresaCompradora)
+    vendedora_empresa  = db.session.query(Empresa).get(pedido.IDEmpresaVendedora)
+
+    tipo_est_map = {t.IDTipoEstoque: t.NomeEstoque for t in db.session.query(TipoEstoque).all()}
+
+    itens_completos = (
+        db.session.query(PedidoItens, Produto, PedidoLotes, PedidoItemSerie)
+            .join(Produto, Produto.IDItem == PedidoItens.IDItem)
+            .outerjoin(PedidoLotes,  PedidoLotes.IDPedidoIten  == PedidoItens.IDPedidoIten)
+            .outerjoin(PedidoItemSerie, PedidoItemSerie.IDPedidoIten == PedidoItens.IDPedidoIten)
+            .filter(PedidoItens.IDPedido == pedido_id)
+            .all()
+    )
+    dados_por_item = {}
+    for pitem, produto, lote, serie in itens_completos:
+        if pitem.IDPedidoIten not in dados_por_item:
+            dados_por_item[pitem.IDPedidoIten] = {
+                "pitem":  pitem,
+                "produto":produto,
+                "lotes":  [],
+                "series": []
+            }
+        if lote and lote.NumeroLote:
+            dados_por_item[pitem.IDPedidoIten]["lotes"].append(lote)
+        if serie and serie.NumeroSerie:
+            dados_por_item[pitem.IDPedidoIten]["series"].append(serie)
+
+    item_ids = [dados["pitem"].IDItem for dados in dados_por_item.values()]
+    imagens  = (
+        db.session.query(ImagensProdutos.IDItem, ImagensProdutos.NomeArquivo)
+            .filter(ImagensProdutos.IDItem.in_(item_ids),
+                    ImagensProdutos.Ordem == 1)
+            .all()
+    )
+    image_urls = {}
+    for iid, fn in imagens:
+        arquivo = _normalizar_nome_arquivo_imagem(fn)
+        if arquivo:
+            image_urls[iid] = url_for('euro.imagem_produto', filename=arquivo)
+    for iid in item_ids:
+        image_urls.setdefault(iid, None)
+
+   
+    filhos_raw = (
+        db.session.query(
+            Pedidos.IDPedido,
+            Pedidos.IDStatusPedido,
+            Pedidos.DataAgendado,
+            Empresa.NomeEmpresa.label('NomeEmpresaVendedora'),
+            ObservacoesPedidos.Observacao.label('Observacao'),
+        )
+        .join(Empresa, Empresa.EmpresaID == Pedidos.IDEmpresaVendedora)
+        .outerjoin(ObservacoesPedidos, ObservacoesPedidos.IDPedido == Pedidos.IDPedido)
+        .filter(Pedidos.IDPedidoPai == pedido.IDPedido)
+        .order_by(Pedidos.IDPedido.desc())
+        .all()
+    )
+
+    filhos_info = []
+    if filhos_raw:
+        status_dict = {
+            s.IDStatusPedido: s.NomeStatusPedido
+            for s in db.session.query(StatusPedido).all()
+        }
+
+       
+        filhos_ids = []
+        vistos = set()
+        for pid, _, _, _, _ in filhos_raw:
+            if pid not in vistos:
+                vistos.add(pid)
+                filhos_ids.append(pid)
+
+       
+        tooltip_rows = []
+        if filhos_ids:
+            tooltip_rows = (
+                db.session.query(
+                    PedidoItens.IDPedido.label('pid'),
+                    Produto.NomeProduto.label('nome'),
+                    func.coalesce(func.sum(PedidoItens.Quantidade), 0).label('qtd')
+                )
+                .join(Produto, Produto.IDItem == PedidoItens.IDItem)
+                .filter(PedidoItens.IDPedido.in_(filhos_ids))
+                .group_by(PedidoItens.IDPedido, Produto.NomeProduto)
+                .order_by(PedidoItens.IDPedido)
+                .all()
+            )
+
+        
+        tooltip_map = {}
+        for row in tooltip_rows:
+            pid = row.pid
+            linha = f"NomeItem: {row.nome}|Qtd: {int(row.qtd or 0)}"
+            tooltip_map.setdefault(pid, []).append(linha)
+
+        tooltip_html_map = {
+            pid: "<br>".join(linhas)  
+            for pid, linhas in tooltip_map.items()
+        }
+
+       
+        for pid in filhos_ids:
+            
+            for _pid, status_id, data_ag, nome_emp_vend, obs_text in filhos_raw:
+                if _pid == pid:
+                    total_filho = _calcular_total_pedido(pid)
+                    filhos_info.append({
+                        "id": pid,
+                        "status_id": status_id,
+                        "status_nome": status_dict.get(status_id, "-"),
+                        "data_agendado": data_ag,
+                        "total": total_filho,
+                        "vendedora_nome": nome_emp_vend,
+                        "observacao": obs_text,
+                        "tooltip_html": tooltip_html_map.get(pid, "Sem itens")  
+                    })
+                    break
+
+    total_pedido = _calcular_total_pedido(pedido_id)
+
+    return render_template(
+        'shempo/editar_pedido.html',
+        pedido = pedido,
+        nome_status = nome_status,
+        status_list = status_list,
+        observacoes = observacoes,
+        anexos  = anexos,
+        funcionario = funcionario,
+        projeto = projeto,
+        compradora_empresa = compradora_empresa,
+        vendedora_empresa = vendedora_empresa,
+        dados_por_item = dados_por_item,
+        tipo_est_map = tipo_est_map,
+        image_urls  = image_urls,
+        is_edicao = True,
+        total_pedido = total_pedido,
+        filhos_info = filhos_info,
+    )
+
 
 
 
@@ -6444,6 +7200,7 @@ from requests.exceptions import ConnectionError, RequestException
     endpoint='devolver_item'
 )
 @login_required
+@requer_item_menu_paineis('ver_pedidos')
 def devolver_item(pedido_id, pedido_item_id):
   
     pedido_item = db.session.query(PedidoItens).get(pedido_item_id)
@@ -6653,8 +7410,10 @@ def devolver_item(pedido_id, pedido_item_id):
 
 
 
+@euro.route('/pedido/<int:pedido_id>/retirada')
 @euro.route('/<int:pedido_id>/retirada')
 @login_required
+@requer_item_menu_paineis('ver_pedidos')
 def formulario_retirada(pedido_id):
 
   
@@ -6673,16 +7432,64 @@ def formulario_retirada(pedido_id):
         db.session.query(PedidoItens, Produto)
         .join(Produto, Produto.IDItem == PedidoItens.IDItem)
         .filter(PedidoItens.IDPedido == pedido_id)
+        .order_by(PedidoItens.IDPedidoIten)
         .all()
     )
+
+    pedido_item_ids = [pitem.IDPedidoIten for pitem, _ in itens_query]
+    series_por_item = defaultdict(list)
+    lotes_por_item = defaultdict(list)
+
+    if pedido_item_ids:
+        for serie in (
+            db.session.query(PedidoItemSerie)
+            .filter(PedidoItemSerie.IDPedidoIten.in_(pedido_item_ids))
+            .order_by(PedidoItemSerie.IDPedidoIten, PedidoItemSerie.NumeroSerie)
+            .all()
+        ):
+            series_por_item[serie.IDPedidoIten].append(serie)
+
+        for lote in (
+            db.session.query(PedidoLotes)
+            .filter(PedidoLotes.IDPedidoIten.in_(pedido_item_ids))
+            .order_by(PedidoLotes.IDPedidoIten, PedidoLotes.NumeroLote)
+            .all()
+        ):
+            lotes_por_item[lote.IDPedidoIten].append(lote)
+
     dados_itens = []
-    for pitem, prod in itens_query:
+    for pitem, produto in itens_query:
+        series = series_por_item.get(pitem.IDPedidoIten, [])
+        lotes = lotes_por_item.get(pitem.IDPedidoIten, [])
+
+        if series:
+            for serie in series:
+                dados_itens.append({
+                    "IDItem": pitem.IDItem,
+                    "NomeProduto": produto.NomeProduto,
+                    "Quantidade": 1,
+                    "NumeroSerie": serie.NumeroSerie,
+                    "NumeroLote": serie.NumeroLote or pitem.NumeroLote,
+                })
+            continue
+
+        if lotes:
+            for lote in lotes:
+                dados_itens.append({
+                    "IDItem": pitem.IDItem,
+                    "NomeProduto": produto.NomeProduto,
+                    "Quantidade": lote.Quantidade or pitem.Quantidade,
+                    "NumeroSerie": pitem.NumerodeSerie,
+                    "NumeroLote": lote.NumeroLote,
+                })
+            continue
+
         dados_itens.append({
             "IDItem": pitem.IDItem,
-            "NomeProduto": prod.NomeProduto,
+            "NomeProduto": produto.NomeProduto,
             "Quantidade": pitem.Quantidade,
-            "NumeroSerie": getattr(pitem, 'NumerodeSerie', None),
-            "NumeroLote": getattr(pitem, 'NumeroLote', None),
+            "NumeroSerie": pitem.NumerodeSerie,
+            "NumeroLote": pitem.NumeroLote,
         })
 
    

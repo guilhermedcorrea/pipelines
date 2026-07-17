@@ -381,38 +381,85 @@
     flex-wrap:wrap;
   }
 
-  .pd-characteristic-list{
-    display:flex;
-    flex-direction:column;
-    gap:9px;
+  .pd-characteristic-table-wrap{
+    width:100%;
+    overflow-x:auto;
+    border:1px solid var(--pd-border);
+    border-radius:12px;
+    background:#fff;
+    -webkit-overflow-scrolling:touch;
   }
 
-  .pd-characteristic{
-    padding:10px;
-    display:grid;
-    grid-template-columns:minmax(180px,.7fr) minmax(0,1.3fr) auto;
-    gap:9px;
-    align-items:center;
-    border:1px solid var(--pd-border);
-    border-radius:11px;
-    background:var(--pd-soft);
+  .pd-characteristic-table{
+    width:100%;
+    min-width:760px;
+    border-collapse:collapse;
+    table-layout:fixed;
+    color:var(--pd-text);
+  }
+
+  .pd-characteristic-table col:nth-child(1){width:34%;}
+  .pd-characteristic-table col:nth-child(2){width:auto;}
+  .pd-characteristic-table col:nth-child(3){width:255px;}
+
+  .pd-characteristic-table th{
+    padding:12px 14px;
+    border-bottom:1px solid var(--pd-border);
+    background:#f3f6fb;
+    color:#475569;
+    font-size:10px;
+    font-weight:900;
+    letter-spacing:.04em;
+    text-align:left;
+    text-transform:uppercase;
+  }
+
+  .pd-characteristic-table td{
+    padding:10px 14px;
+    border-bottom:1px solid #e7ebf1;
+    vertical-align:middle;
+  }
+
+  .pd-characteristic-table tbody tr:nth-child(even){
+    background:#f7f7f8;
+  }
+
+  .pd-characteristic-table tbody tr:last-child td{
+    border-bottom:0;
   }
 
   .pd-characteristic-name{
     color:#334155;
-    font-size:12px;
-    font-weight:850;
+    font-size:13px;
+    font-weight:800;
+    line-height:1.4;
     overflow-wrap:anywhere;
+  }
+
+  .pd-characteristic-value-input{
+    width:100%;
+    min-height:40px;
+    margin:0;
+    padding:8px 11px;
+    border:1px solid #d9e0ea;
+    border-radius:8px;
+    background:#fff;
+    color:var(--pd-text);
+    font-size:13px;
+  }
+
+  .pd-characteristic-value-input:focus{
+    border-color:var(--pd-blue-2);
+    outline:none;
+    box-shadow:0 0 0 3px rgba(3,64,167,.11);
   }
 
   .pd-characteristic-actions{
     display:flex;
-    gap:7px;
+    justify-content:flex-end;
     align-items:center;
-  }
-
-  .pd-characteristic-actions form{
-    margin:0;
+    gap:7px;
+    white-space:nowrap;
   }
 
   .pd-filter-chip{
@@ -420,6 +467,7 @@
     padding:6px 9px;
     display:inline-flex;
     align-items:center;
+    justify-content:center;
     border-radius:999px;
     background:#fff7dd;
     color:#8a5a00;
@@ -650,19 +698,12 @@
     .pd-field-wide,
     .pd-field-full{grid-column:1;}
 
-    .pd-characteristic{
-      grid-template-columns:1fr;
+    .pd-characteristic-table-wrap{
+      border-radius:10px;
     }
 
-    .pd-characteristic-actions{
-      align-items:stretch;
-      flex-direction:column;
-    }
-
-    .pd-characteristic-actions form,
-    .pd-characteristic-actions .pd-button,
-    .pd-filter-chip{
-      width:100%;
+    .pd-characteristic-table{
+      min-width:700px;
     }
 
     .pd-form-actions,
@@ -916,25 +957,65 @@
       {% if caracteristicas %}
         <form method="POST" action="{{ url_for('euro.atualizar_caracteristicas', item_id=item.IDItem) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <div class="pd-characteristic-list">
-            {% for carac in caracteristicas %}
-              <div class="pd-characteristic">
-                <div class="pd-characteristic-name">{{ carac.Caracteristica }}</div>
-                <div class="pd-field pd-field-full">
-                  <label class="sr-only" for="valor_{{ carac.IDCaracteristica }}">Valor de {{ carac.Caracteristica }}</label>
-                  <input type="text" id="valor_{{ carac.IDCaracteristica }}" name="valor_{{ carac.IDCaracteristica }}" value="{{ carac.Valor or '' }}">
-                </div>
-                <div class="pd-characteristic-actions">
-                  {% if carac.BitFiltro %}
-                    <span class="pd-filter-chip">Usado como filtro</span>
-                  {% else %}
-                    <button type="submit" class="pd-button pd-button-small" formaction="{{ url_for('euro.marcar_filtro', item_id=item.IDItem, carac_id=carac.IDCaracteristica) }}" formmethod="POST">Marcar filtro</button>
-                  {% endif %}
-                  <button type="submit" class="pd-button pd-button-danger pd-button-small" formaction="{{ url_for('euro.remover_caracteristica', item_id=item.IDItem, carac_id=carac.IDCaracteristica) }}" formmethod="POST" onclick="return confirm('Remover esta característica?');">Remover</button>
-                </div>
-              </div>
-            {% endfor %}
+
+          <div class="pd-characteristic-table-wrap">
+            <table class="pd-characteristic-table">
+              <colgroup>
+                <col>
+                <col>
+                <col>
+              </colgroup>
+              <thead>
+                <tr>
+                  <th scope="col">Nome</th>
+                  <th scope="col">Valor</th>
+                  <th scope="col">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for carac in caracteristicas %}
+                  <tr>
+                    <td>
+                      <div class="pd-characteristic-name">{{ carac.Caracteristica }}</div>
+                    </td>
+                    <td>
+                      <label class="sr-only" for="valor_{{ carac.IDCaracteristica }}">Valor de {{ carac.Caracteristica }}</label>
+                      <input
+                        type="text"
+                        class="pd-characteristic-value-input"
+                        id="valor_{{ carac.IDCaracteristica }}"
+                        name="valor_{{ carac.IDCaracteristica }}"
+                        value="{{ carac.Valor or '' }}"
+                      >
+                    </td>
+                    <td>
+                      <div class="pd-characteristic-actions">
+                        {% if carac.BitFiltro %}
+                          <span class="pd-filter-chip">Usado como filtro</span>
+                        {% else %}
+                          <button
+                            type="submit"
+                            class="pd-button pd-button-small"
+                            formaction="{{ url_for('euro.marcar_filtro', item_id=item.IDItem, carac_id=carac.IDCaracteristica) }}"
+                            formmethod="POST"
+                          >Marcar filtro</button>
+                        {% endif %}
+
+                        <button
+                          type="submit"
+                          class="pd-button pd-button-danger pd-button-small"
+                          formaction="{{ url_for('euro.remover_caracteristica', item_id=item.IDItem, carac_id=carac.IDCaracteristica) }}"
+                          formmethod="POST"
+                          onclick="return confirm('Remover esta característica?');"
+                        >Remover</button>
+                      </div>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
           </div>
+
           <div class="pd-form-actions">
             <button type="submit" class="pd-button pd-button-primary">Salvar características</button>
           </div>

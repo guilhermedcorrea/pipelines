@@ -1,439 +1,104 @@
-{# templates/editar_pedido.html #}
 {% extends "euromidia/base_euromidia.html" %}
+
 {% block title %}Editar Pedido #{{ pedido.IDPedido }}{% endblock %}
 
 {% block content %}
-{# verifica se estamos no endpoint de edição #}
-{% set is_edicao = request.endpoint == 'euro.editar_pedido' %}
+<style>
+  .container:has(> .order-edit-page){width:100%!important;max-width:none!important;margin:18px 0!important;padding:0 clamp(12px,1.2vw,24px)!important}
+  .order-edit-page{--oe-blue:#002884;--oe-yellow:#ffb300;--oe-text:#0f172a;--oe-muted:#64748b;--oe-border:#dde5ef;--oe-soft:#f5f7fb;width:100%;padding-bottom:28px;color:var(--oe-text)}.order-edit-page *{box-sizing:border-box}.oe-header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px}.oe-header h1{margin:0;color:var(--oe-blue);font-size:clamp(24px,2vw,34px);letter-spacing:-.03em}.oe-header p{margin:6px 0 0;color:var(--oe-muted);font-size:13px}.oe-actions{display:flex;gap:8px;flex-wrap:wrap}.oe-btn{min-height:40px;padding:9px 13px;display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(0,40,132,.22);border-radius:10px;background:#fff;color:var(--oe-blue);font-size:12px;font-weight:850;text-decoration:none;cursor:pointer}.oe-btn:hover{background:#eef3ff}.oe-btn-primary{background:var(--oe-yellow);border-color:var(--oe-yellow);color:#15213d}.oe-btn-danger{border-color:#fecaca;color:#b91c1c}.oe-btn-danger:hover{background:#fef2f2}.oe-btn-small{min-height:32px;padding:6px 9px;font-size:10px}
+  .oe-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}.oe-card{border:1px solid var(--oe-border);border-radius:15px;background:#fff;box-shadow:0 8px 28px rgba(15,23,42,.055);overflow:hidden}.oe-span-12{grid-column:span 12}.oe-span-8{grid-column:span 8}.oe-span-4{grid-column:span 4}.oe-card-head{padding:14px 16px;border-bottom:1px solid var(--oe-border);background:linear-gradient(135deg,#fff,#f7f9ff)}.oe-card-head h2{margin:0;font-size:15px}.oe-card-head p{margin:4px 0 0;color:var(--oe-muted);font-size:10px}.oe-card-body{padding:16px}.oe-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.oe-meta{min-height:70px;padding:11px;border:1px solid var(--oe-border);border-radius:10px;background:var(--oe-soft)}.oe-meta span{display:block;color:var(--oe-muted);font-size:9px;font-weight:900;text-transform:uppercase}.oe-meta strong{display:block;margin-top:5px;font-size:12px}.oe-money{color:#047857;font-size:17px!important}
+  .oe-field label{display:block;margin:0 0 6px;color:#52637a;font-size:10px;font-weight:900;text-transform:uppercase}.oe-field input,.oe-field select,.oe-field textarea{width:100%;min-height:42px;border:1px solid var(--oe-border);border-radius:10px;background:#fff;color:var(--oe-text);font-size:12px;padding:9px 11px}.oe-field textarea{min-height:100px;resize:vertical}.oe-field input:focus,.oe-field select:focus,.oe-field textarea:focus{outline:none;border-color:#0340a7;box-shadow:0 0 0 3px rgba(3,64,167,.1)}.oe-form-actions{margin-top:10px;display:flex;justify-content:flex-end;gap:8px}.oe-stack{display:flex;flex-direction:column;gap:12px}.oe-note{padding:10px 0;border-bottom:1px solid #edf1f6}.oe-note:last-child{border-bottom:0}.oe-note-head{display:flex;justify-content:space-between;gap:10px;color:var(--oe-muted);font-size:9px;font-weight:800}.oe-note p{margin:6px 0 0;white-space:pre-wrap;font-size:11px;line-height:1.5}.oe-file{padding:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--oe-border);border-radius:10px;background:var(--oe-soft)}.oe-file a{color:var(--oe-blue);font-size:11px;font-weight:850;text-decoration:none}.oe-file small{color:var(--oe-muted);font-size:9px}
+  .oe-table-wrap{width:100%;overflow-x:auto}.oe-table{width:100%;min-width:1050px;border-collapse:collapse}.oe-table th{padding:10px 12px;background:#f2f5fa;border-bottom:1px solid var(--oe-border);color:#52637a;font-size:9px;font-weight:950;text-align:left;text-transform:uppercase}.oe-table td{padding:12px;border-bottom:1px solid #edf1f6;font-size:11px;vertical-align:middle}.oe-table tbody tr:last-child td{border-bottom:0}.oe-product{display:flex;align-items:center;gap:10px;min-width:250px}.oe-product-image,.oe-product-placeholder{width:52px;height:52px;flex:0 0 52px;border:1px solid var(--oe-border);border-radius:9px;background:var(--oe-soft)}.oe-product-image{object-fit:contain}.oe-product-placeholder{display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:9px}.oe-product strong{display:block;font-size:12px}.oe-product small{display:block;margin-top:3px;color:var(--oe-muted)}.oe-chip-list{display:flex;gap:5px;flex-wrap:wrap}.oe-chip{padding:4px 7px;border-radius:999px;background:#eef2f7;color:#475569;font-size:9px;font-weight:800}.oe-empty{color:var(--oe-muted);font-size:11px}.oe-warning{padding:10px 12px;border:1px solid #fde68a;border-radius:10px;background:#fffbeb;color:#854d0e;font-size:10px;line-height:1.5}
+  @media(max-width:1050px){.oe-span-8,.oe-span-4{grid-column:span 12}.oe-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media(max-width:720px){.container:has(> .order-edit-page){margin:12px 0!important;padding:0 12px!important}.oe-header{align-items:stretch;flex-direction:column}.oe-actions,.oe-actions .oe-btn{width:100%}.oe-summary{grid-template-columns:1fr}.oe-form-actions,.oe-form-actions .oe-btn{width:100%}.oe-table{min-width:0}.oe-table thead{display:none}.oe-table,.oe-table tbody,.oe-table tr,.oe-table td{display:block;width:100%}.oe-table-wrap{padding:10px;background:var(--oe-soft);overflow:visible}.oe-table tr{margin-bottom:10px;border:1px solid var(--oe-border);border-radius:11px;background:#fff;overflow:hidden}.oe-table td{display:grid;grid-template-columns:105px minmax(0,1fr);gap:10px;text-align:right}.oe-table td::before{content:attr(data-label);color:#64748b;font-size:9px;font-weight:950;text-align:left;text-transform:uppercase}.oe-product{justify-content:flex-end;min-width:0}.oe-chip-list{justify-content:flex-end}}
+</style>
 
-{# helper simples para formatar moeda com 2 casas e vírgula #}
-{% macro money2(v) -%}
-  {{ ('%.2f' % ((v or 0)|float)).replace('.', ',') }}
-{%- endmacro %}
-
-<div class="container-fluid mt-5 p-2">
-  <h2 class="mb-3">Editar Pedido #{{ pedido.IDPedido }}</h2>
-
-  <!-- Dados do Pedido -->
-  <div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center">
-      <h5 class="mb-0">Dados do Pedido</h5>
-      <div class="d-flex flex-column align-items-center">
-        {# Badge de status #}
-        {% set s = nome_status %}
-        {% if s in ['Ativo','Criado'] %}
-          <span class="badge bg-success mb-2" style="font-size:2rem; padding:1.5rem 2rem;">
-            {{ s }}
-          </span>
-        {% elif s in ['Cancelado','Atrasado'] %}
-          <span class="badge bg-danger mb-2" style="font-size:2rem; padding:1.5rem 2rem;">
-            {{ s }}
-          </span>
-        {% elif s == 'Concluído' %}
-          <span class="badge bg-primary mb-2" style="font-size:2rem; padding:1.5rem 2rem;">
-            {{ s }}
-          </span>
-        {% elif s == 'Reservado' %}
-          <span class="badge mb-2" style="background:gold;color:black;font-size:2rem; padding:1.5rem 2rem;">
-            {{ s }}
-          </span>
-        {% elif s == 'Produzindo' %}
-          <span class="badge bg-warning text-dark mb-2" style="font-size:2rem; padding:1.5rem 2rem;">
-            {{ s }}
-          </span>
-        {% else %}
-          <span class="badge bg-secondary mb-2" style="font-size:2rem; padding:1.5rem 2rem;">
-            {{ s }}
-          </span>
-        {% endif %}
-
-        {# Botão “Formulário Retirada” #}
-        <a href="{{ url_for('euro.formulario_retirada', pedido_id=pedido.IDPedido) }}"
-           class="btn btn-light"
-           style="background:#f0f0f0; color:#000; border:1px solid #ccc;">
-          <i class="bi bi-card-list" style="font-size:1.5rem;"></i><br>
-          Formulário<br>Retirada
-        </a>
-
-        {# NOVO: Botão global “Desmembrar Pedido” (abre modal via AJAX) #}
-        {% if is_edicao %}
-        <button type="button"
-                class="btn btn-warning mt-2 js-open-desmembrar-pedido"
-                data-modal-url="{{ url_for('euro.desmembrar_modal', pedido_id=pedido.IDPedido) }}">
-          <i class="bi bi-diagram-3"></i><br>
-          Desmembrar<br>Pedido
-        </button>
-        {% endif %}
-      </div>
+<div class="order-edit-page">
+  <header class="oe-header">
+    <div><h1>Editar Pedido #{{ pedido.IDPedido }}</h1><p>Atualize a situação, registre observações, gerencie anexos e consulte os itens.</p></div>
+    <div class="oe-actions">
+      <a class="oe-btn" href="{{ url_for('euro.ver_pedidos') }}">Voltar aos pedidos</a>
+      <a class="oe-btn" href="{{ url_for('euro.ver_pedido', pedido_id=pedido.IDPedido) }}">Ver Pedido</a>
+      <a class="oe-btn oe-btn-primary" href="{{ url_for('euro.formulario_retirada', pedido_id=pedido.IDPedido) }}" target="_blank">Formulário Retirada</a>
     </div>
+  </header>
 
-    <div class="card-body">
-      <p><strong>IDPedido:</strong> {{ pedido.IDPedido }}</p>
-      <p><strong>ReferenciaPedido:</strong> {{ pedido.ReferenciaPedido or '-' }}</p>
-      <p><strong>OPInicial:</strong> {{ pedido.OPInicial or '-' }}</p>
-      <p><strong>Projeto:</strong> {{ projeto.NomeProjeto if projeto else '-' }}</p>
-
-      {# >>> ADIÇÃO SOLICITADA: DataAgendado e IDPedidoPai <<< #}
-      <p><strong>Data Agendado:</strong>
-        {{ pedido.DataAgendado.strftime('%Y-%m-%d %H:%M') if pedido.DataAgendado else '-' }}
-      </p>
-      <p><strong>Pedido Pai:</strong>
-        {% if pedido.IDPedidoPai %}
-          <a href="{{ url_for('euro.editar_pedido', pedido_id=pedido.IDPedidoPai) }}">#{{ pedido.IDPedidoPai }}</a>
-        {% else %}-{% endif %}
-      </p>
-      {# >>> FIM DA ADIÇÃO <<< #}
-
-      <hr>
-
-      <h6>Compradora</h6>
-      <p><strong>Empresa:</strong> {{ compradora_empresa.NomeEmpresa if compradora_empresa else '-' }}</p>
-      <p><strong>Referência Externa:</strong> {{ compradora_empresa.ReferenciaExternaEmpresa if compradora_empresa else '-' }}</p>
-      <p><strong>Local:</strong> {{ compradora_empresa.CidadeEmpresa or '-' }}, {{ compradora_empresa.UF or '-' }}</p>
-      <hr>
-
-      <h6>Vendedora</h6>
-      <p><strong>Empresa:</strong> {{ vendedora_empresa.NomeEmpresa if vendedora_empresa else '-' }}</p>
-      <p><strong>Referência Externa:</strong> {{ vendedora_empresa.ReferenciaExternaEmpresa if vendedora_empresa else '-' }}</p>
-      <p><strong>Local:</strong> {{ vendedora_empresa.CidadeEmpresa or '-' }}, {{ vendedora_empresa.UF or '-' }}</p>
-      <hr>
-
-      <p><strong>DataPedido:</strong> {{ pedido.DataPedido.strftime('%Y-%m-%d') if pedido.DataPedido else '-' }}</p>
-      <p><strong>OSAuvo:</strong> {{ pedido.OSAuvo or '-' }}</p>
-      <p><strong>TipoPedido:</strong> {{ pedido.TipoPedido or '-' }}</p>
-      <p><strong>Técnico:</strong> {{ funcionario.NomeFuncionario if funcionario else '-' }}</p>
-
-      {# select de situação – exibido apenas em edição #}
-      {% if is_edicao %}
-      <form method="post" class="mt-3">
-        <label for="status_id"><strong>Situação:</strong></label>
-        <select name="status_id" id="status_id"
-                class="form-select w-auto d-inline-block ms-2"
-                onchange="
-                  if(this.value=='3'){
-                    if(confirm(
-                      'Você está prestes a cancelar este pedido.\n'
-                      + 'Isso devolverá todos os saldos aos estoques e é irreversível.\n'
-                      + 'Deseja continuar?'
-                    )){
-                      this.form.submit();
-                    } else {
-                      this.value='{{ pedido.IDStatusPedido or '' }}';
-                    }
-                  }
-                  else if(this.value=='9'){
-                    if(confirm(
-                      'Você está prestes a Criar um Novo Ativo.\n'
-                      + 'Tem certeza que deseja prosseguir?'
-                    )){
-                      this.form.submit();
-                    } else {
-                      this.value='{{ pedido.IDStatusPedido or '' }}';
-                    }
-                  }
-                  else if(this.value){
-                    this.form.submit();
-                  }
-                ">
-          <option value="">-- selecione --</option>
-
-          {# evita erro quando status_list não vem do endpoint de visualização #}
-          {% if status_list is defined %}
-            {% for st in status_list %}
-              <option value="{{ st.IDStatusPedido }}"
-                {% if st.IDStatusPedido == pedido.IDStatusPedido %}selected{% endif %}>
-                {{ st.NomeStatusPedido }}
-              </option>
-            {% endfor %}
-          {% endif %}
-        </select>
-      </form>
-      {% endif %}
-
-      {# Observações #}
-      <div class="mt-4">
-        <h6>Observações</h6>
-        {% if observacoes %}
-          <div class="mb-3" style="max-height:200px; overflow-y:auto; border:1px solid #ccc; padding:1rem;">
-            {% for o in observacoes %}
-              <div class="mb-2">
-                <small class="text-muted">{{ o.usuario }} – {{ o.data.strftime('%d/%m/%Y') }}</small>
-                <p class="mb-1">{{ o.texto }}</p>
-              </div>
-            {% endfor %}
-          </div>
-        {% endif %}
-        {% if is_edicao %}
-          <form method="post">
-            <div class="mb-3">
-              <textarea name="nova_observacao" class="form-control" rows="3"
-                        placeholder="Escreva uma nova observação..."></textarea>
-            </div>
-            <button type="submit" class="btn btn-secondary btn-sm">Adicionar Observação</button>
-          </form>
-        {% endif %}
+  <div class="oe-grid">
+    <section class="oe-card oe-span-12">
+      <div class="oe-card-head"><h2>Dados do pedido</h2><p>Resumo cadastral e financeiro.</p></div>
+      <div class="oe-card-body oe-summary">
+        <div class="oe-meta"><span>Situação atual</span><strong>{{ nome_status or '-' }}</strong></div><div class="oe-meta"><span>Tipo</span><strong>{{ pedido.TipoPedido or '-' }}</strong></div><div class="oe-meta"><span>Referência</span><strong>{{ pedido.ReferenciaPedido or '-' }}</strong></div><div class="oe-meta"><span>Total</span><strong class="oe-money">R$ {{ ('%.2f' % ((total_pedido or 0)|float)).replace('.', ',') }}</strong></div>
+        <div class="oe-meta"><span>OP inicial</span><strong>{{ pedido.OPInicial or '-' }}</strong></div><div class="oe-meta"><span>OS Auvo</span><strong>{{ pedido.OSAuvo or '-' }}</strong></div><div class="oe-meta"><span>Responsável</span><strong>{{ funcionario.NomeFuncionario if funcionario else '-' }}</strong></div><div class="oe-meta"><span>Projeto</span><strong>{{ projeto.NomeProjeto if projeto else '-' }}</strong></div>
+        <div class="oe-meta"><span>Compradora</span><strong>{{ compradora_empresa.NomeEmpresa if compradora_empresa else '-' }}</strong></div><div class="oe-meta"><span>Vendedora</span><strong>{{ vendedora_empresa.NomeEmpresa if vendedora_empresa else '-' }}</strong></div><div class="oe-meta"><span>Data do pedido</span><strong>{{ pedido.DataPedido.strftime('%d/%m/%Y %H:%M') if pedido.DataPedido else '-' }}</strong></div><div class="oe-meta"><span>Data prometida</span><strong>{{ pedido.DataPrometido.strftime('%d/%m/%Y') if pedido.DataPrometido else '-' }}</strong></div>
       </div>
+    </section>
 
-      {# Anexos #}
-      <div class="mt-4">
-        <h6>Anexos</h6>
-        {% if anexos %}
-          <ul class="list-group mb-3">
-            {% for a in anexos %}
-              <li class="list-group-item d-flex justify-content-between align-items-center">
-                <a href="{{ url_for('euro.serve_anexo', subpath=a.CaminhoArquivo) }}"
-                   target="_blank">{{ a.NomeArquivo }}</a>
-                <small class="text-muted">{{ a.DataUpload.strftime('%d/%m/%Y') }}</small>
-              </li>
-            {% endfor %}
-          </ul>
-        {% endif %}
-        {% if is_edicao %}
-          <form method="post" enctype="multipart/form-data">
-            <div class="mb-3">
-              <input type="file" name="anexo" class="form-control-file" />
-            </div>
-            <button type="submit" class="btn btn-secondary btn-sm">Enviar Anexo</button>
-          </form>
-        {% endif %}
+    <section class="oe-card oe-span-4">
+      <div class="oe-card-head"><h2>Alterar situação</h2><p>Algumas situações executam rotinas de estoque e integração.</p></div>
+      <div class="oe-card-body oe-stack">
+        <div class="oe-warning">Ao selecionar cancelamento ou conclusão, confirme somente quando a operação realmente deve ser executada.</div>
+        <form method="post" class="oe-field" id="status-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label for="status_id">Nova situação</label>
+          <select id="status_id" name="status_id" required>
+            <option value="">Selecione</option>
+            {% for status in status_list %}<option value="{{ status.IDStatusPedido }}" {% if status.IDStatusPedido == pedido.IDStatusPedido %}selected{% endif %}>{{ status.NomeStatusPedido }}</option>{% endfor %}
+          </select>
+          <div class="oe-form-actions"><button class="oe-btn oe-btn-primary" type="submit">Salvar situação</button></div>
+        </form>
       </div>
-    </div>
+    </section>
+
+    <section class="oe-card oe-span-8">
+      <div class="oe-card-head"><h2>Observações</h2><p>Histórico do pedido e novo registro.</p></div>
+      <div class="oe-card-body oe-stack">
+        <div>{% for observacao in observacoes %}<article class="oe-note"><div class="oe-note-head"><span>{{ observacao.usuario }}</span><span>{{ observacao.data.strftime('%d/%m/%Y %H:%M') if observacao.data else '-' }}</span></div><p>{{ observacao.texto }}</p></article>{% else %}<div class="oe-empty">Nenhuma observação registrada.</div>{% endfor %}</div>
+        <form method="post" class="oe-field">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label for="nova_observacao">Nova observação</label><textarea id="nova_observacao" name="nova_observacao" placeholder="Descreva a informação que deve ficar registrada no pedido." required></textarea><div class="oe-form-actions"><button class="oe-btn oe-btn-primary" type="submit">Adicionar observação</button></div>
+        </form>
+      </div>
+    </section>
+
+    <section class="oe-card oe-span-12">
+      <div class="oe-card-head"><h2>Itens do pedido</h2><p>Produtos, valores, estoques, lotes e números de série.</p></div>
+      {% if dados_por_item %}
+      <div class="oe-table-wrap"><table class="oe-table"><thead><tr><th>Produto</th><th>Qtd.</th><th>Valor unitário</th><th>Total</th><th>Estoque</th><th>Lotes</th><th>Séries</th><th>Ação</th></tr></thead><tbody>
+        {% for dados in dados_por_item.values() %}{% set pitem = dados.pitem %}{% set produto = dados.produto %}
+        <tr>
+          <td data-label="Produto"><div class="oe-product">{% if image_urls.get(pitem.IDItem) %}<img class="oe-product-image" src="{{ image_urls.get(pitem.IDItem) }}" alt="{{ produto.NomeProduto }}">{% else %}<div class="oe-product-placeholder">Sem imagem</div>{% endif %}<div><strong>{{ produto.NomeProduto }}</strong><small>IDItem {{ pitem.IDItem }} · Item do pedido {{ pitem.IDPedidoIten }}</small></div></div></td>
+          <td data-label="Quantidade">{{ pitem.Quantidade or 0 }}</td><td data-label="Valor unitário">R$ {{ ('%.2f' % ((pitem.ValorUnitario or 0)|float)).replace('.', ',') }}</td><td data-label="Total">R$ {{ ('%.2f' % (((pitem.Quantidade or 0)|float) * ((pitem.ValorUnitario or 0)|float))).replace('.', ',') }}</td><td data-label="Estoque">{{ tipo_est_map.get(pitem.IDTipoEstoque, '-') }}{% if pitem.CodPonto %} · {{ pitem.CodPonto }}{% endif %}</td>
+          <td data-label="Lotes"><div class="oe-chip-list">{% for lote in dados.lotes %}<span class="oe-chip">{{ lote.NumeroLote }}</span>{% else %}<span>-</span>{% endfor %}</div></td><td data-label="Séries"><div class="oe-chip-list">{% for serie in dados.series %}<span class="oe-chip">{{ serie.NumeroSerie }}</span>{% else %}<span>-</span>{% endfor %}</div></td>
+          <td data-label="Ação">{% if (pitem.Quantidade or 0) > 0 %}<form method="post" action="{{ url_for('euro.devolver_item', pedido_id=pedido.IDPedido, pedido_item_id=pitem.IDPedidoIten) }}" onsubmit="return confirm('Devolver este item ao estoque? A operação alterará o saldo do pedido e do estoque.');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="oe-btn oe-btn-small oe-btn-danger" type="submit">Devolver item</button></form>{% else %}-{% endif %}</td>
+        </tr>{% endfor %}
+      </tbody></table></div>
+      {% else %}<div class="oe-card-body oe-empty">Este pedido não possui itens.</div>{% endif %}
+    </section>
+
+    {% if filhos_info %}
+    <section class="oe-card oe-span-12"><div class="oe-card-head"><h2>Pedidos descendentes</h2><p>Pedidos derivados deste pedido principal.</p></div><div class="oe-table-wrap"><table class="oe-table"><thead><tr><th>Pedido</th><th>Situação</th><th>Cliente</th><th>Agendamento</th><th>Total</th><th>Ação</th></tr></thead><tbody>{% for filho in filhos_info %}<tr><td data-label="Pedido">#{{ filho.id }}</td><td data-label="Situação">{{ filho.status_nome or '-' }}</td><td data-label="Cliente">{{ filho.vendedora_nome or '-' }}</td><td data-label="Agendamento">{{ filho.data_agendado.strftime('%d/%m/%Y %H:%M') if filho.data_agendado else '-' }}</td><td data-label="Total">R$ {{ ('%.2f' % ((filho.total or 0)|float)).replace('.', ',') }}</td><td data-label="Ação"><a class="oe-btn oe-btn-small" href="{{ url_for('euro.editar_pedido', pedido_id=filho.id) }}">Abrir</a></td></tr>{% endfor %}</tbody></table></div></section>
+    {% endif %}
+
+    <section class="oe-card oe-span-12">
+      <div class="oe-card-head"><h2>Anexos</h2><p>Documentos, imagens e planilhas vinculados ao pedido.</p></div>
+      <div class="oe-card-body oe-stack">
+        <div class="oe-stack">{% for anexo in anexos %}<div class="oe-file"><a href="{{ url_for('euro.serve_anexo', subpath=anexo.CaminhoArquivo) }}" target="_blank" rel="noopener">{{ anexo.NomeArquivo }}</a><small>{{ anexo.DataUpload.strftime('%d/%m/%Y %H:%M') if anexo.DataUpload else '' }}</small></div>{% else %}<div class="oe-empty">Nenhum anexo registrado.</div>{% endfor %}</div>
+        <form method="post" enctype="multipart/form-data" class="oe-field"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label for="anexo">Adicionar anexo</label><input id="anexo" type="file" name="anexo" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.doc,.docx,.xlsx,.xlsm,.csv" required><div class="oe-form-actions"><button class="oe-btn oe-btn-primary" type="submit">Enviar anexo</button></div></form>
+      </div>
+    </section>
   </div>
-
-  {# =================== BLOCO: PEDIDOS DESCENDENTES (MANTIDA A TABELA) =================== #}
-  {% if filhos_info and filhos_info|length > 0 %}
-    <div class="card mb-4">
-      <div class="card-header">
-        <h5>Pedidos Descendentes</h5>
-      </div>
-      <div class="card-body p-0">
-        <div class="table-responsive">
-          <table class="table table-bordered table-hover align-middle mb-0">
-            <thead class="table-light">
-              <tr>
-                <th scope="col">
-                  <span class="text-decoration-dotted"
-                        data-bs-toggle="tooltip"
-                        data-bs-placement="top"
-                        data-bs-container="body"
-                        tabindex="0"
-                        title="NomeItem: Nome do item | Qtd: Quantidade de todos os itens dentro de cada pedido filho">
-                    IDPedido (Filho)
-                    <i class="bi bi-info-circle ms-1"></i>
-                  </span>
-                </th>
-                <th>Status</th>
-                <th>Cliente</th> 
-                <th>Data Agendado</th>
-                <th>Total do Pedido Filho</th>
-                <th>Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for f in filhos_info %}
-                <tr>
-                  <td>{{ f.id }}</td>
-                  <td>{{ f.status_nome }} ({{ f.status_id or '-' }})</td>
-                  <td>{{ f.vendedora_nome or '-' }}</td> 
-                  <td>
-                    {% if f.data_agendado %}
-                      {{ f.data_agendado.strftime('%Y-%m-%d %H:%M') }}
-                    {% else %}
-                      -
-                    {% endif %}
-                  </td>
-                  <td>R$ {{ money2(f.total) }}</td>
-                  <td>
-                    <a class="btn btn-sm btn-primary"
-                       href="{{ url_for('euro.editar_pedido', pedido_id=f.id) }}">
-                      Abrir
-                    </a>
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div> <!-- .table-responsive -->
-
-        {# Totais dos filhos (apenas essa linha aqui, conforme pedido) #}
-        {% set total_filhos = filhos_info | sum(attribute='total') %}
-        <div class="p-3 border-top text-end">
-          <div class="mb-1">
-            <strong>Total Pedidos Filhos:</strong>
-            R$ {{ money2(total_filhos) }}
-          </div>
-        </div>
-      </div> <!-- .card-body -->
-    </div> <!-- .card -->
-  {% endif %}
-  {# ================= FIM DO BLOCO: PEDIDOS DESCENDENTES ======================= #}
-
-  <!-- Itens do Pedido -->
-  <div class="card mb-4">
-    <div class="card-header"><h5>Itens do Pedido</h5></div>
-    <div class="card-body p-0">
-      <div class="table-responsive">
-        <table class="table table-bordered table-hover align-middle mb-0">
-          <thead class="table-light">
-            <tr>
-              <th>IDItem</th>
-              <th>Foto</th>
-              <th>Nome Produto</th>
-              <th>Quantidade</th>
-              <th>V. Unitário</th>
-              <th>V. Total</th>
-              <th>Lote</th>
-              <th>Série</th>
-              <th>Tipo Estoque</th>
-              <th>CodPonto</th>
-              <th>Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for item_id, dados in dados_por_item.items() %}
-              {% set pitem   = dados.pitem %}
-              {% set produto = dados.produto %}
-              {% set lote    = dados.lotes[0] if dados.lotes else None %}
-              {% set serie   = dados.series[0] if dados.series else None %}
-
-              {# prepara valores monetários #}
-              {% set _vunit = (pitem.ValorUnitario or 0) %}
-              {% set _vtot  = (pitem.ValorTotal if pitem.ValorTotal is not none
-                               else ((pitem.Quantidade or 0) * (pitem.ValorUnitario or 0))) %}
-
-              <tr>
-                <td>{{ pitem.IDItem }}</td>
-                <td style="width:60px;">
-                  {% if image_urls[item_id] %}
-                    <img
-                      src="{{ image_urls[item_id] }}"
-                      width="40" height="40"
-                      loading="lazy"
-                      onerror="this.onerror=null;
-                        this.src='https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif';"
-                    >
-                  {% else %}
-                    <img
-                      src="https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif"
-                      width="40" height="40"
-                    >
-                  {% endif %}
-                </td>
-                <td style="white-space:pre-wrap;">{{ produto.NomeProduto if produto else '-' }}</td>
-                <td>{{ pitem.Quantidade }}</td>
-                <td>{{ money2(_vunit) }}</td>
-                <td>{{ money2(_vtot) }}</td>
-                <td>{{ lote.NumeroLote if lote else '-' }}</td>
-                <td>{{ serie.NumeroSerie if serie else '-' }}</td>
-                <td>{{ tipo_est_map.get(pitem.IDTipoEstoque,'-') }}</td>
-                <td>{{ serie.CodPonto if serie else (pitem.CodPonto or '-') }}</td>
-                <td style="white-space:nowrap;">
-
-                  {# Botão “Remover Item” (já existia) #}
-                  <form method="post"
-                        action="{{ url_for('euro.remover_item_pedido',
-                                           pedido_id=pedido.IDPedido,
-                                           pedido_item_id=pitem.IDPedidoIten) }}"
-                        style="display:inline;">
-                    <button class="btn btn-danger btn-sm me-2">Remover Item</button>
-                  </form>
-
-                  {# (REMOVIDO) botão 'Desmembrar' por item — agora o desmembramento é global #}
-
-                  {# Botão “Movimentar Estoque” (Reserva Técnico) – já existia #}
-                  {% if is_edicao and pedido.TipoPedido == 'Reserva Técnico' %}
-                  <a href="{{ url_for('euro.movimentar_estoque_pedido',
-                                      pedido_id=pedido.IDPedido,
-                                      pedido_item_id=pitem.IDPedidoIten) }}"
-                     class="btn btn-primary btn-sm me-2">
-                    <i class="bi bi-arrow-left-right"></i>
-                    Movimentar Estoque
-                  </a>
-                  {% endif %}
-
-                  {# ← “Devolução” – somente em edição ← #}
-                  {% if is_edicao %}
-                  <form method="post"
-                        action="{{ url_for('euro.devolver_item',
-                                           pedido_id=pedido.IDPedido,
-                                           pedido_item_id=pitem.IDPedidoIten) }}"
-                        style="display:inline;"
-                        onsubmit="return confirm('Confirma devolução deste item?');">
-                    <button class="btn btn-info btn-sm">Devolução</button>
-                  </form>
-                  {% endif %}
-                  {# Fim de “Devolução” #}
-
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div> {# fecha .table-responsive #}
-
-      {# ---- TOTAIS POSICIONADOS (Valor Total e depois Pai + Filhos) ---- #}
-      {% set total_filhos_itens = (filhos_info | sum(attribute='total')) if (filhos_info and filhos_info|length > 0) else 0 %}
-      <div class="p-3 border-top text-end">
-        <div class="fs-5 mb-1">
-          <strong>Valor Total:</strong>
-          R$ {{ money2(total_pedido) }}
-        </div>
-        <div class="fs-6">
-          <strong>Total Pedido Pai + Filhos:</strong>
-          R$ {{ money2((total_pedido or 0) + (total_filhos_itens or 0)) }}
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <a href="{{ url_for('euro.ver_pedidos') }}" class="btn btn-secondary">Voltar</a>
 </div>
 
-{# container onde o HTML do modal global será injetado #}
-<div id="modal-root"></div>
-
 <script>
-  // Abre o modal global de desmembrar pedido via AJAX
-  document.addEventListener('click', async (ev) => {
-    const btn = ev.target.closest('.js-open-desmembrar-pedido');
-    if (!btn) return;
-
-    const url = btn.getAttribute('data-modal-url');
-    if (!url) return;
-
-    try {
-      const resp = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-      if (!resp.ok) throw new Error('Erro ao carregar modal');
-      const html = await resp.text();
-
-      const root = document.getElementById('modal-root');
-      root.innerHTML = html;
-
-      // Bootstrap 5 modal
-      const modalEl = root.querySelector('.modal');
-      if (window.bootstrap && bootstrap.Modal) {
-        const m = new bootstrap.Modal(modalEl, { backdrop: 'static' });
-        m.show();
-      } else {
-        // fallback simples
-        modalEl.style.display = 'block';
-      }
-    } catch (e) {
-      alert('Não foi possível abrir o modal de desmembrar pedido.');
-      console.error(e);
-    }
-  });
-
-  // Inicializa tooltips do Bootstrap 5 após o DOM estar pronto
-  document.addEventListener('DOMContentLoaded', function () {
-    if (window.bootstrap && bootstrap.Tooltip) {
-      var tooltipTriggerList = Array.prototype.slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-      tooltipTriggerList.forEach(function (el) {
-        new bootstrap.Tooltip(el); // data-bs-container="body" evita clipping
-      });
-    } else {
-      console.warn('Bootstrap.Tooltip não encontrado. Confirme se bootstrap.bundle.min.js está disponível no base_euromidia.html');
-    }
-  });
+  (() => {
+    const form = document.getElementById('status-form');
+    const select = document.getElementById('status_id');
+    if (!form || !select) return;
+    form.addEventListener('submit', (event) => {
+      const selected = select.options[select.selectedIndex];
+      const name = selected ? selected.textContent.trim() : '';
+      const sensitive = /cancel|conclu|finaliz|ativo/i.test(name);
+      if (sensitive && !window.confirm(`Confirmar a alteração da situação para "${name}"? Essa mudança pode executar rotinas de estoque ou integração.`)) event.preventDefault();
+    });
+  })();
 </script>
 {% endblock %}
