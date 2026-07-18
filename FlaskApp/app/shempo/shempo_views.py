@@ -4673,12 +4673,13 @@ def adicionar_saldos():
 
 @euro.route('/movimentacao_produto')
 @login_required
+@requer_acesso_catalogo_produtos
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def movimentacao_produto():
-    page = request.args.get('page',     1,  type=int)
-    per_page = request.args.get('per_page', 10, type=int)
+    page = max(request.args.get('page', 1, type=int) or 1, 1)
+    per_page = request.args.get('per_page', 10, type=int) or 10
+    per_page = min(max(per_page, 1), 100)
     search= request.args.get('search',   '').strip()
-    offset= (page - 1) * per_page
 
   
     where_clauses = ["1=1"]
@@ -4699,6 +4700,11 @@ def movimentacao_produto():
     """
     total = _shempo_execute(text(count_sql), params).scalar() or 0
     total_pages = (total + per_page - 1) // per_page
+
+    if total_pages and page > total_pages:
+        page = total_pages
+
+    offset = (page - 1) * per_page
 
     
     main_sql = f"""
@@ -4778,7 +4784,7 @@ def movimentacao_produto():
     lotes_por_item = defaultdict(list)
     if item_ids:
         lotes_sql = text("""
-        SELECT IDItem, IDEstoque, NumeroLote, NumerodeSerie, Quantidade, DataEntrada
+        SELECT IDLote, IDItem, IDEstoque, NumeroLote, NumerodeSerie, Quantidade, DataEntrada
           FROM EstoqueLotes
          WHERE IDItem IN :item_ids
         """).bindparams(bindparam("item_ids", expanding=True))
@@ -4808,6 +4814,7 @@ def movimentacao_produto():
         image_urls = {
             iid: url_for('euro.imagensprodutos', filename=fn)
             for iid, fn in imagens
+            if fn
         }
   
     for iid in item_ids:
@@ -4824,6 +4831,94 @@ def movimentacao_produto():
     )
 
 
+
+
+
+
+@euro.route('/movimentacao_pecas')
+@login_required
+@requer_acesso_catalogo_produtos
+@retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
+def movimentacao_pecas():
+    """Exibe o histórico detalhado de peças, lotes e números de série."""
+    page = max(request.args.get('page', 1, type=int) or 1, 1)
+    per_page = 18
+    search = request.args.get('search', '').strip()
+
+    where_clauses = ["1 = 1"]
+    params = {}
+
+    if search:
+        where_clauses.append("""
+            (
+                CAST(MP.IDMovimentacao AS VARCHAR(30)) LIKE :search
+                OR CAST(MP.IDItem AS VARCHAR(30)) LIKE :search
+                OR MP.NomeProduto LIKE :search
+                OR MP.NumeroLote LIKE :search
+                OR MP.NumeroSerie LIKE :search
+                OR U.NomeUsuario LIKE :search
+            )
+        """)
+        params['search'] = f"%{search}%"
+
+    where_sql = "\n        AND ".join(where_clauses)
+
+    count_sql = f"""
+        SELECT COUNT(*)
+          FROM MovimentacaoPecas MP
+          LEFT JOIN Usuarios U
+            ON U.IDUsuario = MP.IDUsuario
+         WHERE {where_sql}
+    """
+    total = _shempo_execute(text(count_sql), params).scalar() or 0
+    total_pages = (total + per_page - 1) // per_page
+
+    if total_pages and page > total_pages:
+        page = total_pages
+
+    offset = (page - 1) * per_page
+    query_params = dict(params)
+    query_params.update(offset=offset, per_page=per_page)
+
+    main_sql = f"""
+        SELECT
+            MP.IDMovimentacao,
+            MP.DataMovimentacao,
+            MP.IDItem,
+            MP.NomeProduto,
+            MP.NumeroLote,
+            MP.NumeroSerie,
+            MP.TipoOrigem,
+            MP.IDOrigem,
+            MP.TipoDestino,
+            MP.IDDestino,
+            MP.Quantidade,
+            MP.NomeOperacao,
+            MP.IDTipoEstoque,
+            COALESCE(U.NomeUsuario, MP.Usuario, '') AS Usuario
+          FROM MovimentacaoPecas MP
+          LEFT JOIN Usuarios U
+            ON U.IDUsuario = MP.IDUsuario
+         WHERE {where_sql}
+         ORDER BY MP.DataMovimentacao DESC, MP.IDMovimentacao DESC
+         OFFSET :offset ROWS
+         FETCH NEXT :per_page ROWS ONLY
+    """
+
+    rows = _shempo_execute(text(main_sql), query_params).fetchall()
+    items = [dict(row._mapping) for row in rows]
+    display_pages = _build_display_pages(page, total_pages)
+
+    return render_template(
+        'shempo/movimentacao_pecas.html',
+        items=items,
+        page=page,
+        per_page=per_page,
+        total=total,
+        total_pages=total_pages,
+        display_pages=display_pages,
+        search=search,
+    )
 
 
 

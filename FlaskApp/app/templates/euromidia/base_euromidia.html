@@ -1235,7 +1235,7 @@ input:disabled, select:disabled, textarea:disabled{
           <div class="menu-dropdown">
             <div class="desc">Consulta e gestão do inventário</div>
 
-            {% if menu_paineis_disponibilidades or menu_paineis_reserva_ocupacao or menu_paineis_vencimentos_campanhas or menu_paineis_adicionar_saldos %}
+            {% if menu_paineis_disponibilidades or menu_paineis_reserva_ocupacao or menu_paineis_vencimentos_campanhas or menu_paineis_adicionar_saldos or menu_paineis_catalogo_produtos %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Estoques</span>
@@ -1268,6 +1268,23 @@ input:disabled, select:disabled, textarea:disabled{
                     <a href="{{ url_for('euro.adicionar_saldos') }}"
                        class="{% if request.endpoint == 'euro.adicionar_saldos' %}menu-link-current{% endif %}">
                       Adicionar Saldo Produtos
+                    </a>
+                  {% endif %}
+
+                  {#
+                    As duas consultas usam a mesma regra empresarial do catálogo:
+                    IDEmpresaProprietaria = 1 ou BitFullEmpresas = 1.
+                    Os endpoints também são protegidos no shempo_views.py.
+                  #}
+                  {% if menu_paineis_catalogo_produtos %}
+                    <a href="{{ url_for('euro.movimentacao_produto') }}"
+                       class="{% if request.endpoint == 'euro.movimentacao_produto' %}menu-link-current{% endif %}">
+                      Movimentação de Produtos
+                    </a>
+
+                    <a href="{{ url_for('euro.movimentacao_pecas') }}"
+                       class="{% if request.endpoint == 'euro.movimentacao_pecas' %}menu-link-current{% endif %}">
+                      Movimentação de Peças
                     </a>
                   {% endif %}
 

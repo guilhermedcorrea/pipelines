@@ -1,112 +1,431 @@
-{# Template: templates/movimentacao_pecas.html #}
-{% extends 'base.html' %}
+{% extends "euromidia/base_euromidia.html" %}
 
-{% block title %}Movimentação de Peças{% endblock %}
+{% block title %}Movimentação de Peças | Euromídia{% endblock %}
 
 {% block content %}
-  {% set qa = request.args.to_dict() %}
-  {% set _ = qa.pop('page', None) %}
+<style>
+  .mov-page{
+    width:100%;
+    min-width:0;
+  }
 
-  <div class="container-fluid p-2">
-    <h2 class="mb-2">Movimentação de Peças</h2>
+  .mov-header{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:18px;
+    margin-bottom:16px;
+    flex-wrap:wrap;
+  }
 
-    <form method="get" action="{{ url_for('euro.movimentacao_pecas') }}" class="mb-2">
-      <div class="input-group">
-        <input
-          type="text"
-          name="search"
-          class="form-control"
-          placeholder="Pesquisar por ID, Produto, Lote ou Série"
-          value="{{ search }}"
-        >
-        <button type="submit" class="btn btn-primary">Pesquisar</button>
-      </div>
+  .mov-header h1{
+    margin:0;
+    color:var(--euro-blue);
+    font-size:clamp(24px, 3vw, 34px);
+    line-height:1.15;
+  }
+
+  .mov-header p{
+    margin:7px 0 0;
+    color:var(--muted);
+    font-size:14px;
+  }
+
+  .mov-tabs{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+
+  .mov-tab{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:40px;
+    padding:9px 13px;
+    border:1px solid rgba(0,40,132,.18);
+    border-radius:10px;
+    background:#fff;
+    color:var(--euro-blue);
+    text-decoration:none;
+    font-size:13px;
+    font-weight:900;
+  }
+
+  .mov-tab:hover{
+    background:rgba(0,40,132,.06);
+  }
+
+  .mov-tab.is-active{
+    border-color:var(--euro-blue);
+    background:var(--euro-blue);
+    color:#fff;
+  }
+
+  .mov-search-card,
+  .mov-table-card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:14px;
+    box-shadow:0 1px 8px rgba(15,23,42,.06);
+  }
+
+  .mov-search-card{
+    padding:14px;
+    margin-bottom:14px;
+  }
+
+  .mov-search-form{
+    display:grid;
+    grid-template-columns:minmax(220px, 1fr) auto auto;
+    gap:10px;
+    align-items:center;
+  }
+
+  .mov-search-form input{
+    min-height:42px;
+  }
+
+  .mov-action{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:42px;
+    padding:10px 15px;
+    border:1px solid transparent;
+    border-radius:10px;
+    text-decoration:none;
+    font-size:14px;
+    font-weight:900;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+
+  .mov-action-primary{
+    background:var(--euro-yellow);
+    color:#0b1a3a;
+  }
+
+  .mov-action-secondary{
+    border-color:rgba(0,40,132,.18);
+    background:rgba(0,40,132,.07);
+    color:var(--euro-blue);
+  }
+
+  .mov-table-card{
+    overflow:hidden;
+  }
+
+  .mov-table-toolbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:13px 15px;
+    border-bottom:1px solid var(--border);
+    color:var(--muted);
+    font-size:13px;
+    font-weight:800;
+    flex-wrap:wrap;
+  }
+
+  .mov-table-wrap{
+    width:100%;
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+
+  .mov-table{
+    width:100%;
+    min-width:1780px;
+    border-collapse:separate;
+    border-spacing:0;
+    font-size:13px;
+  }
+
+  .mov-table th{
+    padding:11px 10px;
+    border-bottom:1px solid var(--border);
+    background:#f8fafc;
+    color:#334155;
+    text-align:left;
+    font-size:12px;
+    font-weight:900;
+    letter-spacing:.02em;
+    white-space:nowrap;
+  }
+
+  .mov-table td{
+    padding:10px;
+    border-bottom:1px solid #eef2f7;
+    color:#1e293b;
+    vertical-align:middle;
+  }
+
+  .mov-table tbody tr:hover td{
+    background:#fbfdff;
+  }
+
+  .mov-table tbody tr:last-child td{
+    border-bottom:0;
+  }
+
+  .mov-nowrap{
+    white-space:nowrap;
+  }
+
+  .mov-product-name{
+    display:block;
+    min-width:240px;
+    max-width:360px;
+    color:#1e293b;
+    font-weight:900;
+  }
+
+  .mov-code{
+    display:inline-flex;
+    align-items:center;
+    min-height:28px;
+    padding:4px 8px;
+    border:1px solid #dbe3ed;
+    border-radius:8px;
+    background:#f8fafc;
+    color:#334155;
+    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size:12px;
+    font-weight:800;
+    white-space:nowrap;
+  }
+
+  .mov-badge{
+    display:inline-flex;
+    align-items:center;
+    max-width:250px;
+    padding:6px 9px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:900;
+    line-height:1.25;
+    white-space:normal;
+  }
+
+  .mov-badge-entry{ background:#dbeafe; color:#1d4ed8; }
+  .mov-badge-exit{ background:#fee2e2; color:#b91c1c; }
+  .mov-badge-transfer{ background:#dcfce7; color:#15803d; }
+  .mov-badge-neutral{ background:#e2e8f0; color:#475569; }
+
+  .mov-empty{
+    padding:40px 16px !important;
+    color:var(--muted) !important;
+    text-align:center;
+    font-weight:800;
+  }
+
+  .mov-pagination{
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    gap:6px;
+    margin:16px 0 0;
+    padding:0;
+    list-style:none;
+    flex-wrap:wrap;
+  }
+
+  .mov-page-link{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:38px;
+    min-height:38px;
+    padding:7px 11px;
+    border:1px solid var(--border);
+    border-radius:9px;
+    background:#fff;
+    color:var(--euro-blue);
+    text-decoration:none;
+    font-size:13px;
+    font-weight:900;
+  }
+
+  .mov-page-link:hover{
+    background:rgba(0,40,132,.06);
+  }
+
+  .mov-page-link.is-current{
+    border-color:var(--euro-blue);
+    background:var(--euro-blue);
+    color:#fff;
+  }
+
+  .mov-page-link.is-disabled{
+    color:#94a3b8;
+    pointer-events:none;
+    background:#f8fafc;
+  }
+
+  @media (max-width:760px){
+    .mov-search-form{
+      grid-template-columns:1fr;
+    }
+
+    .mov-action{
+      width:100%;
+    }
+
+    .mov-tabs{
+      width:100%;
+    }
+
+    .mov-tab{
+      flex:1 1 180px;
+    }
+  }
+</style>
+
+<section class="mov-page">
+  <div class="mov-header">
+    <div>
+      <h1>Movimentação de Peças</h1>
+      <p>Rastreamento detalhado por produto, lote, número de série, origem e destino.</p>
+    </div>
+
+    <nav class="mov-tabs" aria-label="Telas de movimentação">
+      <a class="mov-tab" href="{{ url_for('euro.movimentacao_produto') }}">
+        Produtos
+      </a>
+      <a class="mov-tab is-active" href="{{ url_for('euro.movimentacao_pecas') }}" aria-current="page">
+        Peças, lotes e séries
+      </a>
+    </nav>
+  </div>
+
+  <div class="mov-search-card">
+    <form class="mov-search-form" method="get" action="{{ url_for('euro.movimentacao_pecas') }}">
+      <input
+        type="search"
+        name="search"
+        value="{{ search }}"
+        placeholder="Pesquisar por movimento, item, produto, lote, série ou usuário"
+        aria-label="Pesquisar movimentações de peças"
+        autocomplete="off"
+      >
+      <button class="mov-action mov-action-primary" type="submit">Pesquisar</button>
+      {% if search %}
+        <a class="mov-action mov-action-secondary" href="{{ url_for('euro.movimentacao_pecas') }}">
+          Limpar
+        </a>
+      {% else %}
+        <span aria-hidden="true"></span>
+      {% endif %}
     </form>
+  </div>
 
-    <div class="table-responsive">
-      <table class="table table-striped table-hover align-middle">
+  <div class="mov-table-card">
+    <div class="mov-table-toolbar">
+      <span>{{ total }} movimentação{% if total != 1 %}ões{% endif %} encontrada{% if total != 1 %}s{% endif %}</span>
+      <span>Página {{ page }} de {{ total_pages if total_pages > 0 else 1 }}</span>
+    </div>
+
+    <div class="mov-table-wrap">
+      <table class="mov-table">
         <thead>
           <tr>
-            <th>ID</th>
+            <th>ID movimento</th>
             <th>Data</th>
-            <th>ID Item</th>
+            <th>ID item</th>
             <th>Produto</th>
             <th>Lote</th>
-            <th>Série</th>
-            <th>Tipo Origem</th>
-            <th>ID Origem</th>
-            <th>Tipo Destino</th>
-            <th>ID Destino</th>
-            <th>Qtde</th>
+            <th>Número de série</th>
+            <th>Tipo origem</th>
+            <th>ID origem</th>
+            <th>Tipo destino</th>
+            <th>ID destino</th>
+            <th>Quantidade</th>
             <th>Operação</th>
-            <th>Estoque</th>
+            <th>Tipo estoque</th>
             <th>Usuário</th>
           </tr>
         </thead>
         <tbody>
-          {% for mv in items %}
+          {% if items %}
+            {% for mv in items %}
+              {% set operacao = mv.NomeOperacao or 'Não informado' %}
+              {% set operacao_lower = operacao|lower %}
+              <tr>
+                <td class="mov-nowrap"><strong>#{{ mv.IDMovimentacao }}</strong></td>
+                <td class="mov-nowrap">
+                  {{ mv.DataMovimentacao.strftime('%d/%m/%Y %H:%M') if mv.DataMovimentacao else '—' }}
+                </td>
+                <td><span class="mov-code">{{ mv.IDItem if mv.IDItem is not none else '—' }}</span></td>
+                <td><span class="mov-product-name">{{ mv.NomeProduto or 'Produto não identificado' }}</span></td>
+                <td><span class="mov-code">{{ mv.NumeroLote or '—' }}</span></td>
+                <td><span class="mov-code">{{ mv.NumeroSerie or '—' }}</span></td>
+                <td>{{ mv.TipoOrigem or '—' }}</td>
+                <td><span class="mov-code">{{ mv.IDOrigem if mv.IDOrigem is not none else '—' }}</span></td>
+                <td>{{ mv.TipoDestino or '—' }}</td>
+                <td><span class="mov-code">{{ mv.IDDestino if mv.IDDestino is not none else '—' }}</span></td>
+                <td class="mov-nowrap"><strong>{{ mv.Quantidade if mv.Quantidade is not none else '—' }}</strong></td>
+                <td>
+                  {% if 'entrada' in operacao_lower %}
+                    <span class="mov-badge mov-badge-entry">{{ operacao }}</span>
+                  {% elif 'saída' in operacao_lower or 'saida' in operacao_lower or 'devolução' in operacao_lower or 'devolucao' in operacao_lower %}
+                    <span class="mov-badge mov-badge-exit">{{ operacao }}</span>
+                  {% elif 'transferência' in operacao_lower or 'transferencia' in operacao_lower %}
+                    <span class="mov-badge mov-badge-transfer">{{ operacao }}</span>
+                  {% else %}
+                    <span class="mov-badge mov-badge-neutral">{{ operacao }}</span>
+                  {% endif %}
+                </td>
+                <td><span class="mov-code">{{ mv.IDTipoEstoque if mv.IDTipoEstoque is not none else '—' }}</span></td>
+                <td>{{ mv.Usuario or '—' }}</td>
+              </tr>
+            {% endfor %}
+          {% else %}
             <tr>
-              <td>{{ mv.IDMovimentacao }}</td>
-              <td>{{ mv.DataMovimentacao }}</td>
-              <td>{{ mv.IDItem }}</td>
-              <td>{{ mv.NomeProduto }}</td>
-              <td>{{ mv.NumeroLote or '' }}</td>
-              <td>{{ mv.NumeroSerie or '' }}</td>
-              <td>{{ mv.TipoOrigem }}</td>
-              <td>{{ mv.IDOrigem }}</td>
-              <td>{{ mv.TipoDestino }}</td>
-              <td>{{ mv.IDDestino }}</td>
-              <td>{{ mv.Quantidade }}</td>
-
-              {# Operação com badge de cor #}
-              {% set op = mv.NomeOperacao %}
-              <td>
-                {% if op == 'Entrada' %}
-                  <span class="badge bg-primary" style="font-size:1rem;padding:0.5rem 1rem;">{{ op }}</span>
-                {% elif op == 'Saída' %}
-                  <span class="badge bg-danger" style="font-size:1rem;padding:0.5rem 1rem;">{{ op }}</span>
-                {% elif op == 'Transferência' %}
-                  <span class="badge bg-success" style="font-size:1rem;padding:0.5rem 1rem;">{{ op }}</span>
-                {% else %}
-                  <span class="badge bg-secondary" style="font-size:1rem;padding:0.5rem 1rem;">{{ op }}</span>
-                {% endif %}
-              </td>
-
-              <td>{{ mv.IDTipoEstoque }}</td>
-              <td>{{ mv.Usuario }}</td>
+              <td class="mov-empty" colspan="14">Nenhuma movimentação de peça encontrada para os filtros informados.</td>
             </tr>
-          {% endfor %}
+          {% endif %}
         </tbody>
       </table>
     </div>
+  </div>
 
-    <nav aria-label="Paginação" class="d-flex justify-content-center my-4">
-      <ul class="pagination mb-0">
-        <li class="page-item {% if page == 1 %}disabled{% endif %}">
-          <a class="page-link"
-             href="{{ url_for('euro.movimentacao_pecas', page=page-1, **qa) }}">
-            Anterior
-          </a>
+  {% if total_pages > 1 %}
+    <nav aria-label="Paginação das movimentações de peças">
+      <ul class="mov-pagination">
+        <li>
+          <a
+            class="mov-page-link {% if page <= 1 %}is-disabled{% endif %}"
+            href="{{ url_for('euro.movimentacao_pecas', page=page-1 if page > 1 else 1, search=search) }}"
+            {% if page <= 1 %}aria-disabled="true" tabindex="-1"{% endif %}
+          >Anterior</a>
         </li>
 
         {% for p in display_pages %}
           {% if p == '...' %}
-            <li class="page-item disabled"><span class="page-link">…</span></li>
+            <li><span class="mov-page-link is-disabled">…</span></li>
           {% else %}
-            <li class="page-item {% if p == page %}active{% endif %}">
-              <a class="page-link"
-                 href="{{ url_for('euro.movimentacao_pecas', page=p, **qa) }}">{{ p }}</a>
+            <li>
+              <a
+                class="mov-page-link {% if p == page %}is-current{% endif %}"
+                href="{{ url_for('euro.movimentacao_pecas', page=p, search=search) }}"
+                {% if p == page %}aria-current="page"{% endif %}
+              >{{ p }}</a>
             </li>
           {% endif %}
         {% endfor %}
 
-        <li class="page-item {% if page == total_pages %}disabled{% endif %}">
-          <a class="page-link"
-             href="{{ url_for('euro.movimentacao_pecas', page=page+1, **qa) }}">
-            Próxima
-          </a>
+        <li>
+          <a
+            class="mov-page-link {% if page >= total_pages %}is-disabled{% endif %}"
+            href="{{ url_for('euro.movimentacao_pecas', page=page+1 if page < total_pages else total_pages, search=search) }}"
+            {% if page >= total_pages %}aria-disabled="true" tabindex="-1"{% endif %}
+          >Próxima</a>
         </li>
       </ul>
     </nav>
-  </div>
+  {% endif %}
+</section>
 {% endblock %}
