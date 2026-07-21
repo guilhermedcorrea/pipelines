@@ -4679,6 +4679,8 @@ def grade_painel(codponto: int):
 
     mes_de = (request.args.get("mes_de") or "").strip()
     mes_ate = (request.args.get("mes_ate") or "").strip()
+    dt_ini_lista_str = (request.args.get("dt_ini") or "").strip()
+    dt_fim_lista_str = (request.args.get("dt_fim") or "").strip()
 
     modo = (request.args.get("modo") or "").strip().lower()
     data_ref_str = (request.args.get("data_ref") or "").strip()
@@ -5060,6 +5062,43 @@ def grade_painel(codponto: int):
     dt_ini = None
     dt_fim = None
 
+    # A lista envia o intervalo diário exato em dt_ini/dt_fim. Esses parâmetros
+    # têm prioridade sobre mes_de/mes_ate, pois mes_de é um campo mensal da
+    # interface da grade e não consegue representar, por exemplo, 21/07/2026.
+    dt_ini_lista = _parse_date_ymd(dt_ini_lista_str)
+    dt_fim_lista = _parse_date_ymd(dt_fim_lista_str)
+
+    if dt_ini_lista or dt_fim_lista:
+        dt_ini = dt_ini_lista or dt_fim_lista
+        dt_fim = dt_fim_lista or dt_ini_lista
+
+        if dt_ini and dt_fim and dt_fim < dt_ini:
+            dt_ini, dt_fim = dt_fim, dt_ini
+
+        if dt_ini and dt_fim:
+            mes_ref = f"{dt_ini.year:04d}-{dt_ini.month:02d}"
+            mes_de = mes_de or mes_ref
+            mes_ate = mes_ate or f"{dt_fim.year:04d}-{dt_fim.month:02d}-{dt_fim.day:02d}"
+
+    # Depois de usar filtros dentro da grade, o formulário preserva modo e
+    # data_ref. O modo intervalo mantém o mesmo início diário mesmo sem os
+    # parâmetros dt_ini/dt_fim originais na nova submissão.
+    if (dt_ini is None or dt_fim is None) and modo == "intervalo":
+        dt_ini_intervalo = _parse_date_ymd(data_ref_str)
+        dt_fim_intervalo = _parse_date_ymd(dt_fim_lista_str) or _parse_date_ymd(mes_ate)
+
+        if dt_ini_intervalo or dt_fim_intervalo:
+            dt_ini = dt_ini_intervalo or dt_fim_intervalo
+            dt_fim = dt_fim_intervalo or dt_ini_intervalo
+
+            if dt_ini and dt_fim and dt_fim < dt_ini:
+                dt_ini, dt_fim = dt_fim, dt_ini
+
+            if dt_ini and dt_fim:
+                mes_ref = f"{dt_ini.year:04d}-{dt_ini.month:02d}"
+                mes_de = mes_de or mes_ref
+                mes_ate = f"{dt_fim.year:04d}-{dt_fim.month:02d}-{dt_fim.day:02d}"
+
 
     if tem_filtro_codface:
         codpontos_resolvidos_pelas_faces = []
@@ -5097,7 +5136,7 @@ def grade_painel(codponto: int):
                 codfaces_override=filtros_codface,
             )
 
-    if modo in ("dia", "semana", "mes", "ano"):
+    if (dt_ini is None or dt_fim is None) and modo in ("dia", "semana", "mes", "ano"):
         dt_ref = _parse_date_ymd(data_ref_str) or hoje
 
         cal_ref = (
@@ -8358,6 +8397,8 @@ def grade_painel(codponto: int):
         mes_ref_next=mes_ref_next,
         mes_de=mes_de,
         mes_ate=mes_ate,
+        dt_ini=dt_ini,
+        dt_fim=dt_fim,
         dias=dias,
         ultimo_dia=ultimo_dia,
         total_dias=total_dias,
@@ -8526,7 +8567,7 @@ def grade_painel_multi():
     def _resolver_mes_ref_base():
         hoje = date.today()
 
-        for chave in ("mes_ref", "mes_de", "mes_ate", "data_ref"):
+        for chave in ("dt_ini", "dt_fim", "mes_ref", "mes_de", "mes_ate", "data_ref"):
             mes_ref_tmp = _extrair_mes_referencia(request.args.get(chave))
             if mes_ref_tmp:
                 return mes_ref_tmp
@@ -8572,12 +8613,24 @@ def grade_painel_multi():
                     return None
             return _coerce_to_date(valor)
 
+        dt_ini_arg = _coerce_to_date(request.args.get("dt_ini"))
+        dt_fim_arg = _coerce_to_date(request.args.get("dt_fim"))
         mes_de_arg = _coerce_mes_ou_data_inicio(request.args.get("mes_de"))
         mes_ate_arg = _coerce_mes_ou_data_fim(request.args.get("mes_ate"))
         data_ref_arg = _coerce_to_date(request.args.get("data_ref"))
         modo = _normalizar_texto(request.args.get("modo")).lower()
 
-        if mes_de_arg and mes_ate_arg:
+        if dt_ini_arg or dt_fim_arg:
+            dt_ini = dt_ini_arg or dt_fim_arg
+            dt_fim = dt_fim_arg or dt_ini_arg
+            if dt_fim < dt_ini:
+                dt_ini, dt_fim = dt_fim, dt_ini
+        elif modo == "intervalo" and (data_ref_arg or mes_ate_arg):
+            dt_ini = data_ref_arg or mes_ate_arg
+            dt_fim = mes_ate_arg or data_ref_arg
+            if dt_fim < dt_ini:
+                dt_ini, dt_fim = dt_fim, dt_ini
+        elif mes_de_arg and mes_ate_arg:
             dt_ini = mes_de_arg
             dt_fim = mes_ate_arg
             if dt_fim < dt_ini:
@@ -8851,6 +8904,8 @@ def grade_painel_multi():
         tipo = _normalizar_texto(request.args.get("tipo"))
         mes_de = _normalizar_texto(request.args.get("mes_de"))
         mes_ate = _normalizar_texto(request.args.get("mes_ate"))
+        dt_ini = _normalizar_texto(request.args.get("dt_ini"))
+        dt_fim = _normalizar_texto(request.args.get("dt_fim"))
         modo = _normalizar_texto(request.args.get("modo"))
         data_ref = _normalizar_texto(request.args.get("data_ref"))
         bi_semana = _normalizar_texto(request.args.get("bi_semana"))
@@ -8869,6 +8924,10 @@ def grade_painel_multi():
             parametros.append(("mes_de", mes_de))
         if mes_ate:
             parametros.append(("mes_ate", mes_ate))
+        if dt_ini:
+            parametros.append(("dt_ini", dt_ini))
+        if dt_fim:
+            parametros.append(("dt_fim", dt_fim))
         if modo:
             parametros.append(("modo", modo))
         if data_ref:

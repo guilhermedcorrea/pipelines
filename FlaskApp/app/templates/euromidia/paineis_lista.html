@@ -2472,6 +2472,13 @@
                               codponto=x.CodPonto,
                               codface=x.CodFace,
 
+                              dt_ini=(
+                                (filtros.dt_ini[:10] if filtros.dt_ini is string else (filtros.dt_ini.strftime('%Y-%m-%d') if filtros.dt_ini else None))
+                              ),
+                              dt_fim=(
+                                (filtros.dt_fim[:10] if filtros.dt_fim is string else (filtros.dt_fim.strftime('%Y-%m-%d') if filtros.dt_fim else None))
+                              ),
+
                               mes_de=(
                                 (filtros.dt_ini[:7] if filtros.dt_ini is string else (filtros.dt_ini.strftime('%Y-%m') if filtros.dt_ini else None))
                               ),
@@ -2479,7 +2486,13 @@
                                 (filtros.dt_fim[:10] if filtros.dt_fim is string else (filtros.dt_fim.strftime('%Y-%m-%d') if filtros.dt_fim else None))
                               ),
 
-                              mes_ref=(filtros.mes_atual if filtros.mes_atual else None),
+                              modo='intervalo',
+                              data_ref=(
+                                (filtros.dt_ini[:10] if filtros.dt_ini is string else (filtros.dt_ini.strftime('%Y-%m-%d') if filtros.dt_ini else None))
+                              ),
+                              mes_ref=(
+                                (filtros.dt_ini[:7] if filtros.dt_ini is string else (filtros.dt_ini.strftime('%Y-%m') if filtros.dt_ini else None))
+                              ),
                               tudo=(filtros.tudo if filtros.tudo else None),
                               tipo=(x.TipoProd if x.TipoProd else None),
                               return_to=return_to_paineis
@@ -2687,8 +2700,6 @@
     const btnFechar = document.getElementById("btnFecharPeriodo");
     const btnAplicar = document.getElementById("btnAplicarPeriodo");
     const btnHoje = document.getElementById("btnHoje");
-    const rotaListaPaineis = {{ url_for('Paineis.lista_paineis')|tojson }};
-    const CHAVE_STORAGE_FACES = "euromidia_lista_paineis_faces_selecionadas_v1";
 
     const lblTopo = document.getElementById("lblPeriodoTopo");
     const lblAno  = document.getElementById("lblAno");
@@ -2890,33 +2901,6 @@
       return shell.closest("form");
     }
 
-    function limparFacesPersistidas(){
-      try{
-        localStorage.removeItem(CHAVE_STORAGE_FACES);
-      }catch(e){}
-    }
-
-    function navegarParaPeriodoSemOutrosFiltros(modo, iniDateObj, fimDateObj){
-      const form = getForm();
-      const url = new URL(rotaListaPaineis, window.location.origin);
-      const modoLimpo = String(modo || "").trim().toLowerCase();
-
-      url.searchParams.set("periodo", modoLimpo);
-      url.searchParams.set("dt_ini", toISO(iniDateObj));
-      url.searchParams.set("dt_fim", toISO(fimDateObj));
-
-      const perPageInput = form ? form.querySelector('input[name="per_page"]') : null;
-      const perPage = parseInt(String((perPageInput && perPageInput.value) || "20"), 10);
-      if (Number.isInteger(perPage) && perPage > 0){
-        url.searchParams.set("per_page", String(perPage));
-      }
-
-      // Atalhos de período significam todas as ocupações/reservas do intervalo.
-      // A URL nova não leva busca, dropdowns, status, formato ou faces selecionadas.
-      limparFacesPersistidas();
-      window.location.href = url.pathname + url.search + url.hash;
-    }
-
     function submitForm(){
       const form = getForm();
       if (!form) return;
@@ -3002,7 +2986,7 @@
 
       if (modoNormalizado === "dia" || modoNormalizado === "hoje"){
         setRange(hoje, hoje);
-        if (autoSubmit) navegarParaPeriodoSemOutrosFiltros(modoNormalizado, hoje, hoje);
+        if (autoSubmit) submitForm();
         return;
       }
       if (modoNormalizado === "semana"){
@@ -3013,7 +2997,7 @@
         const fim = new Date(ini);
         fim.setDate(fim.getDate() + 6);
         setRange(ini, fim);
-        if (autoSubmit) navegarParaPeriodoSemOutrosFiltros(modoNormalizado, ini, fim);
+        if (autoSubmit) submitForm();
         return;
       }
       if (modoNormalizado === "mes"){
@@ -3022,7 +3006,7 @@
         setRange(ini, fim);
         lblAno.textContent = String(y);
         marcarMesSelecionado(y, m);
-        if (autoSubmit) navegarParaPeriodoSemOutrosFiltros(modoNormalizado, ini, fim);
+        if (autoSubmit) submitForm();
         return;
       }
       if (modoNormalizado === "ano"){
@@ -3031,7 +3015,7 @@
         setRange(ini, fim);
         lblAno.textContent = String(y);
         limparSelecaoMes();
-        if (autoSubmit) navegarParaPeriodoSemOutrosFiltros(modoNormalizado, ini, fim);
+        if (autoSubmit) submitForm();
         return;
       }
     }
@@ -3811,6 +3795,7 @@
     const returnToPaineis = {{ (return_to_paineis or url_for('Paineis.lista_paineis'))|tojson }};
     const filtrosServidorFaces = {{ (filtros.selected_codface or [])|tojson }};
     const filtrosServidorPontos = {{ (filtros.selected_codponto or [])|tojson }};
+    const tiposProdutoLista = {{ (filtros.tipo or [])|tojson }};
 
     if (!form || !container || !badge || !info || !btnAbrir || !btnLimpar) return;
 
@@ -4063,15 +4048,41 @@
       return rotaGradeBase.replace(/0(?=\/grade(?:\/)?$)/, cp);
     }
 
+    function aplicarPeriodoExatoNaUrlGrade(url, dtIni, dtFim){
+      const inicio = normalizarTexto(dtIni).slice(0, 10);
+      const fim = normalizarTexto(dtFim).slice(0, 10);
+
+      if (inicio){
+        // mes_de continua existindo para compatibilidade com o seletor mensal da grade.
+        // dt_ini e data_ref carregam o dia exato usado na lista.
+        url.searchParams.set("mes_de", inicio.slice(0, 7));
+        url.searchParams.set("dt_ini", inicio);
+        url.searchParams.set("data_ref", inicio);
+      }
+
+      if (fim){
+        url.searchParams.set("mes_ate", fim);
+        url.searchParams.set("dt_fim", fim);
+      }
+
+      if (inicio || fim){
+        url.searchParams.set("modo", "intervalo");
+      }
+    }
+
+    function aplicarTipoProdutoNaUrlGrade(url){
+      if (!Array.isArray(tiposProdutoLista) || tiposProdutoLista.length !== 1) return;
+      const tipo = normalizarTexto(tiposProdutoLista[0]);
+      if (tipo){
+        url.searchParams.set("tipo", tipo);
+      }
+    }
+
     function montarUrlGradeSimples(codponto, codfaces, dtIni, dtFim){
       const url = new URL(caminhoGradePorCodPonto(codponto), window.location.origin);
 
-      if (dtIni){
-        url.searchParams.set("mes_de", dtIni.slice(0, 7));
-      }
-      if (dtFim){
-        url.searchParams.set("mes_ate", dtFim.slice(0, 10));
-      }
+      aplicarPeriodoExatoNaUrlGrade(url, dtIni, dtFim);
+      aplicarTipoProdutoNaUrlGrade(url);
 
       (codfaces || []).forEach(codface => {
         if (normalizarTexto(codface)){
@@ -4089,16 +4100,13 @@
     function montarUrlGradeMulti(lista, dtIni, dtFim){
       const url = new URL(rotaGradeMulti, window.location.origin);
 
-      if (dtIni){
-        url.searchParams.set("mes_de", dtIni.slice(0, 7));
-      }
-      if (dtFim){
-        url.searchParams.set("mes_ate", dtFim.slice(0, 10));
-      }
+      aplicarPeriodoExatoNaUrlGrade(url, dtIni, dtFim);
+      aplicarTipoProdutoNaUrlGrade(url);
 
       lista.forEach(item => {
         if (normalizarTexto(item.codface)){
           url.searchParams.append("codface", item.codface);
+          url.searchParams.append("codponto", item.codponto);
         }
       });
 
