@@ -22408,6 +22408,7 @@ def _buscar_filtros_faces_para_reserva_ocupacao(cidades: list[str] | None = None
 
 @paineis_bp.route("/reserva-ocupacao", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("reserva_ocupacao")
 @limiter.limit(LIMITE_GET_TELAS_NAVEGACAO, methods=["GET"])
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def reserva_ocupacao():
@@ -22419,12 +22420,6 @@ def reserva_ocupacao():
     - Ela usa o layout do base correto: euromidia/base_euromidia.html.
     - O CodFace é selecionado por combobox pesquisável com dados do ponto.
     """
-    try:
-        if int(getattr(current_user, "IDEmpresaProprietaria", 0) or 0) != 3:
-            abort(403)
-    except Exception:
-        abort(403)
-
     q = (request.args.get("q") or "").strip()
     codponto_raw = (request.args.get("codponto") or request.args.get("cod_ponto") or "").strip()
     codface_sel = (request.args.get("codface") or request.args.get("cod_face") or request.args.get("face_principal") or request.args.get("face") or "").strip()

@@ -1071,7 +1071,18 @@ input:disabled, select:disabled, textarea:disabled{
         ) %}
         {% set menu_paineis_lista_ocupacao = False %}
         {% set menu_paineis_preferencia_reservas = False %}
-        {% set menu_paineis_reserva_ocupacao = (current_user.is_authenticated and (current_user.IDEmpresaProprietaria|default(0, true)|int) == 3) %}
+        {# Reserva: IDEmpresaProprietaria = 3 ou BitFullEmpresas = 1. #}
+        {% set menu_paineis_reserva_ocupacao = (
+          pode_acessar_menu_paineis('reserva_ocupacao')
+          if pode_acessar_menu_paineis is defined
+          else (
+            current_user.is_authenticated
+            and (
+              (current_user.IDEmpresaProprietaria|default(0, true)|int) == 3
+              or (current_user.BitFullEmpresas|default(0, true)|int) == 1
+            )
+          )
+        ) %}
         {% set menu_paineis_contratos = (pode_acessar_menu_paineis('contratos') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_mov_fin = (pode_acessar_menu_paineis('movimentacao_financeira') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_inadimplentes = (pode_acessar_menu_paineis('inadimplentes') if pode_acessar_menu_paineis is defined else True) %}
@@ -1139,8 +1150,9 @@ input:disabled, select:disabled, textarea:disabled{
         {#
           Revalidação final do ACL depois dos ajustes por perfil.
           É necessária porque um Admin/Coordenador da IDEmpresaProprietaria = 1
+          sem BitFullEmpresas
           não pode enxergar os estoques de painéis, Check-in, Atendimento ou
-          Financeiro. A opção Adicionar Saldo Produtos é tratada separadamente.
+          Financeiro. Reserva e Adicionar Saldo Produtos possuem regras próprias.
           O ACL Python consulta a Silver.DimUsuarios e tem prioridade sobre o perfil.
         #}
         {% if pode_acessar_menu_paineis is defined %}
@@ -1163,17 +1175,12 @@ input:disabled, select:disabled, textarea:disabled{
         {% endif %}
 
         {#
-          Mantém o comportamento atual para quem já enxerga o submenu Estoques
-          e libera somente Adicionar Saldo Produtos para IDEmpresaProprietaria = 1.
+          Adicionar Saldo Produtos segue exclusivamente a regra empresarial:
+          IDEmpresaProprietaria = 1 ou BitFullEmpresas = 1.
           menu_paineis_catalogo_produtos usa a consulta centralizada do ACL e,
           portanto, não depende de o campo da empresa existir no current_user.
         #}
-        {% set menu_paineis_adicionar_saldos = (
-          menu_paineis_catalogo_produtos
-          or menu_paineis_disponibilidades
-          or menu_paineis_reserva_ocupacao
-          or menu_paineis_vencimentos_campanhas
-        ) %}
+        {% set menu_paineis_adicionar_saldos = menu_paineis_catalogo_produtos %}
 
         {% set menu_admin = (
           current_user.is_authenticated
@@ -1268,6 +1275,24 @@ input:disabled, select:disabled, textarea:disabled{
                     <a href="{{ url_for('euro.adicionar_saldos') }}"
                        class="{% if request.endpoint == 'euro.adicionar_saldos' %}menu-link-current{% endif %}">
                       Adicionar Saldo Produtos
+                    </a>
+                  {% endif %}
+
+                  {#
+                    Consultas de estoque visíveis somente para usuário ativo com:
+                    IDEmpresaProprietaria = 1 ou BitFullEmpresas = 1.
+                    menu_paineis_catalogo_produtos aplica essa regra empresarial
+                    pela validação centralizada do ACL.
+                  #}
+                  {% if menu_paineis_catalogo_produtos %}
+                    <a href="{{ url_for('euro.estoquematriz', item_id=0) }}"
+                       class="{% if request.endpoint == 'euro.estoquematriz' %}menu-link-current{% endif %}">
+                      Saldos de Produtos
+                    </a>
+
+                    <a href="{{ url_for('euro.visualizar_saldo_lotes') }}"
+                       class="{% if request.endpoint == 'euro.visualizar_saldo_lotes' %}menu-link-current{% endif %}">
+                      Saldos por Lote/Série
                     </a>
                   {% endif %}
 

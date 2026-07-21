@@ -410,6 +410,33 @@ def usuario_pode_acessar_catalogo_produtos() -> bool:
     return id_empresa == 1 or possui_acesso_total_empresas
 
 
+def usuario_pode_acessar_reserva_ocupacao() -> bool:
+    """
+    Autoriza a tela Reserva somente quando o usuário está ativo e atende
+    pelo menos uma destas condições:
+
+    - IDEmpresaProprietaria = 3; ou
+    - BitFullEmpresas = 1.
+
+    A mesma função controla o menu e o acesso direto ao endpoint.
+    """
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    dados = _dados_empresariais_usuario_catalogo()
+
+    bit_ativo = dados.get("BitAtivo")
+    if bit_ativo is not None and not _flag_ativa_acl(bit_ativo):
+        return False
+
+    id_empresa = _converter_int_acl(dados.get("IDEmpresaProprietaria"))
+    possui_acesso_total_empresas = _flag_ativa_acl(
+        dados.get("BitFullEmpresas")
+    )
+
+    return id_empresa == 3 or possui_acesso_total_empresas
+
+
 def usuario_pode_acessar_ver_pedidos() -> bool:
     """Autoriza a consulta de pedidos pela mesma regra empresarial do catálogo.
 
@@ -652,6 +679,9 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
 
     if chave in {"catalogo_produtos", "catalogo_de_produtos", "lista_produtos"}:
         return usuario_pode_acessar_catalogo_produtos()
+
+    if chave in {"reserva", "reserva_ocupacao", "ocupacao_reserva"}:
+        return usuario_pode_acessar_reserva_ocupacao()
 
     if chave in {
         "ver_pedidos",
