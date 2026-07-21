@@ -1958,8 +1958,8 @@
                 ⛭ Filtrar
               </button>
 
-              <a class="btn btn-secondary js-preservar-faces-url"
-                 data-preservar-faces="1"
+              <a class="btn btn-secondary"
+                 id="btnLimparFiltrosListaPaineis"
                  href="{{ url_for('Paineis.lista_paineis', per_page=filtros.per_page, limpar_filtros=1) }}"
                  style="text-decoration:none;display:flex;align-items:center;gap:8px;justify-content:center;"
                  title="Remove todos os filtros e volta ao padrão">
@@ -2147,6 +2147,7 @@
                   <div class="periodo-inputs-reais">
                     <input type="date" id="dtIniReal" name="dt_ini" value="{{ filtros.dt_ini or '' }}">
                     <input type="date" id="dtFimReal" name="dt_fim" value="{{ filtros.dt_fim or '' }}">
+                    <input type="hidden" id="periodoRapidoReal" name="periodo" value="{{ filtros.periodo or '' }}">
                   </div>
                 </div>
               </div>
@@ -2186,7 +2187,8 @@
             <button type="button" id="btnAbrirGradesSelecionadas" class="btn-pill">
               ⊞ Abrir grades selecionadas
             </button>
-            <button type="button" id="btnLimparFacesSelecionadas" class="btn-pill danger">
+            <button type="button" id="btnLimparFacesSelecionadas" class="btn-pill danger"
+                    title="Limpar faces selecionadas, busca e todos os filtros da lista">
               ⌫ Limpar seleção
             </button>
           </div>
@@ -2563,6 +2565,7 @@
                                       formato=filtros.formato,
                                       dt_ini=filtros.dt_ini,
                                       dt_fim=filtros.dt_fim,
+                                      periodo=filtros.periodo,
                                       bi_semana=filtros.bi_semana,
                                       mes_atual=filtros.mes_atual,
                                       tudo=filtros.tudo,
@@ -2589,6 +2592,7 @@
                                       formato=filtros.formato,
                                       dt_ini=filtros.dt_ini,
                                       dt_fim=filtros.dt_fim,
+                                      periodo=filtros.periodo,
                                       bi_semana=filtros.bi_semana,
                                       mes_atual=filtros.mes_atual,
                                       tudo=filtros.tudo,
@@ -2619,6 +2623,7 @@
                                       formato=filtros.formato,
                                       dt_ini=filtros.dt_ini,
                                       dt_fim=filtros.dt_fim,
+                                      periodo=filtros.periodo,
                                       bi_semana=filtros.bi_semana,
                                       mes_atual=filtros.mes_atual,
                                       tudo=filtros.tudo,
@@ -2645,6 +2650,7 @@
                                       formato=filtros.formato,
                                       dt_ini=filtros.dt_ini,
                                       dt_fim=filtros.dt_fim,
+                                      periodo=filtros.periodo,
                                       bi_semana=filtros.bi_semana,
                                       mes_atual=filtros.mes_atual,
                                       tudo=filtros.tudo,
@@ -2681,6 +2687,8 @@
     const btnFechar = document.getElementById("btnFecharPeriodo");
     const btnAplicar = document.getElementById("btnAplicarPeriodo");
     const btnHoje = document.getElementById("btnHoje");
+    const rotaListaPaineis = {{ url_for('Paineis.lista_paineis')|tojson }};
+    const CHAVE_STORAGE_FACES = "euromidia_lista_paineis_faces_selecionadas_v1";
 
     const lblTopo = document.getElementById("lblPeriodoTopo");
     const lblAno  = document.getElementById("lblAno");
@@ -2702,6 +2710,11 @@
       document.getElementById("dtFimReal") ||
       shell.querySelector('input[name="mes_ate"]') ||
       document.querySelector('input[name="mes_ate"]');
+
+    const periodoRapidoReal =
+      document.getElementById("periodoRapidoReal") ||
+      shell.querySelector('input[name="periodo"]') ||
+      document.querySelector('input[name="periodo"]');
 
     const chips = Array.from(shell.querySelectorAll(".periodo-chip[data-modo]"));
     const mesesBtns = Array.from(document.querySelectorAll(".periodo-mes"));
@@ -2756,6 +2769,13 @@
 
     function limparChipsAtivos(){
       chips.forEach(c => c.classList.remove("ativo"));
+      if (btnHoje) btnHoje.classList.remove("ativo");
+    }
+
+    function limparPeriodoRapido(){
+      if (periodoRapidoReal){
+        periodoRapidoReal.value = "";
+      }
     }
 
     function limparBiSemana(){
@@ -2826,6 +2846,7 @@
       const ini = (opt.getAttribute("data-inicio") || "").trim();
       const fim = (opt.getAttribute("data-fim") || "").trim();
 
+      limparPeriodoRapido();
       limparDias();
 
       if (pickerDe)  pickerDe.value  = ini;
@@ -2869,6 +2890,33 @@
       return shell.closest("form");
     }
 
+    function limparFacesPersistidas(){
+      try{
+        localStorage.removeItem(CHAVE_STORAGE_FACES);
+      }catch(e){}
+    }
+
+    function navegarParaPeriodoSemOutrosFiltros(modo, iniDateObj, fimDateObj){
+      const form = getForm();
+      const url = new URL(rotaListaPaineis, window.location.origin);
+      const modoLimpo = String(modo || "").trim().toLowerCase();
+
+      url.searchParams.set("periodo", modoLimpo);
+      url.searchParams.set("dt_ini", toISO(iniDateObj));
+      url.searchParams.set("dt_fim", toISO(fimDateObj));
+
+      const perPageInput = form ? form.querySelector('input[name="per_page"]') : null;
+      const perPage = parseInt(String((perPageInput && perPageInput.value) || "20"), 10);
+      if (Number.isInteger(perPage) && perPage > 0){
+        url.searchParams.set("per_page", String(perPage));
+      }
+
+      // Atalhos de período significam todas as ocupações/reservas do intervalo.
+      // A URL nova não leva busca, dropdowns, status, formato ou faces selecionadas.
+      limparFacesPersistidas();
+      window.location.href = url.pathname + url.search + url.hash;
+    }
+
     function submitForm(){
       const form = getForm();
       if (!form) return;
@@ -2894,6 +2942,7 @@
 
     function marcarChip(modo){
       chips.forEach(c => c.classList.toggle("ativo", c.getAttribute("data-modo") === modo));
+      if (btnHoje) btnHoje.classList.toggle("ativo", modo === "hoje");
     }
 
     function marcarMesSelecionado(ano, mes){
@@ -2944,37 +2993,45 @@
       const hoje = new Date();
       const y = hoje.getFullYear();
       const m = hoje.getMonth() + 1;
+      const modoNormalizado = String(modo || "").trim().toLowerCase();
 
       limparBiSemana();
+      if (periodoRapidoReal){
+        periodoRapidoReal.value = modoNormalizado;
+      }
 
-      if (modo === "dia"){
+      if (modoNormalizado === "dia" || modoNormalizado === "hoje"){
         setRange(hoje, hoje);
-        if (autoSubmit) submitForm();
+        if (autoSubmit) navegarParaPeriodoSemOutrosFiltros(modoNormalizado, hoje, hoje);
         return;
       }
-      if (modo === "semana"){
+      if (modoNormalizado === "semana"){
+        // Semana-calendário atual: segunda-feira até domingo.
+        const diasDesdeSegunda = (hoje.getDay() + 6) % 7;
         const ini = new Date(hoje);
-        ini.setDate(ini.getDate() - 6);
-        setRange(ini, hoje);
-        if (autoSubmit) submitForm();
+        ini.setDate(ini.getDate() - diasDesdeSegunda);
+        const fim = new Date(ini);
+        fim.setDate(fim.getDate() + 6);
+        setRange(ini, fim);
+        if (autoSubmit) navegarParaPeriodoSemOutrosFiltros(modoNormalizado, ini, fim);
         return;
       }
-      if (modo === "mes"){
+      if (modoNormalizado === "mes"){
         const ini = new Date(y, m - 1, 1);
         const fim = new Date(y, m - 1, ultimoDiaDoMes(y, m));
         setRange(ini, fim);
         lblAno.textContent = String(y);
         marcarMesSelecionado(y, m);
-        if (autoSubmit) submitForm();
+        if (autoSubmit) navegarParaPeriodoSemOutrosFiltros(modoNormalizado, ini, fim);
         return;
       }
-      if (modo === "ano"){
+      if (modoNormalizado === "ano"){
         const ini = new Date(y, 0, 1);
         const fim = new Date(y, 11, 31);
         setRange(ini, fim);
         lblAno.textContent = String(y);
         limparSelecaoMes();
-        if (autoSubmit) submitForm();
+        if (autoSubmit) navegarParaPeriodoSemOutrosFiltros(modoNormalizado, ini, fim);
         return;
       }
     }
@@ -3029,8 +3086,8 @@
       btnHoje.addEventListener("click", function(ev){
         ev.preventDefault();
         ev.stopPropagation();
-        marcarChip("dia");
-        aplicarModoRapido("dia", true);
+        marcarChip("hoje");
+        aplicarModoRapido("hoje", true);
       });
     }
 
@@ -3065,6 +3122,7 @@
         const ini = new Date(ano, mes - 1, 1);
         const fim = new Date(ano, mes - 1, ultimoDiaDoMes(ano, mes));
 
+        limparPeriodoRapido();
         marcarChip("mes");
         limparBiSemana();
         setRange(ini, fim);
@@ -3079,6 +3137,7 @@
     if (pickerDe){
       pickerDe.addEventListener("change", function(){
         limparBiSemana();
+        limparPeriodoRapido();
         limparChipsAtivos();
         pickerDe.setCustomValidity("");
         if (!(pickerDias && String(pickerDias.value || "").trim())){
@@ -3091,6 +3150,7 @@
     if (pickerAte){
       pickerAte.addEventListener("change", function(){
         limparBiSemana();
+        limparPeriodoRapido();
         limparChipsAtivos();
         limparDias();
         aplicarPickersParaReal();
@@ -3100,6 +3160,7 @@
     if (pickerDias){
       pickerDias.addEventListener("input", function(){
         limparBiSemana();
+        limparPeriodoRapido();
         limparChipsAtivos();
         aplicarDiasNoAte(false);
       });
@@ -3133,6 +3194,11 @@
     if (selBiSemana && selBiSemana.value){
       limparChipsAtivos();
       aplicarBiSemanaSelecionadaNoRange();
+    } else {
+      const modoInicial = String((periodoRapidoReal && periodoRapidoReal.value) || "").trim().toLowerCase();
+      if (["dia", "hoje", "semana", "mes", "ano"].includes(modoInicial)){
+        marcarChip(modoInicial);
+      }
     }
 
     setTopoLabelPorDatas();
@@ -3734,10 +3800,14 @@
     const info = document.getElementById("facesSelecionadasInfo");
     const btnAbrir = document.getElementById("btnAbrirGradesSelecionadas");
     const btnLimpar = document.getElementById("btnLimparFacesSelecionadas");
+    const btnLimparFiltros = document.getElementById("btnLimparFiltrosListaPaineis");
     const checkPagina = document.getElementById("selecionarFacesPagina");
+    const inputBusca = document.getElementById("buscaPaineis");
+    const listaBusca = document.getElementById("listaBuscaPaineis");
 
     const rotaGradeBase = {{ url_for('Paineis.grade_painel', codponto=0)|tojson }};
     const rotaGradeMulti = {{ url_for('Paineis.grade_painel_multi')|tojson }};
+    const rotaLimparFiltros = {{ url_for('Paineis.lista_paineis', per_page=filtros.per_page, limpar_filtros=1)|tojson }};
     const returnToPaineis = {{ (return_to_paineis or url_for('Paineis.lista_paineis'))|tojson }};
     const filtrosServidorFaces = {{ (filtros.selected_codface or [])|tojson }};
     const filtrosServidorPontos = {{ (filtros.selected_codponto or [])|tojson }};
@@ -3956,6 +4026,38 @@
       sincronizarChecksDaPagina();
     }
 
+    function limparEstadoLocalDaLista(){
+      try{
+        localStorage.removeItem(CHAVE_STORAGE);
+      }catch(e){}
+
+      container.innerHTML = "";
+
+      checksDaPagina().forEach(chk => {
+        chk.checked = false;
+      });
+
+      if (checkPagina){
+        checkPagina.checked = false;
+        checkPagina.indeterminate = false;
+      }
+
+      if (inputBusca){
+        inputBusca.value = "";
+        inputBusca.setAttribute("aria-expanded", "false");
+      }
+
+      if (listaBusca){
+        listaBusca.hidden = true;
+        listaBusca.innerHTML = "";
+      }
+    }
+
+    function abrirListaTotalmenteLimpa(){
+      limparEstadoLocalDaLista();
+      window.location.href = rotaLimparFiltros;
+    }
+
     function caminhoGradePorCodPonto(codponto){
       const cp = String(codponto);
       return rotaGradeBase.replace(/0(?=\/grade(?:\/)?$)/, cp);
@@ -4065,11 +4167,15 @@
 
     btnLimpar.addEventListener("click", function(ev){
       ev.preventDefault();
-      try{
-        localStorage.removeItem(CHAVE_STORAGE);
-      }catch(e){}
-      sincronizarChecksDaPagina();
+      abrirListaTotalmenteLimpa();
     });
+
+    if (btnLimparFiltros){
+      btnLimparFiltros.addEventListener("click", function(){
+        // O link segue normalmente; aqui a seleção persistida também é removida.
+        limparEstadoLocalDaLista();
+      });
+    }
 
     btnAbrir.addEventListener("click", function(ev){
       ev.preventDefault();

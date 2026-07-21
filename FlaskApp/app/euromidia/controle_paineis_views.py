@@ -2408,7 +2408,7 @@ def lista_paineis():
 
             if p == "ano":
                 inicio = date(hoje_ref.year, 1, 1)
-                fim = hoje_ref
+                fim = date(hoje_ref.year, 12, 31)
                 return inicio, fim
 
             return None, None
@@ -3906,6 +3906,80 @@ def lista_paineis():
         sub_faces = sub_faces.distinct().subquery()
         base_q = base_q.filter(DimFacesPaineis.CodFace.in_(select(sub_faces.c.CodFace)))
 
+    # Um filtro de período deve listar somente faces que realmente possuam
+    # alguma ocupação no intervalo. A existência é aplicada antes do count e
+    # da paginação para manter totais, páginas e linhas sempre coerentes.
+    #
+    # A chave de correlação é CodPonto + CodFace normalizada. Usar somente
+    # CodFace poderia misturar faces homônimas de painéis diferentes.
+    #
+    # CONTRATO: item ativo cuja vigência sobrepõe o período.
+    # RESERVA: Origem=RESERVA e Status=RESERVADO cuja vigência sobrepõe o
+    # período. DataFim nula representa reserva sem término informado.
+    if not tudo:
+        codface_dim_evento_norm = func.upper(
+            func.ltrim(func.rtrim(func.coalesce(DimFacesPaineis.CodFace, "")))
+        )
+        codface_contrato_evento_norm = func.upper(
+            func.ltrim(
+                func.rtrim(
+                    func.coalesce(FatoControleContratosItensEuromidia.CodFace, "")
+                )
+            )
+        )
+        codface_reserva_evento_norm = func.upper(
+            func.ltrim(
+                func.rtrim(
+                    func.coalesce(FatoOcupacaoPaineisEuromidia.CodFace, "")
+                )
+            )
+        )
+
+        contrato_no_periodo_existe = (
+            db.session.query(
+                FatoControleContratosItensEuromidia.IDFatoControleContratosItensEuromidia
+            )
+            .filter(
+                FatoControleContratosItensEuromidia.CodPonto == DimFacesPaineis.CodPonto,
+                codface_contrato_evento_norm == codface_dim_evento_norm,
+                filtro_periodo_itens_ocup,
+            )
+            .exists()
+        )
+
+        origem_reserva_norm = func.upper(
+            func.ltrim(
+                func.rtrim(func.coalesce(FatoOcupacaoPaineisEuromidia.Origem, ""))
+            )
+        )
+        status_reserva_norm = func.upper(
+            func.ltrim(
+                func.rtrim(func.coalesce(FatoOcupacaoPaineisEuromidia.Status, ""))
+            )
+        )
+        fim_reserva_evento = func.coalesce(
+            FatoOcupacaoPaineisEuromidia.DataFim,
+            date(9999, 12, 31),
+        )
+
+        reserva_no_periodo_existe = (
+            db.session.query(FatoOcupacaoPaineisEuromidia.CodPonto)
+            .filter(
+                FatoOcupacaoPaineisEuromidia.CodPonto == DimFacesPaineis.CodPonto,
+                codface_reserva_evento_norm == codface_dim_evento_norm,
+                origem_reserva_norm == "RESERVA",
+                status_reserva_norm == "RESERVADO",
+                FatoOcupacaoPaineisEuromidia.DataInicio != None,
+                FatoOcupacaoPaineisEuromidia.DataInicio <= dt_fim_ocup,
+                fim_reserva_evento >= dt_ini_ocup,
+            )
+            .exists()
+        )
+
+        base_q = base_q.filter(
+            or_(contrato_no_periodo_existe, reserva_no_periodo_existe)
+        )
+
     total = base_q.count()
 
     rows = (
@@ -4502,7 +4576,7 @@ def lista_paineis():
             primeiro_dia_mes_atual,
             date(hoje.year, hoje.month, calendar.monthrange(hoje.year, hoje.month)[1]),
         ),
-        "ano": (date(hoje.year, 1, 1), hoje),
+        "ano": (date(hoje.year, 1, 1), date(hoje.year, 12, 31)),
     }
 
     pode_abrir_detalhes_painel = not usuario_logado_eh_perfil_vendedor

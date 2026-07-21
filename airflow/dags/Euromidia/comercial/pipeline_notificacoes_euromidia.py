@@ -854,11 +854,19 @@ def _conteudo_evento(evento: dict[str, Any]) -> tuple[str, str, str]:
     else:
         detalhe_extra_html = ""
 
+    # Em clientes de e-mail (principalmente Outlook), apenas max-width/max-height
+    # pode ser ignorado. Por isso o tamanho é definido também no atributo HTML
+    # width e o logo fica dentro de uma célula própria, alinhada à direita.
     logo_html = (
-        f"<img src='{html.escape(logo_url, quote=True)}' alt='Euromídia' "
-        "style='display:block;max-width:190px;max-height:64px;margin:0 auto'>"
+        f"<img src='{html.escape(logo_url, quote=True)}' alt='Euromídia Comunicação' "
+        "width='165' "
+        "style='display:block;width:165px;max-width:165px;height:auto;"
+        "border:0;outline:none;text-decoration:none;margin:0 0 0 auto'>"
         if logo_url
-        else "<div style='font-size:26px;font-weight:700;color:#FFFFFF'>EUROMÍDIA</div>"
+        else (
+            "<div style='font-size:20px;font-weight:800;color:#FFFFFF;"
+            "text-align:right;white-space:nowrap'>EUROMÍDIA</div>"
+        )
     )
 
     corpo_email = f"""<!doctype html>
@@ -869,11 +877,23 @@ def _conteudo_evento(evento: dict[str, Any]) -> tuple[str, str, str]:
       <td align="center">
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:680px;background:#FFFFFF;border-radius:12px;overflow:hidden;box-shadow:0 4px 18px rgba(0,0,0,.08)">
           <tr>
-            <td align="center" style="padding:22px;background:#4B4BDB">{logo_html}</td>
+            <td style="height:8px;background:#FFD000;font-size:0;line-height:0">&nbsp;</td>
+          </tr>
+          <tr>
+            <td style="padding:20px 28px;background:#0B0C8F">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse">
+                <tr>
+                  <td align="left" valign="middle" style="padding-right:18px">
+                    <div style="margin:0;color:#FFFFFF;font-size:24px;line-height:1.2;font-weight:800">{_html(titulo)}</div>
+                    <div style="margin-top:5px;color:#FFFFFF;font-size:12px;line-height:1.4;font-weight:600;opacity:.95">Notificação automática do sistema de reservas</div>
+                  </td>
+                  <td align="right" valign="middle" width="180" style="width:180px;min-width:180px">{logo_html}</td>
+                </tr>
+              </table>
+            </td>
           </tr>
           <tr>
             <td style="padding:30px 32px">
-              <h1 style="margin:0 0 14px;color:#111827;font-size:24px;line-height:1.3">{_html(titulo)}</h1>
               <p style="margin:0;color:#4B5563;font-size:16px;line-height:1.65">{_html(chamada)}</p>
               <div style="margin:22px 0;padding:14px 16px;border-left:5px solid {cor_destaque};background:#F9FAFB;color:#1F2937;font-weight:700">{_html(destaque)}</div>
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:14px">{linhas_html}</table>

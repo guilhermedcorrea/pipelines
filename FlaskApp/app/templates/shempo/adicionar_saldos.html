@@ -5,6 +5,8 @@
 <div class="container my-4">
   <h2>Adicionar/Remover Saldo de Produto</h2>
   <form id="formSaldos" method="POST" action="{{ url_for('euro.adicionar_saldos') }}">
+    {# Token obrigatório porque o CSRFProtect está habilitado globalmente na aplicação. #}
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="table-responsive">
       <table class="table table-bordered align-middle" id="table-linhas" style="table-layout: auto;">
         <thead class="table-light">
