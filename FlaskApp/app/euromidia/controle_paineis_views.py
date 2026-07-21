@@ -3906,82 +3906,16 @@ def lista_paineis():
         sub_faces = sub_faces.distinct().subquery()
         base_q = base_q.filter(DimFacesPaineis.CodFace.in_(select(sub_faces.c.CodFace)))
 
-    # Um filtro de período deve listar somente faces que realmente possuam
-    # alguma ocupação no intervalo. A existência é aplicada antes do count e
-    # da paginação para manter totais, páginas e linhas sempre coerentes.
-    #
-    # A chave de correlação é CodPonto + CodFace normalizada. Usar somente
-    # CodFace poderia misturar faces homônimas de painéis diferentes.
-    #
-    # CONTRATO: item ativo cuja vigência sobrepõe o período.
-    # RESERVA: Origem=RESERVA e Status=RESERVADO cuja vigência sobrepõe o
-    # período. DataFim nula representa reserva sem término informado.
-    if not tudo:
-        codface_dim_evento_norm = func.upper(
-            func.ltrim(func.rtrim(func.coalesce(DimFacesPaineis.CodFace, "")))
-        )
-        codface_contrato_evento_norm = func.upper(
-            func.ltrim(
-                func.rtrim(
-                    func.coalesce(FatoControleContratosItensEuromidia.CodFace, "")
-                )
-            )
-        )
-        codface_reserva_evento_norm = func.upper(
-            func.ltrim(
-                func.rtrim(
-                    func.coalesce(FatoOcupacaoPaineisEuromidia.CodFace, "")
-                )
-            )
-        )
+    # O período serve para calcular ocupação, reservas e disponibilidade; ele
+    # não define quais painéis existem na lista. Assim, um painel ativo sem
+    # contrato ou reserva no intervalo continua visível com ocupação igual a
+    # zero. Filtros explicitamente ligados aos contratos (cliente, vendedor,
+    # tipo de documento e cidade de exibição) continuam sendo aplicados acima.
 
-        contrato_no_periodo_existe = (
-            db.session.query(
-                FatoControleContratosItensEuromidia.IDFatoControleContratosItensEuromidia
-            )
-            .filter(
-                FatoControleContratosItensEuromidia.CodPonto == DimFacesPaineis.CodPonto,
-                codface_contrato_evento_norm == codface_dim_evento_norm,
-                filtro_periodo_itens_ocup,
-            )
-            .exists()
-        )
-
-        origem_reserva_norm = func.upper(
-            func.ltrim(
-                func.rtrim(func.coalesce(FatoOcupacaoPaineisEuromidia.Origem, ""))
-            )
-        )
-        status_reserva_norm = func.upper(
-            func.ltrim(
-                func.rtrim(func.coalesce(FatoOcupacaoPaineisEuromidia.Status, ""))
-            )
-        )
-        fim_reserva_evento = func.coalesce(
-            FatoOcupacaoPaineisEuromidia.DataFim,
-            date(9999, 12, 31),
-        )
-
-        reserva_no_periodo_existe = (
-            db.session.query(FatoOcupacaoPaineisEuromidia.CodPonto)
-            .filter(
-                FatoOcupacaoPaineisEuromidia.CodPonto == DimFacesPaineis.CodPonto,
-                codface_reserva_evento_norm == codface_dim_evento_norm,
-                origem_reserva_norm == "RESERVA",
-                status_reserva_norm == "RESERVADO",
-                FatoOcupacaoPaineisEuromidia.DataInicio != None,
-                FatoOcupacaoPaineisEuromidia.DataInicio <= dt_fim_ocup,
-                fim_reserva_evento >= dt_ini_ocup,
-            )
-            .exists()
-        )
-
-        base_q = base_q.filter(
-            or_(contrato_no_periodo_existe, reserva_no_periodo_existe)
-        )
-
-    total = base_q.count()
-
+    # A ocupação é calculada abaixo com contratos + reservas e depende do
+    # período/filtros atuais. Por isso, a paginação não pode acontecer nesta
+    # consulta: se limitássemos aqui, ordenaríamos somente os registros da
+    # página atual, e não todos os painéis do resultado filtrado.
     rows = (
         base_q
         .order_by(
@@ -3989,8 +3923,6 @@ def lista_paineis():
             DimFacesPaineis.CodFace.asc(),
             func.upper(func.trim(DimFacesPaineis.Tipo)).asc(),
         )
-        .offset((page - 1) * per_page)
-        .limit(per_page)
         .all()
     )
 
@@ -4543,22 +4475,56 @@ def lista_paineis():
             }
         )
 
+    def _pct_ocupacao_item(item) -> float:
+        try:
+            return float(item.get("Pct") or 0.0)
+        except Exception:
+            return 0.0
+
     status_list_norm = [(s or "").strip().lower() for s in (status_list or []) if (s or "").strip()]
     if status_list_norm and ("todos" not in status_list_norm):
         itens_filtrados = []
         for x in itens:
+            pct_item = _pct_ocupacao_item(x)
             if "com_conflito" in status_list_norm and x.get("Conflitos", 0) > 0:
                 itens_filtrados.append(x)
                 continue
-            if "livre" in status_list_norm and int(x.get("Pct", 0) or 0) == 0:
+            if "livre" in status_list_norm and pct_item <= 0.0:
                 itens_filtrados.append(x)
                 continue
-            if "ocupado" in status_list_norm and (int(x.get("Pct", 0) or 0) > 0 and x.get("Conflitos", 0) == 0):
+            if "ocupado" in status_list_norm and (pct_item > 0.0 and x.get("Conflitos", 0) == 0):
                 itens_filtrados.append(x)
                 continue
         itens = itens_filtrados
 
+    # Ordenação oficial da lista: maior percentual de ocupação primeiro.
+    # Cidade/CodFace/Tipo/CodPonto são apenas desempates determinísticos para
+    # impedir que itens com o mesmo percentual troquem de posição entre páginas.
+    def _chave_ordenacao_ocupacao(item):
+        try:
+            codponto_ordem = int(item.get("CodPonto"))
+        except Exception:
+            codponto_ordem = 2147483647
+
+        return (
+            -_pct_ocupacao_item(item),
+            str(item.get("Cidade") or "").strip().casefold(),
+            str(item.get("CodFace") or "").strip().casefold(),
+            str(item.get("TipoProd") or "").strip().casefold(),
+            codponto_ordem,
+        )
+
+    itens.sort(key=_chave_ordenacao_ocupacao)
+
+    # O total e a paginação precisam refletir o conjunto após os filtros de
+    # ocupação/status. Somente agora os itens da página solicitada são recortados.
+    total = len(itens)
     total_pages = max(1, (total + per_page - 1) // per_page)
+    if page > total_pages:
+        page = total_pages
+
+    indice_inicio_pagina = (page - 1) * per_page
+    itens = itens[indice_inicio_pagina:indice_inicio_pagina + per_page]
 
     if tudo:
         periodo_label = f"Tudo ({dt_ini_ocup.strftime('%d/%m/%Y')} até {dt_fim_ocup.strftime('%d/%m/%Y')})"

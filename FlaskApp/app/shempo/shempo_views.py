@@ -5093,16 +5093,16 @@ from flask import Response
 
 @euro.route('/estoquematriz')
 @login_required
+@requer_acesso_catalogo_produtos
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def estoquematriz():
-    page = request.args.get('page', 1, type=int)
+    page = max(request.args.get('page', 1, type=int) or 1, 1)
     per_page = 18
     search = request.args.get('search', '', type=str).strip().lower()
     fcar = request.args.get('fcar',   '', type=str).strip()
     fval = request.args.get('fval',   '', type=str).strip()
     store_type = request.args.get('store_type', 'EstoqueMatriz', type=str).strip()
     export = request.args.get('export', None)
-    offset = (page - 1) * per_page
 
     store_types = [
         'Todos',
@@ -5113,6 +5113,9 @@ def estoquematriz():
         'EstoqueManutencaoInterna',
         'EstoqueShempo'
     ]
+
+    if store_type not in store_types:
+        store_type = 'EstoqueMatriz'
 
     def fetch_rows(model, saldo_attr, minimo_attr):
         return (
@@ -5186,8 +5189,13 @@ def estoquematriz():
         )
 
   
-    total= len(filtered)
+    total = len(filtered)
     total_pages = (total + per_page - 1) // per_page
+
+    if total_pages and page > total_pages:
+        page = total_pages
+
+    offset = (page - 1) * per_page
     page_items = filtered[offset: offset + per_page]
 
 
@@ -5213,6 +5221,7 @@ def estoquematriz():
         car: sorted({v for c, v in filtro_data if c == car})
         for car, _ in filtro_data
     }
+    display_pages = _build_display_pages(page, total_pages)
 
     return render_template(
         'shempo/estoquematriz.html',
@@ -5225,7 +5234,118 @@ def estoquematriz():
         store_type = store_type,
         store_types = store_types,
         filter_groups = filter_groups,
-        image_urls = image_urls
+        image_urls = image_urls,
+        total = total,
+        display_pages = display_pages,
+    )
+
+
+
+
+@euro.route('/visualizar_saldo_lotes', methods=['GET'])
+@login_required
+@requer_acesso_catalogo_produtos
+@retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
+def visualizar_saldo_lotes():
+    """Lista lotes, números de série e quantidades registrados nos estoques."""
+    page = max(request.args.get('page', 1, type=int) or 1, 1)
+    per_page = 18
+    search = request.args.get('search', '', type=str).strip()
+    tipo = request.args.get('tipo', '', type=str).strip()
+
+    tipos_rows = _shempo_execute(text("""
+        SELECT DISTINCT NomeEstoque
+          FROM dbo.TipoEstoque
+         WHERE NomeEstoque IS NOT NULL
+           AND LTRIM(RTRIM(NomeEstoque)) <> ''
+         ORDER BY NomeEstoque
+    """)).fetchall()
+    tipos_list = [row.NomeEstoque for row in tipos_rows]
+
+    where_clauses = ["1 = 1"]
+    params = {}
+
+    if search:
+        where_clauses.append("""
+            (
+                CAST(l.IDLote AS VARCHAR(30)) LIKE :search
+                OR CAST(l.IDItem AS VARCHAR(30)) LIKE :search
+                OR CAST(l.IDEstoque AS VARCHAR(30)) LIKE :search
+                OR p.ReferenciaExterna LIKE :search
+                OR p.NomeProduto LIKE :search
+                OR l.NumeroLote LIKE :search
+                OR l.NumerodeSerie LIKE :search
+                OR CAST(l.CodPonto AS VARCHAR(30)) LIKE :search
+            )
+        """)
+        params['search'] = f'%{search}%'
+
+    if tipo:
+        where_clauses.append("t.NomeEstoque = :tipo")
+        params['tipo'] = tipo
+
+    where_sql = "\n          AND ".join(where_clauses)
+
+    count_sql = f"""
+        SELECT COUNT(*)
+          FROM dbo.EstoqueLotes AS l
+          INNER JOIN dbo.Produto AS p
+            ON p.IDItem = l.IDItem
+          INNER JOIN dbo.TipoEstoque AS t
+            ON t.IDTipoEstoque = l.IDTipoEstoque
+         WHERE {where_sql}
+    """
+    total = _shempo_execute(text(count_sql), params).scalar() or 0
+    total_pages = (total + per_page - 1) // per_page
+
+    if total_pages and page > total_pages:
+        page = total_pages
+
+    offset = (page - 1) * per_page
+    query_params = dict(params)
+    query_params.update(offset=offset, per_page=per_page)
+
+    data_sql = f"""
+        SELECT
+            l.IDLote,
+            l.IDItem,
+            p.ReferenciaExterna,
+            p.NomeProduto,
+            l.IDEstoque,
+            l.NumeroLote,
+            l.NumerodeSerie,
+            l.Quantidade,
+            l.DataEntrada,
+            t.NomeEstoque,
+            l.CodPonto
+          FROM dbo.EstoqueLotes AS l
+          INNER JOIN dbo.Produto AS p
+            ON p.IDItem = l.IDItem
+          INNER JOIN dbo.TipoEstoque AS t
+            ON t.IDTipoEstoque = l.IDTipoEstoque
+         WHERE {where_sql}
+         ORDER BY l.IDLote DESC
+         OFFSET :offset ROWS
+         FETCH NEXT :per_page ROWS ONLY
+    """
+
+    rows = [
+        dict(row._mapping)
+        for row in _shempo_execute(text(data_sql), query_params).fetchall()
+    ]
+    display_pages = _build_display_pages(page, total_pages)
+
+    return render_template(
+        'shempo/visualizar_saldo_lotes.html',
+        rows=rows,
+        page=page,
+        per_page=per_page,
+        total=total,
+        total_pages=total_pages,
+        display_pages=display_pages,
+        search=search,
+        tipo=tipo,
+        tipos_list=tipos_list,
     )
 
 
