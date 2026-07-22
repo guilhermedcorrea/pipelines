@@ -1368,6 +1368,11 @@ input:disabled, select:disabled, textarea:disabled{
                        class="{% if request.endpoint == 'euro.lista_produtos' %}menu-link-current{% endif %}">
                       Catálogo Produtos
                     </a>
+
+                    <a href="{{ url_for('euro.criar_componente') }}"
+                       class="{% if request.endpoint == 'euro.criar_componente' %}menu-link-current{% endif %}">
+                      Cadastrar Produto
+                    </a>
                   {% endif %}
 
                   {% if menu_paineis_checkin_novo %}

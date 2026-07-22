@@ -4,350 +4,395 @@
 
 {% block content %}
 <style>
-  .container:has(> .product-create-page){
-    width:100% !important;
-    max-width:none !important;
-    margin:18px 0 !important;
-    padding:0 clamp(12px,1.2vw,24px) !important;
+  .container:has(> .produto-cadastro-pagina) {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 18px 0 !important;
+    padding: 0 clamp(12px, 1.25vw, 24px) !important;
   }
 
-  .product-create-page{
-    --pc-blue:#002884;
-    --pc-blue-2:#0340a7;
-    --pc-yellow:#ffb300;
-    --pc-text:#0f172a;
-    --pc-muted:#64748b;
-    --pc-border:#dfe5ee;
-    --pc-soft:#f6f8fc;
-    width:100%;
-    max-width:none;
-    padding-bottom:28px;
+  .produto-cadastro-pagina {
+    --cad-azul: #002884;
+    --cad-azul-claro: #0340a7;
+    --cad-amarelo: #ffb300;
+    --cad-texto: #0f172a;
+    --cad-texto-suave: #64748b;
+    --cad-borda: #dfe5ee;
+    --cad-fundo-suave: #f6f8fc;
+    width: 100%;
+    max-width: none;
+    padding-bottom: 28px;
   }
 
-  .product-create-page *,
-  .product-create-page *::before,
-  .product-create-page *::after{
-    box-sizing:border-box;
+  .produto-cadastro-pagina *,
+  .produto-cadastro-pagina *::before,
+  .produto-cadastro-pagina *::after {
+    box-sizing: border-box;
   }
 
-  .pc-header{
-    display:flex;
-    align-items:flex-end;
-    justify-content:space-between;
-    gap:18px;
-    margin-bottom:18px;
+  .cad-cabecalho {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 18px;
   }
 
-  .pc-header h1{
-    margin:0;
-    color:var(--pc-blue);
-    font-size:clamp(25px,2vw,34px);
-    line-height:1.12;
-    letter-spacing:-.03em;
+  .cad-cabecalho h1 {
+    margin: 0;
+    color: var(--cad-azul);
+    font-size: clamp(25px, 2vw, 34px);
+    line-height: 1.12;
+    letter-spacing: -.03em;
   }
 
-  .pc-header p{
-    max-width:760px;
-    margin:7px 0 0;
-    color:var(--pc-muted);
-    font-size:14px;
-    line-height:1.45;
+  .cad-cabecalho p {
+    max-width: 780px;
+    margin: 7px 0 0;
+    color: var(--cad-texto-suave);
+    font-size: 14px;
+    line-height: 1.45;
   }
 
-  .pc-button{
-    min-height:42px;
-    padding:9px 14px;
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    gap:8px;
-    border:1px solid rgba(0,40,132,.2);
-    border-radius:10px;
-    background:#fff;
-    color:var(--pc-blue);
-    text-decoration:none;
-    font-size:13px;
-    font-weight:850;
-    cursor:pointer;
+  .cad-botao {
+    min-height: 42px;
+    padding: 9px 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px solid rgba(0, 40, 132, .20);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--cad-azul);
+    text-decoration: none;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: background .16s ease, border-color .16s ease, transform .16s ease;
   }
 
-  .pc-button:hover{
-    border-color:rgba(0,40,132,.38);
-    background:#eef3ff;
+  .cad-botao:hover {
+    border-color: rgba(0, 40, 132, .38);
+    background: #eef3ff;
+    color: var(--cad-azul);
   }
 
-  .pc-button-primary{
-    border-color:var(--pc-yellow);
-    background:var(--pc-yellow);
-    color:#14213d;
+  .cad-botao:focus-visible {
+    outline: 3px solid rgba(3, 64, 167, .20);
+    outline-offset: 2px;
   }
 
-  .pc-button-primary:hover{
-    border-color:#f2aa00;
-    background:#f2aa00;
+  .cad-botao-principal {
+    border-color: var(--cad-amarelo);
+    background: var(--cad-amarelo);
+    color: #14213d;
   }
 
-  .pc-button-danger{
-    border-color:#fecaca;
-    color:#b91c1c;
+  .cad-botao-principal:hover {
+    border-color: #f2aa00;
+    background: #f2aa00;
+    color: #14213d;
   }
 
-  .pc-button-danger:hover{
-    border-color:#fca5a5;
-    background:#fef2f2;
+  .cad-botao-remover {
+    border-color: #fecaca;
+    color: #b91c1c;
   }
 
-  .pc-button svg{
-    width:17px;
-    height:17px;
-    flex:0 0 auto;
+  .cad-botao-remover:hover {
+    border-color: #fca5a5;
+    background: #fef2f2;
+    color: #991b1b;
   }
 
-  .pc-card{
-    width:100%;
-    overflow:hidden;
-    border:1px solid var(--pc-border);
-    border-radius:16px;
-    background:#fff;
-    box-shadow:0 8px 28px rgba(15,23,42,.065);
+  .cad-botao svg {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 auto;
   }
 
-  .pc-section{
-    padding:19px;
-    border-bottom:1px solid var(--pc-border);
+  .cad-cartao {
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid var(--cad-borda);
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 8px 28px rgba(15, 23, 42, .065);
   }
 
-  .pc-section:last-of-type{
-    border-bottom:0;
+  .cad-secao {
+    padding: 19px;
+    border-bottom: 1px solid var(--cad-borda);
   }
 
-  .pc-section-head{
-    display:flex;
-    align-items:flex-start;
-    justify-content:space-between;
-    gap:14px;
-    margin-bottom:15px;
+  .cad-secao-cabecalho {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 15px;
   }
 
-  .pc-section-head h2{
-    margin:0;
-    color:var(--pc-text);
-    font-size:17px;
+  .cad-secao-cabecalho h2 {
+    margin: 0;
+    color: var(--cad-texto);
+    font-size: 17px;
   }
 
-  .pc-section-head p{
-    margin:5px 0 0;
-    color:var(--pc-muted);
-    font-size:12px;
-    line-height:1.4;
+  .cad-secao-cabecalho p {
+    margin: 5px 0 0;
+    color: var(--cad-texto-suave);
+    font-size: 12px;
+    line-height: 1.4;
   }
 
-  .pc-grid{
-    display:grid;
-    grid-template-columns:repeat(12,minmax(0,1fr));
-    gap:13px;
+  .cad-grade {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 13px;
   }
 
-  .pc-field{grid-column:span 4;}
-  .pc-field-wide{grid-column:span 6;}
-  .pc-field-full{grid-column:1 / -1;}
-
-  .pc-field label{
-    margin:0 0 6px;
-    display:block;
-    color:#52637a;
-    font-size:11px;
-    font-weight:850;
+  .cad-campo {
+    grid-column: span 4;
+    min-width: 0;
   }
 
-  .pc-required{color:#dc2626;}
-
-  .pc-field input,
-  .pc-field select,
-  .pc-field textarea{
-    width:100%;
-    min-height:43px;
-    margin:0;
-    border:1px solid var(--pc-border);
-    border-radius:10px;
-    background:#fff;
-    color:var(--pc-text);
-    font-size:13px;
+  .cad-campo-meio {
+    grid-column: span 6;
   }
 
-  .pc-field input:focus,
-  .pc-field select:focus,
-  .pc-field textarea:focus{
-    border-color:var(--pc-blue-2);
-    box-shadow:0 0 0 3px rgba(3,64,167,.11);
+  .cad-campo-total {
+    grid-column: 1 / -1;
   }
 
-  .pc-help{
-    margin:5px 0 0;
-    color:var(--pc-muted);
-    font-size:10px;
-    line-height:1.4;
+  .cad-campo label {
+    display: block;
+    margin: 0 0 6px;
+    color: #52637a;
+    font-size: 11px;
+    font-weight: 800;
   }
 
-  .pc-switches{
-    display:grid;
-    grid-template-columns:repeat(3,minmax(0,1fr));
-    gap:12px;
-    margin-bottom:15px;
+  .cad-obrigatorio {
+    color: #dc2626;
   }
 
-  .pc-switch{
-    min-height:62px;
-    padding:12px 13px;
-    display:flex;
-    align-items:center;
-    gap:11px;
-    border:1px solid var(--pc-border);
-    border-radius:11px;
-    background:var(--pc-soft);
-    cursor:pointer;
+  .cad-campo input,
+  .cad-campo select,
+  .cad-campo textarea {
+    width: 100%;
+    min-height: 43px;
+    margin: 0;
+    padding: 9px 11px;
+    border: 1px solid var(--cad-borda);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--cad-texto);
+    font: inherit;
+    font-size: 13px;
   }
 
-  .pc-switch input{
-    width:20px;
-    height:20px;
-    flex:0 0 auto;
-    accent-color:var(--pc-blue-2);
+  .cad-campo input:focus,
+  .cad-campo select:focus,
+  .cad-campo textarea:focus {
+    border-color: var(--cad-azul-claro);
+    outline: 0;
+    box-shadow: 0 0 0 3px rgba(3, 64, 167, .11);
   }
 
-  .pc-switch strong{
-    display:block;
-    color:var(--pc-text);
-    font-size:12px;
+  .cad-ajuda {
+    margin: 5px 0 0;
+    color: var(--cad-texto-suave);
+    font-size: 10px;
+    line-height: 1.4;
   }
 
-  .pc-switch small{
-    display:block;
-    margin-top:2px;
-    color:var(--pc-muted);
-    font-size:10px;
+  .cad-opcoes {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 15px;
   }
 
-  .pc-dynamic-list{
-    display:flex;
-    flex-direction:column;
-    gap:10px;
+  .cad-opcao {
+    min-height: 62px;
+    padding: 12px 13px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    border: 1px solid var(--cad-borda);
+    border-radius: 11px;
+    background: var(--cad-fundo-suave);
+    cursor: pointer;
   }
 
-  .pc-dynamic-row{
-    padding:11px;
-    display:grid;
-    grid-template-columns:minmax(0,1fr) auto;
-    gap:9px;
-    align-items:end;
-    border:1px solid var(--pc-border);
-    border-radius:11px;
-    background:var(--pc-soft);
+  .cad-opcao input {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+    accent-color: var(--cad-azul-claro);
   }
 
-  .pc-dynamic-row.characteristic{
-    grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;
+  .cad-opcao strong {
+    display: block;
+    color: var(--cad-texto);
+    font-size: 12px;
   }
 
-  .pc-card-footer{
-    padding:16px 19px;
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:12px;
-    border-top:1px solid var(--pc-border);
-    background:#fbfcff;
+  .cad-opcao small {
+    display: block;
+    margin-top: 2px;
+    color: var(--cad-texto-suave);
+    font-size: 10px;
   }
 
-  .pc-card-footer p{
-    margin:0;
-    color:var(--pc-muted);
-    font-size:11px;
+  .cad-lista-dinamica {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
 
-  @media(max-width:900px){
-    .pc-field,
-    .pc-field-wide{grid-column:span 6;}
-
-    .pc-switches{grid-template-columns:1fr;}
+  .cad-lista-vazia {
+    margin: 0;
+    padding: 14px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 11px;
+    background: #fbfcff;
+    color: var(--cad-texto-suave);
+    font-size: 12px;
+    text-align: center;
   }
 
-  @media(max-width:650px){
-    .container:has(> .product-create-page){
-      margin:12px 0 !important;
-      padding:0 12px !important;
+  .cad-linha-dinamica {
+    padding: 11px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 9px;
+    align-items: end;
+    border: 1px solid var(--cad-borda);
+    border-radius: 11px;
+    background: var(--cad-fundo-suave);
+  }
+
+  .cad-linha-dinamica.cad-caracteristica {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .cad-rodape {
+    padding: 16px 19px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-top: 1px solid var(--cad-borda);
+    background: #fbfcff;
+  }
+
+  .cad-rodape p {
+    margin: 0;
+    color: var(--cad-texto-suave);
+    font-size: 11px;
+  }
+
+  @media (max-width: 900px) {
+    .cad-campo,
+    .cad-campo-meio {
+      grid-column: span 6;
     }
 
-    .pc-header,
-    .pc-section-head,
-    .pc-card-footer{
-      align-items:stretch;
-      flex-direction:column;
+    .cad-opcoes {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 650px) {
+    .container:has(> .produto-cadastro-pagina) {
+      margin: 12px 0 !important;
+      padding: 0 12px !important;
     }
 
-    .pc-header .pc-button,
-    .pc-section-head .pc-button,
-    .pc-card-footer .pc-button{
-      width:100%;
+    .cad-cabecalho,
+    .cad-secao-cabecalho,
+    .cad-rodape {
+      align-items: stretch;
+      flex-direction: column;
     }
 
-    .pc-section{padding:15px;}
-
-    .pc-grid{grid-template-columns:1fr;}
-
-    .pc-field,
-    .pc-field-wide,
-    .pc-field-full{grid-column:1;}
-
-    .pc-dynamic-row,
-    .pc-dynamic-row.characteristic{
-      grid-template-columns:1fr;
+    .cad-cabecalho .cad-botao,
+    .cad-secao-cabecalho .cad-botao,
+    .cad-rodape .cad-botao {
+      width: 100%;
     }
 
-    .pc-dynamic-row .pc-button{width:100%;}
+    .cad-secao {
+      padding: 15px;
+    }
+
+    .cad-grade {
+      grid-template-columns: 1fr;
+    }
+
+    .cad-campo,
+    .cad-campo-meio,
+    .cad-campo-total {
+      grid-column: 1;
+    }
+
+    .cad-linha-dinamica,
+    .cad-linha-dinamica.cad-caracteristica {
+      grid-template-columns: 1fr;
+    }
+
+    .cad-linha-dinamica .cad-botao {
+      width: 100%;
+    }
   }
 </style>
 
-<div class="product-create-page">
-  <header class="pc-header">
+<div class="produto-cadastro-pagina">
+  <header class="cad-cabecalho">
     <div>
       <h1>Cadastrar Produto</h1>
-      <p>Cadastre os dados principais, classificação, saldo inicial, compatibilidades e características do produto.</p>
+      <p>Cadastre os dados principais, a classificação, o saldo inicial, as compatibilidades e as características do produto.</p>
     </div>
 
-    <a href="{{ url_for('euro.lista_produtos') }}" class="pc-button">
+    <a href="{{ url_for('euro.lista_produtos') }}" class="cad-botao">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M19 12H5M11 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M19 12H5M11 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
       </svg>
       Voltar ao catálogo
     </a>
   </header>
 
-  <form method="POST" action="{{ url_for('euro.criar_componente') }}" class="pc-card" id="productCreateForm">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <form method="POST" action="{{ url_for('euro.criar_componente') }}" class="cad-cartao" id="formCadastroProduto">
+    {% if csrf_token is defined %}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% endif %}
 
-    <section class="pc-section">
-      <div class="pc-section-head">
+    <section class="cad-secao">
+      <div class="cad-secao-cabecalho">
         <div>
           <h2>Dados principais</h2>
-          <p>Os campos marcados são necessários para criar o cadastro.</p>
+          <p>Os campos marcados com asterisco são necessários para criar o cadastro.</p>
         </div>
       </div>
 
-      <div class="pc-grid">
-        <div class="pc-field pc-field-wide">
-          <label for="nome_produto">Nome do produto <span class="pc-required">*</span></label>
-          <input type="text" id="nome_produto" name="nome_produto" maxlength="500" required autocomplete="off">
+      <div class="cad-grade">
+        <div class="cad-campo cad-campo-meio">
+          <label for="nome_produto">Nome do produto <span class="cad-obrigatorio">*</span></label>
+          <input type="text" id="nome_produto" name="nome_produto" maxlength="200" required autocomplete="off">
         </div>
 
-        <div class="pc-field pc-field-wide">
-          <label for="referencia_externa">Referência externa <span class="pc-required">*</span></label>
+        <div class="cad-campo cad-campo-meio">
+          <label for="referencia_externa">Referência externa <span class="cad-obrigatorio">*</span></label>
           <input type="text" id="referencia_externa" name="referencia_externa" maxlength="200" required autocomplete="off">
-          <p class="pc-help">A referência não pode estar cadastrada em outro produto.</p>
+          <p class="cad-ajuda">A referência não pode estar cadastrada em outro produto.</p>
         </div>
 
-        <div class="pc-field">
-          <label for="id_departamento">Departamento <span class="pc-required">*</span></label>
+        <div class="cad-campo">
+          <label for="id_departamento">Departamento <span class="cad-obrigatorio">*</span></label>
           <select id="id_departamento" name="id_departamento" required>
             <option value="">Selecione</option>
             {% for dept in departamentos %}
@@ -356,8 +401,8 @@
           </select>
         </div>
 
-        <div class="pc-field">
-          <label for="familia_id">Família <span class="pc-required">*</span></label>
+        <div class="cad-campo">
+          <label for="familia_id">Família <span class="cad-obrigatorio">*</span></label>
           <select id="familia_id" name="familia_id" required>
             <option value="">Selecione</option>
             {% for fam in familias %}
@@ -366,8 +411,8 @@
           </select>
         </div>
 
-        <div class="pc-field">
-          <label for="id_categoria">Categoria <span class="pc-required">*</span></label>
+        <div class="cad-campo">
+          <label for="id_categoria">Categoria <span class="cad-obrigatorio">*</span></label>
           <select id="id_categoria" name="id_categoria" required>
             <option value="">Selecione</option>
             {% for cat in categorias %}
@@ -378,114 +423,130 @@
       </div>
     </section>
 
-    <section class="pc-section">
-      <div class="pc-section-head">
+    <section class="cad-secao">
+      <div class="cad-secao-cabecalho">
         <div>
           <h2>Classificação</h2>
           <p>Defina como o produto será utilizado no sistema.</p>
         </div>
       </div>
 
-      <div class="pc-switches">
-        <label class="pc-switch">
+      <div class="cad-opcoes">
+        <label class="cad-opcao">
           <input type="checkbox" name="bit_ativo" value="1" checked>
-          <span><strong>Produto ativo</strong><small>Disponível para uso no catálogo.</small></span>
+          <span>
+            <strong>Produto ativo</strong>
+            <small>Disponível para utilização no catálogo.</small>
+          </span>
         </label>
 
-        <label class="pc-switch">
+        <label class="cad-opcao">
           <input type="checkbox" name="classifica_ativo" value="1">
-          <span><strong>Classificar como ativo</strong><small>Permite associação ao controle de ativos.</small></span>
+          <span>
+            <strong>Classificar como ativo</strong>
+            <small>Permite associação ao controle de ativos.</small>
+          </span>
         </label>
 
-        <label class="pc-switch">
+        <label class="cad-opcao">
           <input type="checkbox" name="bit_pmv" value="1">
-          <span><strong>Produto é um PMV</strong><small>Marca o item como produto principal PMV.</small></span>
+          <span>
+            <strong>Produto é um PMV</strong>
+            <small>Marca o item como produto principal PMV.</small>
+          </span>
         </label>
       </div>
 
-      <div class="pc-grid">
-        <div class="pc-field pc-field-wide">
+      <div class="cad-grade">
+        <div class="cad-campo cad-campo-meio">
           <label for="chassi">Chassi</label>
           <input type="text" id="chassi" name="chassi" maxlength="100" autocomplete="off">
         </div>
 
-        <div class="pc-field pc-field-wide">
+        <div class="cad-campo cad-campo-meio">
           <label for="renavam">Renavam</label>
           <input type="text" id="renavam" name="renavam" maxlength="100" autocomplete="off">
         </div>
       </div>
     </section>
 
-    <section class="pc-section">
-      <div class="pc-section-head">
+    <section class="cad-secao">
+      <div class="cad-secao-cabecalho">
         <div>
           <h2>Saldo inicial</h2>
           <p>O estoque Matriz será criado automaticamente com o resultado da entrada menos a saída.</p>
         </div>
       </div>
 
-      <div class="pc-grid">
-        <div class="pc-field pc-field-wide">
+      <div class="cad-grade">
+        <div class="cad-campo cad-campo-meio">
           <label for="saldo_entrada">Entrada inicial</label>
           <input type="number" id="saldo_entrada" name="saldo_entrada" min="0" step="1" value="0" inputmode="numeric">
         </div>
 
-        <div class="pc-field pc-field-wide">
+        <div class="cad-campo cad-campo-meio">
           <label for="saldo_saida">Saída inicial</label>
           <input type="number" id="saldo_saida" name="saldo_saida" min="0" step="1" value="0" inputmode="numeric">
+          <p class="cad-ajuda">A saída não pode ser maior que a entrada.</p>
         </div>
       </div>
     </section>
 
-    <section class="pc-section">
-      <div class="pc-section-head">
+    <section class="cad-secao">
+      <div class="cad-secao-cabecalho">
         <div>
           <h2>Compatibilidade com PMV</h2>
-          <p>Informe um ou mais modelos compatíveis. Este preenchimento é opcional.</p>
+          <p>Informe um ou mais modelos compatíveis. O preenchimento é opcional.</p>
         </div>
-        <button type="button" class="pc-button" data-action="add-compatibility">
+
+        <button type="button" class="cad-botao" data-acao="adicionar-pmv">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
           </svg>
           Adicionar PMV
         </button>
       </div>
 
-      <div class="pc-dynamic-list" id="compatibilityList"></div>
+      <div class="cad-lista-dinamica" id="listaCompatibilidade">
+        <p class="cad-lista-vazia">Nenhum PMV informado.</p>
+      </div>
     </section>
 
-    <section class="pc-section">
-      <div class="pc-section-head">
+    <section class="cad-secao">
+      <div class="cad-secao-cabecalho">
         <div>
           <h2>Características</h2>
-          <p>Adicione pares de característica e valor ao produto.</p>
+          <p>Adicione pares de característica e valor ao produto. O preenchimento é opcional.</p>
         </div>
-        <button type="button" class="pc-button" data-action="add-characteristic">
+
+        <button type="button" class="cad-botao" data-acao="adicionar-caracteristica">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
           </svg>
           Adicionar característica
         </button>
       </div>
 
-      <div class="pc-dynamic-list" id="characteristicList"></div>
+      <div class="cad-lista-dinamica" id="listaCaracteristicas">
+        <p class="cad-lista-vazia">Nenhuma característica informada.</p>
+      </div>
     </section>
 
-    <footer class="pc-card-footer">
-      <p><span class="pc-required">*</span> Campos obrigatórios.</p>
-      <button type="submit" class="pc-button pc-button-primary">
+    <footer class="cad-rodape">
+      <p><span class="cad-obrigatorio">*</span> Campos obrigatórios.</p>
+      <button type="submit" class="cad-botao cad-botao-principal">
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M5 12l4 4L19 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M5 12l4 4L19 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
         </svg>
-        Criar produto
+        Cadastrar produto
       </button>
     </footer>
   </form>
 </div>
 
-<template id="compatibilityTemplate">
-  <div class="pc-dynamic-row">
-    <div class="pc-field pc-field-full">
+<template id="modeloCompatibilidade">
+  <div class="cad-linha-dinamica">
+    <div class="cad-campo cad-campo-total">
       <label>PMV compatível</label>
       <select name="pmv_compat">
         <option value="">Selecione um PMV</option>
@@ -494,56 +555,121 @@
         {% endfor %}
       </select>
     </div>
-    <button type="button" class="pc-button pc-button-danger" data-action="remove-row">Remover</button>
+    <button type="button" class="cad-botao cad-botao-remover" data-acao="remover-linha">Remover</button>
   </div>
 </template>
 
-<template id="characteristicTemplate">
-  <div class="pc-dynamic-row characteristic">
-    <div class="pc-field pc-field-full">
+<template id="modeloCaracteristica">
+  <div class="cad-linha-dinamica cad-caracteristica">
+    <div class="cad-campo cad-campo-total">
       <label>Característica</label>
-      <input type="text" name="nova_caracteristica" maxlength="200" placeholder="Ex.: Voltagem">
+      <input type="text" name="nova_caracteristica" maxlength="30" placeholder="Ex.: Voltagem">
     </div>
-    <div class="pc-field pc-field-full">
+    <div class="cad-campo cad-campo-total">
       <label>Valor</label>
       <input type="text" name="novo_valor" maxlength="500" placeholder="Ex.: 12 V">
     </div>
-    <button type="button" class="pc-button pc-button-danger" data-action="remove-row">Remover</button>
+    <button type="button" class="cad-botao cad-botao-remover" data-acao="remover-linha">Remover</button>
   </div>
 </template>
 
 <script>
-  (function(){
+  (function () {
     "use strict";
 
-    const compatibilityList = document.getElementById("compatibilityList");
-    const characteristicList = document.getElementById("characteristicList");
-    const compatibilityTemplate = document.getElementById("compatibilityTemplate");
-    const characteristicTemplate = document.getElementById("characteristicTemplate");
+    const formulario = document.getElementById("formCadastroProduto");
+    const listaCompatibilidade = document.getElementById("listaCompatibilidade");
+    const listaCaracteristicas = document.getElementById("listaCaracteristicas");
+    const modeloCompatibilidade = document.getElementById("modeloCompatibilidade");
+    const modeloCaracteristica = document.getElementById("modeloCaracteristica");
 
-    function appendTemplate(container, template){
-      container.appendChild(template.content.cloneNode(true));
+    function atualizarMensagemVazia(lista, mensagem) {
+      const linhas = lista.querySelectorAll(".cad-linha-dinamica");
+      let aviso = lista.querySelector(".cad-lista-vazia");
+
+      if (linhas.length === 0 && !aviso) {
+        aviso = document.createElement("p");
+        aviso.className = "cad-lista-vazia";
+        aviso.textContent = mensagem;
+        lista.appendChild(aviso);
+      } else if (linhas.length > 0 && aviso) {
+        aviso.remove();
+      }
     }
 
-    document.querySelector('[data-action="add-compatibility"]').addEventListener("click", function(){
-      appendTemplate(compatibilityList, compatibilityTemplate);
+    function adicionarModelo(lista, modelo, mensagemVazia) {
+      const aviso = lista.querySelector(".cad-lista-vazia");
+      if (aviso) {
+        aviso.remove();
+      }
+
+      lista.appendChild(modelo.content.cloneNode(true));
+      atualizarMensagemVazia(lista, mensagemVazia);
+    }
+
+    document.querySelector('[data-acao="adicionar-pmv"]').addEventListener("click", function () {
+      adicionarModelo(listaCompatibilidade, modeloCompatibilidade, "Nenhum PMV informado.");
     });
 
-    document.querySelector('[data-action="add-characteristic"]').addEventListener("click", function(){
-      appendTemplate(characteristicList, characteristicTemplate);
+    document.querySelector('[data-acao="adicionar-caracteristica"]').addEventListener("click", function () {
+      adicionarModelo(listaCaracteristicas, modeloCaracteristica, "Nenhuma característica informada.");
     });
 
-    document.querySelectorAll(".pc-dynamic-list").forEach(function(list){
-      list.addEventListener("click", function(event){
-        const button = event.target.closest('[data-action="remove-row"]');
-        if (button){
-          button.closest(".pc-dynamic-row").remove();
+    document.querySelectorAll(".cad-lista-dinamica").forEach(function (lista) {
+      lista.addEventListener("click", function (evento) {
+        const botao = evento.target.closest('[data-acao="remover-linha"]');
+        if (!botao) {
+          return;
         }
+
+        botao.closest(".cad-linha-dinamica").remove();
+        atualizarMensagemVazia(
+          lista,
+          lista === listaCompatibilidade
+            ? "Nenhum PMV informado."
+            : "Nenhuma característica informada."
+        );
       });
     });
 
-    appendTemplate(compatibilityList, compatibilityTemplate);
-    appendTemplate(characteristicList, characteristicTemplate);
+    formulario.addEventListener("submit", function (evento) {
+      const entrada = Number(document.getElementById("saldo_entrada").value || 0);
+      const saida = Number(document.getElementById("saldo_saida").value || 0);
+      const campoSaida = document.getElementById("saldo_saida");
+      campoSaida.setCustomValidity("");
+
+      if (saida > entrada) {
+        evento.preventDefault();
+        campoSaida.setCustomValidity("A saída inicial não pode ser maior que a entrada inicial.");
+        campoSaida.reportValidity();
+        campoSaida.addEventListener("input", function limparErro() {
+          campoSaida.setCustomValidity("");
+          campoSaida.removeEventListener("input", limparErro);
+        });
+        return;
+      }
+
+      const linhas = listaCaracteristicas.querySelectorAll(".cad-linha-dinamica");
+      for (const linha of linhas) {
+        const caracteristica = linha.querySelector('[name="nova_caracteristica"]');
+        const valor = linha.querySelector('[name="novo_valor"]');
+        caracteristica.setCustomValidity("");
+        valor.setCustomValidity("");
+        const somenteUmPreenchido = Boolean(caracteristica.value.trim()) !== Boolean(valor.value.trim());
+
+        if (somenteUmPreenchido) {
+          evento.preventDefault();
+          const campoIncompleto = caracteristica.value.trim() ? valor : caracteristica;
+          campoIncompleto.setCustomValidity("Preencha a característica e o valor, ou remova esta linha.");
+          campoIncompleto.reportValidity();
+          campoIncompleto.addEventListener("input", function limparErro() {
+            campoIncompleto.setCustomValidity("");
+            campoIncompleto.removeEventListener("input", limparErro);
+          });
+          return;
+        }
+      }
+    });
   })();
 </script>
 {% endblock content %}
