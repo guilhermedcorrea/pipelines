@@ -7399,6 +7399,8 @@ def editar_pedido(pedido_id):
         is_edicao = True,
         total_pedido = total_pedido,
         filhos_info = filhos_info,
+        tem_rota_desmembrar = 'euro.desmembrar_modal' in current_app.view_functions,
+        tem_rota_remover_item = 'euro.remover_item_pedido' in current_app.view_functions,
     )
 
 
@@ -7621,6 +7623,555 @@ def devolver_item(pedido_id, pedido_item_id):
 
     return redirect(url_for('euro.editar_pedido', pedido_id=pedido_id))
 
+
+
+
+
+@euro.route(
+    '/movimentar_estoque_pedido/<int:pedido_id>/<int:pedido_item_id>',
+    methods=['GET', 'POST'],
+    endpoint='movimentar_estoque_pedido'
+)
+@login_required
+@requer_item_menu_paineis('ver_pedidos')
+def movimentar_estoque_pedido(pedido_id, pedido_item_id):
+    """Transfere saldo de um item reservado pelo técnico para um estoque físico."""
+
+    tipo_ids = {
+        'EstoqueMatriz': 1,
+        'Reserva Técnico': 2,
+        'EstoqueManutencaoExterna': 3,
+        'Pedido Venda': 4,
+        'EstoqueContainer': 6,
+        'EstoqueEuroMidia': 7,
+        'EstoqueShempo': 8,
+        'EstoqueManutencaoInterna': 9,
+        'EstoqueEuroMatriz': 10,
+    }
+
+    estoques_config = {
+        'EstoqueMatriz': {
+            'model': EstoqueMatriz,
+            'saldo_attr': 'Saldo',
+            'proprietario_attr': None,
+        },
+        'EstoqueEuroMidia': {
+            'model': EstoqueEuro,
+            'saldo_attr': 'Saldo',
+            'proprietario_attr': 'EuroID',
+        },
+        'EstoqueEuroMatriz': {
+            'model': EstoqueEuroMatriz,
+            'saldo_attr': 'Quantidade',
+            'proprietario_attr': 'EuroID',
+        },
+        'EstoqueShempo': {
+            'model': EstoqueShempo,
+            'saldo_attr': 'Saldo',
+            'proprietario_attr': 'ShempoId',
+        },
+        'EstoqueManutencaoExterna': {
+            'model': EstoqueManutencaoExterna,
+            'saldo_attr': 'Saldo',
+            'proprietario_attr': None,
+        },
+        'EstoqueContainer': {
+            'model': EstoqueContainer,
+            'saldo_attr': 'Saldo',
+            'proprietario_attr': None,
+        },
+        'EstoqueManutencaoInterna': {
+            'model': EstoqueManutencaoInterna,
+            'saldo_attr': 'Saldo',
+            'proprietario_attr': None,
+        },
+    }
+
+    pedido = db.session.query(Pedidos).get(pedido_id)
+    if not pedido or pedido.TipoPedido != 'Reserva Técnico':
+        flash('Pedido não encontrado ou não é uma Reserva Técnico.', 'error')
+        return redirect(url_for('euro.ver_pedidos'))
+
+    pedido_item = db.session.query(PedidoItens).get(pedido_item_id)
+    if not pedido_item or pedido_item.IDPedido != pedido_id:
+        flash('Item não localizado neste pedido.', 'error')
+        return redirect(url_for('euro.editar_pedido', pedido_id=pedido_id))
+
+    produto = db.session.query(Produto).get(pedido_item.IDItem)
+    if not produto:
+        flash('Produto vinculado ao pedido não foi encontrado.', 'error')
+        return redirect(url_for('euro.editar_pedido', pedido_id=pedido_id))
+
+    if (pedido_item.Quantidade or 0) <= 0:
+        flash('Este item não possui mais saldo reservado para movimentação.', 'warning')
+        return redirect(url_for('euro.editar_pedido', pedido_id=pedido_id))
+
+    item_id = pedido_item.IDItem
+
+    def _int_opcional(valor):
+        valor = str(valor or '').strip()
+        if not valor or valor.lower() in {'none', 'null'}:
+            return None
+        try:
+            return int(valor)
+        except (TypeError, ValueError):
+            return None
+
+    def _opcao_destino(registro, nome_estoque, logradouro=''):
+        config = estoques_config[nome_estoque]
+        proprietario_attr = config['proprietario_attr']
+        proprietario = (
+            getattr(registro, proprietario_attr, None)
+            if proprietario_attr else None
+        )
+        return {
+            'IDEstoque': getattr(registro, 'IDEstoque', None),
+            'IDItem': item_id,
+            'CodPonto': getattr(registro, 'CodPonto', None),
+            'Saldo': getattr(registro, config['saldo_attr'], 0) or 0,
+            'NomeEstoque': nome_estoque,
+            'IDProprietario': proprietario,
+            'Logradouro': logradouro or '',
+        }
+
+    origem_groups = {
+        'Reserva Técnico': [{
+            'IDEstoque': pedido.IDPedido,
+            'IDItem': item_id,
+            'CodPonto': pedido_item.CodPonto,
+            'Saldo': pedido_item.Quantidade or 0,
+            'NomeEstoque': 'Reserva Técnico',
+            'IDProprietario': pedido.IDPedido,
+            'Logradouro': '',
+        }]
+    }
+
+    registros_por_tipo = {}
+    for nome_estoque, config in estoques_config.items():
+        registros_por_tipo[nome_estoque] = (
+            db.session.query(config['model'])
+            .filter(config['model'].IDItem == item_id)
+            .order_by(config['model'].IDEstoque)
+            .all()
+        )
+
+    destino_groups = {}
+
+    # Os estoques vinculados à EuroMídia precisam listar também os equipamentos
+    # que ainda não possuem uma linha de saldo para este produto.
+    pontos_euro = (
+        db.session.query(PontosEuro)
+        .order_by(PontosEuro.CodPonto, PontosEuro.EuroID)
+        .all()
+    )
+    endereco_por_ponto = {
+        (p.EuroID, p.CodPonto): (p.Logradouro or '')
+        for p in pontos_euro
+    }
+
+    for nome_estoque in ('EstoqueEuroMidia', 'EstoqueEuroMatriz'):
+        existentes = registros_por_tipo[nome_estoque]
+        por_ponto = {
+            (getattr(reg, 'EuroID', None), getattr(reg, 'CodPonto', None)): reg
+            for reg in existentes
+        }
+        opcoes = []
+        chaves_adicionadas = set()
+
+        for ponto in pontos_euro:
+            chave = (ponto.EuroID, ponto.CodPonto)
+            registro = por_ponto.get(chave)
+            if registro is not None:
+                opcoes.append(
+                    _opcao_destino(
+                        registro,
+                        nome_estoque,
+                        endereco_por_ponto.get(chave, ''),
+                    )
+                )
+            else:
+                opcoes.append({
+                    'IDEstoque': None,
+                    'IDItem': item_id,
+                    'CodPonto': ponto.CodPonto,
+                    'Saldo': 0,
+                    'NomeEstoque': nome_estoque,
+                    'IDProprietario': ponto.EuroID,
+                    'Logradouro': ponto.Logradouro or '',
+                })
+            chaves_adicionadas.add(chave)
+
+        for registro in existentes:
+            chave = (
+                getattr(registro, 'EuroID', None),
+                getattr(registro, 'CodPonto', None),
+            )
+            if chave not in chaves_adicionadas:
+                opcoes.append(_opcao_destino(registro, nome_estoque))
+
+        destino_groups[nome_estoque] = opcoes
+
+    for nome_estoque in (
+        'EstoqueMatriz',
+        'EstoqueShempo',
+        'EstoqueManutencaoExterna',
+        'EstoqueContainer',
+        'EstoqueManutencaoInterna',
+    ):
+        opcoes = [
+            _opcao_destino(registro, nome_estoque)
+            for registro in registros_por_tipo[nome_estoque]
+        ]
+        if not opcoes:
+            opcoes = [{
+                'IDEstoque': None,
+                'IDItem': item_id,
+                'CodPonto': None,
+                'Saldo': 0,
+                'NomeEstoque': nome_estoque,
+                'IDProprietario': None,
+                'Logradouro': '',
+            }]
+        destino_groups[nome_estoque] = opcoes
+
+    pedido_lotes_data = []
+    if getattr(produto, 'ControlaLote', False):
+        pedido_lotes = (
+            db.session.query(PedidoLotes)
+            .filter(
+                PedidoLotes.IDPedido == pedido_id,
+                PedidoLotes.IDPedidoIten == pedido_item_id,
+                PedidoLotes.IDItem == item_id,
+                PedidoLotes.Quantidade > 0,
+            )
+            .order_by(PedidoLotes.NumeroLote)
+            .all()
+        )
+        pedido_lotes_data = [{
+            'NumeroLote': lote.NumeroLote,
+            'Quantidade': lote.Quantidade or 0,
+            'NomeProduto': produto.NomeProduto,
+        } for lote in pedido_lotes]
+
+    pedido_series_data = []
+    if getattr(produto, 'ControlaNumerodeSerie', False):
+        pedido_series = (
+            db.session.query(PedidoItemSerie)
+            .filter(
+                PedidoItemSerie.IDPedido == pedido_id,
+                PedidoItemSerie.IDPedidoIten == pedido_item_id,
+                PedidoItemSerie.IDItem == item_id,
+            )
+            .order_by(PedidoItemSerie.NumeroSerie)
+            .all()
+        )
+        pedido_series_data = [{
+            'IDSerie': serie.IDSerie,
+            'NumeroSerie': serie.NumeroSerie,
+            'NumeroLote': serie.NumeroLote,
+        } for serie in pedido_series]
+
+    if request.method == 'POST':
+        try:
+            pedido_item = (
+                db.session.query(PedidoItens)
+                .filter(
+                    PedidoItens.IDPedidoIten == pedido_item_id,
+                    PedidoItens.IDPedido == pedido_id,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if pedido_item is None:
+                raise ValueError('O item não está mais disponível neste pedido.')
+
+            try:
+                quantidade = int(request.form.get('quantidade', '0') or 0)
+            except (TypeError, ValueError):
+                quantidade = 0
+
+            saldo_reservado = int(pedido_item.Quantidade or 0)
+            if quantidade <= 0:
+                raise ValueError('Informe uma quantidade maior que zero.')
+            if quantidade > saldo_reservado:
+                raise ValueError(
+                    'A quantidade informada é maior que o saldo reservado do item.'
+                )
+
+            tipo_destino = request.form.get('estoque_destino', '').strip()
+            if tipo_destino not in estoques_config:
+                raise ValueError('Selecione um tipo de estoque de destino válido.')
+
+            partes_destino = request.form.get(
+                'proprietario_destino', ''
+            ).split('|', 2)
+            if len(partes_destino) != 3:
+                raise ValueError('Selecione corretamente o equipamento/estoque de destino.')
+
+            estoque_id = _int_opcional(partes_destino[0])
+            proprietario_id = _int_opcional(partes_destino[1])
+            cod_ponto = _int_opcional(partes_destino[2])
+
+            config = estoques_config[tipo_destino]
+            model = config['model']
+            saldo_attr = config['saldo_attr']
+            proprietario_attr = config['proprietario_attr']
+
+            query_destino = db.session.query(model).filter(model.IDItem == item_id)
+            destino = None
+
+            if estoque_id is not None:
+                destino = (
+                    query_destino
+                    .filter(model.IDEstoque == estoque_id)
+                    .with_for_update()
+                    .first()
+                )
+                if destino is None:
+                    raise ValueError('O estoque de destino selecionado não foi encontrado.')
+            else:
+                if proprietario_attr:
+                    if proprietario_id is None:
+                        raise ValueError('Selecione o proprietário/equipamento de destino.')
+                    query_destino = query_destino.filter(
+                        getattr(model, proprietario_attr) == proprietario_id
+                    )
+                if hasattr(model, 'CodPonto'):
+                    query_destino = query_destino.filter(model.CodPonto == cod_ponto)
+                destino = query_destino.with_for_update().first()
+
+            if tipo_destino in ('EstoqueEuroMidia', 'EstoqueEuroMatriz'):
+                ponto_valido = (
+                    db.session.query(PontosEuro.EuroID)
+                    .filter(
+                        PontosEuro.EuroID == proprietario_id,
+                        PontosEuro.CodPonto == cod_ponto,
+                    )
+                    .first()
+                )
+                if estoque_id is None and ponto_valido is None:
+                    raise ValueError('O equipamento/painel selecionado não é válido.')
+
+            if destino is None:
+                campos_destino = {
+                    'IDItem': item_id,
+                    saldo_attr: quantidade,
+                }
+                if proprietario_attr:
+                    campos_destino[proprietario_attr] = proprietario_id
+                if hasattr(model, 'CodPonto'):
+                    campos_destino['CodPonto'] = cod_ponto
+                if hasattr(model, 'IDTipoEstoque'):
+                    campos_destino['IDTipoEstoque'] = tipo_ids[tipo_destino]
+
+                destino = model(**campos_destino)
+                db.session.add(destino)
+                db.session.flush()
+            else:
+                saldo_atual = getattr(destino, saldo_attr, 0) or 0
+                setattr(destino, saldo_attr, saldo_atual + quantidade)
+                if hasattr(destino, 'IDTipoEstoque'):
+                    destino.IDTipoEstoque = tipo_ids[tipo_destino]
+                db.session.add(destino)
+                db.session.flush()
+
+            lote_numero = request.form.get(
+                'numero_lote_escolhido', ''
+            ).strip()
+
+            if getattr(produto, 'ControlaLote', False):
+                if not lote_numero:
+                    raise ValueError('Selecione o lote que será movimentado.')
+
+                lotes_reserva = (
+                    db.session.query(PedidoLotes)
+                    .filter(
+                        PedidoLotes.IDPedido == pedido_id,
+                        PedidoLotes.IDPedidoIten == pedido_item_id,
+                        PedidoLotes.IDItem == item_id,
+                        PedidoLotes.NumeroLote == lote_numero,
+                    )
+                    .with_for_update()
+                    .all()
+                )
+                saldo_lote = sum(int(lote.Quantidade or 0) for lote in lotes_reserva)
+                if saldo_lote < quantidade:
+                    raise ValueError(
+                        'O lote selecionado não possui quantidade suficiente na reserva.'
+                    )
+
+                restante = quantidade
+                for lote_reserva in lotes_reserva:
+                    retirar = min(restante, int(lote_reserva.Quantidade or 0))
+                    lote_reserva.Quantidade -= retirar
+                    restante -= retirar
+                    if lote_reserva.Quantidade <= 0:
+                        db.session.delete(lote_reserva)
+                    if restante == 0:
+                        break
+
+                lote_destino = (
+                    db.session.query(EstoqueLotes)
+                    .filter(
+                        EstoqueLotes.IDItem == item_id,
+                        EstoqueLotes.IDEstoque == destino.IDEstoque,
+                        EstoqueLotes.IDTipoEstoque == tipo_ids[tipo_destino],
+                        EstoqueLotes.NumeroLote == lote_numero,
+                    )
+                    .with_for_update()
+                    .first()
+                )
+                if lote_destino:
+                    lote_destino.Quantidade = (
+                        int(lote_destino.Quantidade or 0) + quantidade
+                    )
+                    lote_destino.CodPonto = getattr(destino, 'CodPonto', None)
+                else:
+                    lote_destino = EstoqueLotes(
+                        IDItem=item_id,
+                        IDEstoque=destino.IDEstoque,
+                        NumeroLote=lote_numero,
+                        NumerodeSerie=None,
+                        Quantidade=quantidade,
+                        DataEntrada=datetime.now(),
+                        IDTipoEstoque=tipo_ids[tipo_destino],
+                        CodPonto=getattr(destino, 'CodPonto', None),
+                    )
+                    db.session.add(lote_destino)
+
+            if getattr(produto, 'ControlaNumerodeSerie', False):
+                series_informadas = [
+                    numero.strip()
+                    for numero in request.form.getlist('numero_serie_escolhido[]')
+                    if numero and numero.strip()
+                ]
+                series_informadas = list(dict.fromkeys(series_informadas))
+
+                if len(series_informadas) != quantidade:
+                    raise ValueError(
+                        'Selecione exatamente uma série para cada unidade movimentada.'
+                    )
+
+                series_reserva = (
+                    db.session.query(PedidoItemSerie)
+                    .filter(
+                        PedidoItemSerie.IDPedido == pedido_id,
+                        PedidoItemSerie.IDPedidoIten == pedido_item_id,
+                        PedidoItemSerie.IDItem == item_id,
+                        PedidoItemSerie.NumeroSerie.in_(series_informadas),
+                    )
+                    .with_for_update()
+                    .all()
+                )
+                if len(series_reserva) != quantidade:
+                    raise ValueError(
+                        'Uma ou mais séries selecionadas não pertencem mais à reserva.'
+                    )
+
+                if getattr(produto, 'ControlaLote', False):
+                    serie_lote_invalida = any(
+                        (serie.NumeroLote or '') != lote_numero
+                        for serie in series_reserva
+                    )
+                    if serie_lote_invalida:
+                        raise ValueError(
+                            'As séries selecionadas não pertencem ao lote informado.'
+                        )
+
+                for serie_reserva in series_reserva:
+                    db.session.add(EstoqueSerie(
+                        IDSerie=serie_reserva.IDSerie,
+                        IDItem=serie_reserva.IDItem,
+                        NumeroSerie=serie_reserva.NumeroSerie,
+                        NumeroLote=serie_reserva.NumeroLote,
+                        IDEstoque=destino.IDEstoque,
+                        TipoEstoque=tipo_destino,
+                        CodPonto=getattr(destino, 'CodPonto', None),
+                        IDTipoEstoque=tipo_ids[tipo_destino],
+                        DataEntrada=datetime.now(),
+                        DataSaida=None,
+                    ))
+                    db.session.delete(serie_reserva)
+
+            pedido_item.Quantidade = saldo_reservado - quantidade
+            if pedido_item.Quantidade <= 0:
+                pedido_item.Quantidade = 0
+            db.session.add(pedido_item)
+
+            db.session.add(Movimentacao(
+                IDUsuario=session.get('user_id'),
+                NomeMovimentacao=(
+                    f'Transferência Reserva Técnico Pedido {pedido.IDPedido}'
+                ),
+                IDItem=item_id,
+                Quantidade=quantidade,
+                IDProprietarioOrigem=pedido.IDPedido,
+                IDTipoEstoqueOrigem=tipo_ids['Reserva Técnico'],
+                CodPontoOrigem=pedido_item.CodPonto,
+                IDProprietarioDestino=destino.IDEstoque,
+                IDTipoEstoqueDestino=tipo_ids[tipo_destino],
+                CodPontoDestino=getattr(destino, 'CodPonto', None),
+                NumeroLoteOrigem=lote_numero or None,
+                NumeroLoteDestino=lote_numero or None,
+                DataMovimentacao=datetime.now(),
+            ))
+
+            db.session.add(ObservacoesPedidos(
+                IDPedido=pedido_id,
+                Observacao=(
+                    f'Movimentação de {quantidade} unidade(s) do item '
+                    f'{item_id} para {tipo_destino}'
+                    + (
+                        f' / CodPonto {getattr(destino, "CodPonto", None)}'
+                        if getattr(destino, 'CodPonto', None) is not None else ''
+                    )
+                    + (
+                        f' / Lote {lote_numero}' if lote_numero else ''
+                    )
+                ),
+                IDUsuario=session.get('user_id'),
+                DataObservacao=datetime.now(),
+            ))
+
+            db.session.commit()
+            flash('Estoque movimentado com sucesso.', 'success')
+            return redirect(url_for('euro.editar_pedido', pedido_id=pedido_id))
+
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), 'error')
+            return redirect(url_for(
+                'euro.movimentar_estoque_pedido',
+                pedido_id=pedido_id,
+                pedido_item_id=pedido_item_id,
+            ))
+        except SQLAlchemyError:
+            db.session.rollback()
+            current_app.logger.exception(
+                'Erro ao movimentar item %s da reserva técnica %s.',
+                pedido_item_id,
+                pedido_id,
+            )
+            flash(
+                'Não foi possível concluir a movimentação. Nenhum saldo foi alterado.',
+                'error',
+            )
+            return redirect(url_for(
+                'euro.movimentar_estoque_pedido',
+                pedido_id=pedido_id,
+                pedido_item_id=pedido_item_id,
+            ))
+
+    return render_template(
+        'shempo/movimentar_estoque_pedido.html',
+        item=produto,
+        pedido=pedido,
+        pedido_item=pedido_item,
+        origem_groups=origem_groups,
+        destino_groups=destino_groups,
+        pedido_lotes_data=pedido_lotes_data,
+        pedido_series_data=pedido_series_data,
+    )
 
 
 

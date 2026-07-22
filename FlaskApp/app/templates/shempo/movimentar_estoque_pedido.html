@@ -1,124 +1,639 @@
-{% extends 'base.html' %}
-{% block title %}Movimentar Estoque do Item {{ item.IDItem }}{% endblock %}
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Movimentar Estoque — Pedido #{{ pedido.IDPedido }}{% endblock %}
 
 {% block content %}
-<h2>Movimentar Estoque do Item {{ item.IDItem }} - {{ item.NomeProduto }}</h2>
+<style>
+  .mov-pedido-page {
+    --mov-primary: #1f5f99;
+    --mov-primary-dark: #174a78;
+    --mov-border: #dfe6ee;
+    --mov-muted: #667085;
+    --mov-bg: #f4f7fb;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 24px clamp(12px, 2vw, 28px) 40px;
+  }
 
-<form method="POST" action="{{ url_for('euro.movimentar_estoque_pedido', pedido_id=pedido.IDPedido, item_id=item.IDItem) }}">
-  <!-- Estoque de Origem -->
-  <div class="mb-3">
-    <label for="estoque_origem" class="form-label">Estoque de Origem</label>
-    <select name="estoque_origem" id="estoque_origem" class="form-select" onchange="atualizarProprietario('origem')">
-      {% for nome, lista in origem_groups.items() %}
-      <option value="{{ nome }}">{{ nome }} (Qtd: {{ lista[0].Saldo }})</option>
-      {% endfor %}
-    </select>
-  </div>
+  .mov-pedido-page *,
+  .mov-pedido-page *::before,
+  .mov-pedido-page *::after {
+    box-sizing: border-box;
+  }
 
-  <!-- Proprietário de Origem -->
-  <div class="mb-3">
-    <label for="proprietario_origem" class="form-label">Proprietário de Origem</label>
-    <select name="proprietario_origem" id="proprietario_origem" class="form-select">
-      <!-- Preenchido via JS -->
-    </select>
-  </div>
+  .mov-pedido-page .mov-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 20px;
+    padding: clamp(18px, 3vw, 28px);
+    color: #fff;
+    border-radius: 18px;
+    background: linear-gradient(135deg, var(--mov-primary-dark), var(--mov-primary));
+    box-shadow: 0 12px 30px rgba(23, 74, 120, .18);
+  }
 
-  <!-- Estoque de Destino -->
-  <div class="mb-3">
-    <label for="estoque_destino" class="form-label">Receber Estoque</label>
-    <select name="estoque_destino" id="estoque_destino" class="form-select" onchange="atualizarProprietario('destino')">
-      {% for nome, lista in destino_groups.items() %}
-      <option value="{{ nome }}">{{ nome }} (Qtd: {{ lista[0].Saldo }})</option>
-      {% endfor %}
-    </select>
-  </div>
+  .mov-pedido-page .mov-header h1 {
+    margin: 0 0 7px;
+    font-size: clamp(1.45rem, 3vw, 2rem);
+    font-weight: 750;
+  }
 
-  <!-- Proprietário de Destino -->
-  <div class="mb-3">
-    <label for="proprietario_destino" class="form-label">Proprietário de Destino</label>
-    <select name="proprietario_destino" id="proprietario_destino" class="form-select">
-      <!-- Preenchido via JS -->
-    </select>
-  </div>
+  .mov-pedido-page .mov-header p {
+    margin: 0;
+    color: rgba(255, 255, 255, .82);
+  }
 
-  <!-- Quantidade a Transferir -->
-  <div class="mb-3">
-    <label for="quantidade" class="form-label">Quantidade a Transferir</label>
-    <input type="number" name="quantidade" id="quantidade" class="form-control" value="0" min="0" oninput="atualizarCalculos()">
-  </div>
+  .mov-pedido-page .mov-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 9px 14px;
+    border: 1px solid rgba(255, 255, 255, .28);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .12);
+    font-weight: 700;
+    white-space: nowrap;
+  }
 
-  <!-- Exibição dinâmica dos saldos -->
-  <div class="mb-3">
-    <p><strong>Disponível no Estoque de Origem após Transferência:</strong> <span id="origem_restante">0</span></p>
-    <p><strong>Disponível no Estoque de Destino após Transferência:</strong> <span id="destino_restante">0</span></p>
-  </div>
+  .mov-pedido-page .mov-card {
+    margin-bottom: 20px;
+    overflow: hidden;
+    border: 1px solid var(--mov-border);
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 6px 20px rgba(16, 24, 40, .06);
+  }
 
-  <div class="row">
-    <div class="col-md-6">
-      <h4>Detalhes Estoque de Origem</h4>
-      <table class="table table-bordered">
-        <tr>
-          <th>ID Item</th>
-          <th>Nome Produto</th>
-          <th>FamiliaID</th>
-          <th>Referência Externa</th>
-          <th>Saldo Atual</th>
-          <th>Saldo Após Transferência</th>
-        </tr>
-        <tr>
-          <td>{{ item.IDItem }}</td>
-          <td>{{ item.NomeProduto }}</td>
-          <td>{{ item.FamiliaID or '-' }}</td>
-          <td>{{ item.ReferenciaExterna }}</td>
-          <td id="origem_atual">0</td>
-          <td id="origem_transferido">0</td>
-        </tr>
-      </table>
+  .mov-pedido-page .mov-card-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--mov-border);
+    background: #fbfcfe;
+  }
+
+  .mov-pedido-page .mov-card-header h2 {
+    margin: 0;
+    color: #1d2939;
+    font-size: 1.08rem;
+    font-weight: 750;
+  }
+
+  .mov-pedido-page .mov-card-body {
+    padding: clamp(16px, 2.5vw, 24px);
+  }
+
+  .mov-pedido-page .mov-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 13px;
+  }
+
+  .mov-pedido-page .mov-summary-item {
+    min-width: 0;
+    padding: 13px 14px;
+    border: 1px solid #eaecf0;
+    border-radius: 12px;
+    background: var(--mov-bg);
+  }
+
+  .mov-pedido-page .mov-summary-label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--mov-muted);
+    font-size: .75rem;
+    font-weight: 750;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+  }
+
+  .mov-pedido-page .mov-summary-value {
+    display: block;
+    overflow-wrap: anywhere;
+    color: #101828;
+    font-weight: 650;
+  }
+
+  .mov-pedido-page .mov-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  .mov-pedido-page .mov-field-full {
+    grid-column: 1 / -1;
+  }
+
+  .mov-pedido-page .form-label {
+    color: #344054;
+    font-weight: 700;
+  }
+
+  .mov-pedido-page .form-text {
+    color: var(--mov-muted);
+  }
+
+  .mov-pedido-page .mov-balance-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 4px;
+  }
+
+  .mov-pedido-page .mov-balance {
+    padding: 16px;
+    border: 1px solid var(--mov-border);
+    border-radius: 12px;
+    background: #fbfcfe;
+  }
+
+  .mov-pedido-page .mov-balance strong {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--mov-muted);
+    font-size: .78rem;
+    text-transform: uppercase;
+  }
+
+  .mov-pedido-page .mov-balance span {
+    color: #101828;
+    font-size: 1.35rem;
+    font-weight: 800;
+  }
+
+  .mov-pedido-page .mov-series-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    max-height: 270px;
+    padding: 12px;
+    overflow-y: auto;
+    border: 1px solid var(--mov-border);
+    border-radius: 12px;
+    background: #fbfcfe;
+  }
+
+  .mov-pedido-page .mov-series-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid #eaecf0;
+    border-radius: 9px;
+    background: #fff;
+  }
+
+  .mov-pedido-page .mov-series-item label {
+    min-width: 0;
+    cursor: pointer;
+  }
+
+  .mov-pedido-page .mov-series-number {
+    display: block;
+    overflow-wrap: anywhere;
+    color: #101828;
+    font-weight: 700;
+  }
+
+  .mov-pedido-page .mov-series-lot {
+    color: var(--mov-muted);
+    font-size: .78rem;
+  }
+
+  .mov-pedido-page .mov-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 22px;
+    padding-top: 20px;
+    border-top: 1px solid var(--mov-border);
+  }
+
+  .mov-pedido-page .mov-warning {
+    margin-top: 10px;
+    padding: 11px 13px;
+    color: #7a2e0e;
+    border: 1px solid #fedf89;
+    border-radius: 9px;
+    background: #fffaeb;
+  }
+
+  @media (max-width: 960px) {
+    .mov-pedido-page .mov-summary {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .mov-pedido-page .mov-series-list {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 680px) {
+    .mov-pedido-page {
+      padding-top: 14px;
+    }
+
+    .mov-pedido-page .mov-header {
+      flex-direction: column;
+    }
+
+    .mov-pedido-page .mov-grid,
+    .mov-pedido-page .mov-summary,
+    .mov-pedido-page .mov-balance-grid,
+    .mov-pedido-page .mov-series-list {
+      grid-template-columns: 1fr;
+    }
+
+    .mov-pedido-page .mov-field-full {
+      grid-column: auto;
+    }
+
+    .mov-pedido-page .mov-actions {
+      flex-direction: column-reverse;
+    }
+
+    .mov-pedido-page .mov-actions .btn {
+      width: 100%;
+    }
+  }
+</style>
+
+<main class="mov-pedido-page">
+  <header class="mov-header">
+    <div>
+      <h1>Movimentar estoque da reserva</h1>
+      <p>Transfira o saldo reservado pelo técnico para um equipamento ou outro estoque.</p>
     </div>
-    <div class="col-md-6">
-      <h4>Detalhes Estoque de Destino</h4>
-      <table class="table table-bordered">
-        <tr>
-          <th>ID Item</th>
-          <th>Nome Produto</th>
-          <th>FamiliaID</th>
-          <th>Referência Externa</th>
-          <th>Saldo Atual</th>
-          <th>Saldo Após Transferência</th>
-        </tr>
-        <tr>
-          <td>{{ item.IDItem }}</td>
-          <td>{{ item.NomeProduto }}</td>
-          <td>{{ item.FamiliaID or '-' }}</td>
-          <td>{{ item.ReferenciaExterna }}</td>
-          <td id="destino_atual">0</td>
-          <td id="destino_transferido">0</td>
-        </tr>
-      </table>
+    <span class="mov-badge">Pedido #{{ pedido.IDPedido }}</span>
+  </header>
+
+  <section class="mov-card" aria-labelledby="resumo-movimentacao-title">
+    <div class="mov-card-header">
+      <h2 id="resumo-movimentacao-title">Item reservado</h2>
     </div>
-  </div>
+    <div class="mov-card-body">
+      <div class="mov-summary">
+        <div class="mov-summary-item">
+          <span class="mov-summary-label">ID do item</span>
+          <span class="mov-summary-value">{{ item.IDItem }}</span>
+        </div>
+        <div class="mov-summary-item">
+          <span class="mov-summary-label">Produto</span>
+          <span class="mov-summary-value">{{ item.NomeProduto }}</span>
+        </div>
+        <div class="mov-summary-item">
+          <span class="mov-summary-label">Origem</span>
+          <span class="mov-summary-value">Reserva Técnico — Pedido #{{ pedido.IDPedido }}</span>
+        </div>
+        <div class="mov-summary-item">
+          <span class="mov-summary-label">Saldo reservado</span>
+          <span class="mov-summary-value" id="saldo-reservado">{{ pedido_item.Quantidade or 0 }}</span>
+        </div>
+      </div>
+    </div>
+  </section>
 
-  <button type="submit" class="btn btn-primary">Confirmar</button>
-</form>
+  <section class="mov-card" aria-labelledby="destino-movimentacao-title">
+    <div class="mov-card-header">
+      <h2 id="destino-movimentacao-title">Destino da movimentação</h2>
+    </div>
 
-<a href="{{ url_for('euro.ver_estoques', item_id=item.IDItem) }}" class="btn btn-secondary mt-3">Voltar</a>
+    <div class="mov-card-body">
+      <form method="post"
+            action="{{ url_for('euro.movimentar_estoque_pedido', pedido_id=pedido.IDPedido, pedido_item_id=pedido_item.IDPedidoIten) }}"
+            id="form-movimentar-pedido"
+            novalidate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div class="mov-grid">
+          <div>
+            <label for="estoque_destino" class="form-label">Tipo de estoque de destino</label>
+            <select name="estoque_destino"
+                    id="estoque_destino"
+                    class="form-select"
+                    required>
+              {% for nome_estoque, opcoes in destino_groups.items() %}
+                <option value="{{ nome_estoque }}">
+                  {% if nome_estoque == 'EstoqueEuroMidia' %}
+                    Equipamento/Painel — Estoque EuroMídia
+                  {% elif nome_estoque == 'EstoqueEuroMatriz' %}
+                    Equipamento/Painel — Estoque EuroMatriz
+                  {% elif nome_estoque == 'EstoqueMatriz' %}
+                    Estoque Matriz
+                  {% elif nome_estoque == 'EstoqueShempo' %}
+                    Estoque Shempo
+                  {% elif nome_estoque == 'EstoqueManutencaoExterna' %}
+                    Manutenção Externa
+                  {% elif nome_estoque == 'EstoqueManutencaoInterna' %}
+                    Manutenção Interna
+                  {% elif nome_estoque == 'EstoqueContainer' %}
+                    Estoque Container
+                  {% else %}
+                    {{ nome_estoque }}
+                  {% endif %}
+                </option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Selecione “Equipamento/Painel” para transferir o item ao CodPonto.</div>
+          </div>
+
+          <div>
+            <label for="proprietario_destino" class="form-label">Equipamento / local de destino</label>
+            <select name="proprietario_destino"
+                    id="proprietario_destino"
+                    class="form-select"
+                    required>
+            </select>
+            <div class="form-text" id="destino-detalhe">Escolha o equipamento ou estoque que receberá o saldo.</div>
+          </div>
+
+          {% if item.ControlaLote %}
+            <div>
+              <label for="numero_lote_escolhido" class="form-label">Lote da reserva</label>
+              <select name="numero_lote_escolhido"
+                      id="numero_lote_escolhido"
+                      class="form-select"
+                      required>
+                <option value="">-- selecione o lote --</option>
+                {% for lote in pedido_lotes_data %}
+                  <option value="{{ lote.NumeroLote }}"
+                          data-quantidade="{{ lote.Quantidade or 0 }}">
+                    {{ lote.NumeroLote }} — disponível: {{ lote.Quantidade or 0 }}
+                  </option>
+                {% endfor %}
+              </select>
+              {% if not pedido_lotes_data %}
+                <div class="mov-warning">
+                  O produto controla lote, mas não há lote disponível vinculado a este item da reserva.
+                </div>
+              {% endif %}
+            </div>
+          {% endif %}
+
+          <div>
+            <label for="quantidade" class="form-label">Quantidade a transferir</label>
+            <input type="number"
+                   name="quantidade"
+                   id="quantidade"
+                   class="form-control"
+                   value="1"
+                   min="1"
+                   max="{{ pedido_item.Quantidade or 0 }}"
+                   inputmode="numeric"
+                   {% if item.ControlaNumerodeSerie %}readonly{% endif %}
+                   required>
+            {% if item.ControlaNumerodeSerie %}
+              <div class="form-text">A quantidade é calculada pelas séries marcadas abaixo.</div>
+            {% endif %}
+          </div>
+
+          {% if item.ControlaNumerodeSerie %}
+            <div class="mov-field-full">
+              <label class="form-label">Séries que serão movimentadas</label>
+              {% if pedido_series_data %}
+                <div class="mov-series-list" id="lista-series">
+                  {% for serie in pedido_series_data %}
+                    <div class="mov-series-item"
+                         data-serie-lote="{{ serie.NumeroLote or '' }}">
+                      <input class="form-check-input serie-checkbox"
+                             type="checkbox"
+                             name="numero_serie_escolhido[]"
+                             value="{{ serie.NumeroSerie }}"
+                             id="serie-{{ loop.index }}"
+                             checked>
+                      <label for="serie-{{ loop.index }}">
+                        <span class="mov-series-number">{{ serie.NumeroSerie }}</span>
+                        <span class="mov-series-lot">Lote: {{ serie.NumeroLote or '-' }}</span>
+                      </label>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="mov-warning">
+                  O produto controla número de série, mas nenhuma série está vinculada a este item.
+                </div>
+              {% endif %}
+            </div>
+          {% endif %}
+
+          <div class="mov-field-full">
+            <div class="mov-balance-grid">
+              <div class="mov-balance">
+                <strong>Saldo restante na reserva</strong>
+                <span id="saldo-origem-apos">{{ pedido_item.Quantidade or 0 }}</span>
+              </div>
+              <div class="mov-balance">
+                <strong>Saldo no destino após a transferência</strong>
+                <span id="saldo-destino-apos">0</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mov-actions">
+          <a href="{{ url_for('euro.editar_pedido', pedido_id=pedido.IDPedido) }}"
+             class="btn btn-secondary">
+            <i class="bi bi-arrow-left" aria-hidden="true"></i>
+            Voltar ao pedido
+          </a>
+          <button type="submit"
+                  class="btn btn-primary"
+                  id="btn-confirmar-movimentacao">
+            <i class="bi bi-arrow-left-right" aria-hidden="true"></i>
+            Confirmar movimentação
+          </button>
+        </div>
+      </form>
+    </div>
+  </section>
+</main>
 
 <script>
-  // GARANTIR QUE NÃO REDIRECIONA O FORM
-  document.querySelector('form').addEventListener('submit', function(e) {
-    const action = this.action;
-    if (!action.includes('/movimentar_estoque_pedido/')) {
-      e.preventDefault();
-      alert('Erro: formulário com rota incorreta!');
+  (function () {
+    'use strict';
+
+    const destinoGroups = {{ destino_groups|tojson }};
+    const saldoReservado = Number({{ pedido_item.Quantidade or 0 }});
+    const controlaLote = {{ 'true' if item.ControlaLote else 'false' }};
+    const controlaSerie = {{ 'true' if item.ControlaNumerodeSerie else 'false' }};
+
+    const form = document.getElementById('form-movimentar-pedido');
+    const tipoDestino = document.getElementById('estoque_destino');
+    const localDestino = document.getElementById('proprietario_destino');
+    const quantidade = document.getElementById('quantidade');
+    const lote = document.getElementById('numero_lote_escolhido');
+    const origemApos = document.getElementById('saldo-origem-apos');
+    const destinoApos = document.getElementById('saldo-destino-apos');
+    const destinoDetalhe = document.getElementById('destino-detalhe');
+
+    function textoDestino(registro) {
+      const partes = [];
+
+      if (registro.CodPonto !== null && registro.CodPonto !== '') {
+        partes.push('CodPonto ' + registro.CodPonto);
+      }
+      if (registro.Logradouro) {
+        partes.push(registro.Logradouro);
+      }
+      if (registro.IDEstoque !== null && registro.IDEstoque !== '') {
+        partes.push('IDEstoque ' + registro.IDEstoque);
+      }
+      partes.push('Saldo atual: ' + Number(registro.Saldo || 0));
+
+      return partes.join(' — ');
     }
-  });
 
-  function atualizarProprietario(tipo) {
-    // Se quiser preencher os selects via AJAX, faça aqui
-  }
+    function valorDestino(registro) {
+      const estoqueId = registro.IDEstoque ?? '';
+      const proprietarioId = registro.IDProprietario ?? '';
+      const codPonto = registro.CodPonto ?? '';
+      return `${estoqueId}|${proprietarioId}|${codPonto}`;
+    }
 
-  function atualizarCalculos() {
-    // Se quiser calcular o saldo restante, implemente aqui
-  }
+    function preencherDestinos() {
+      const grupo = destinoGroups[tipoDestino.value] || [];
+      localDestino.innerHTML = '';
+
+      grupo.forEach(function (registro, indice) {
+        const option = document.createElement('option');
+        option.value = valorDestino(registro);
+        option.textContent = textoDestino(registro);
+        option.dataset.saldo = String(Number(registro.Saldo || 0));
+        option.dataset.logradouro = registro.Logradouro || '';
+        option.dataset.codPonto = registro.CodPonto ?? '';
+        if (indice === 0) option.selected = true;
+        localDestino.appendChild(option);
+      });
+
+      atualizarCalculos();
+    }
+
+    function quantidadeSelecionada() {
+      return Math.max(0, Number.parseInt(quantidade.value, 10) || 0);
+    }
+
+    function seriesVisiveis() {
+      return Array.from(document.querySelectorAll('.mov-series-item'))
+        .filter(function (item) { return !item.hidden; });
+    }
+
+    function atualizarQuantidadePorSeries() {
+      if (!controlaSerie) return;
+
+      const marcadas = document.querySelectorAll('.serie-checkbox:checked').length;
+      quantidade.value = String(marcadas);
+      atualizarCalculos();
+    }
+
+    function filtrarSeriesPorLote() {
+      if (!controlaSerie || !controlaLote || !lote) return;
+
+      const loteSelecionado = lote.value;
+      document.querySelectorAll('.mov-series-item').forEach(function (item) {
+        const mesmoLote = Boolean(loteSelecionado) && item.dataset.serieLote === loteSelecionado;
+        item.hidden = !mesmoLote;
+
+        const checkbox = item.querySelector('.serie-checkbox');
+        checkbox.checked = mesmoLote;
+      });
+
+      atualizarQuantidadePorSeries();
+    }
+
+    function atualizarLimiteDoLote() {
+      if (!controlaLote || !lote || controlaSerie) return;
+
+      const selecionado = lote.options[lote.selectedIndex];
+      const saldoLote = selecionado ? Number(selecionado.dataset.quantidade || 0) : 0;
+      const limite = Math.min(saldoReservado, saldoLote);
+      quantidade.max = String(limite);
+
+      if (limite > 0 && (quantidadeSelecionada() <= 0 || quantidadeSelecionada() > limite)) {
+        quantidade.value = '1';
+      }
+      atualizarCalculos();
+    }
+
+    function atualizarCalculos() {
+      const qtd = quantidadeSelecionada();
+      const option = localDestino.options[localDestino.selectedIndex];
+      const saldoDestino = option ? Number(option.dataset.saldo || 0) : 0;
+
+      origemApos.textContent = String(Math.max(0, saldoReservado - qtd));
+      destinoApos.textContent = String(saldoDestino + qtd);
+
+      if (option) {
+        const detalhes = [];
+        if (option.dataset.codPonto) detalhes.push('CodPonto ' + option.dataset.codPonto);
+        if (option.dataset.logradouro) detalhes.push(option.dataset.logradouro);
+        destinoDetalhe.textContent = detalhes.length
+          ? detalhes.join(' — ')
+          : 'Destino selecionado.';
+      }
+    }
+
+    tipoDestino.addEventListener('change', preencherDestinos);
+    localDestino.addEventListener('change', atualizarCalculos);
+    quantidade.addEventListener('input', atualizarCalculos);
+
+    if (lote) {
+      lote.addEventListener('change', function () {
+        filtrarSeriesPorLote();
+        atualizarLimiteDoLote();
+      });
+    }
+
+    document.querySelectorAll('.serie-checkbox').forEach(function (checkbox) {
+      checkbox.addEventListener('change', atualizarQuantidadePorSeries);
+    });
+
+    form.addEventListener('submit', function (event) {
+      const qtd = quantidadeSelecionada();
+      let mensagem = '';
+
+      if (!localDestino.value) {
+        mensagem = 'Selecione o equipamento ou estoque de destino.';
+      } else if (controlaLote && (!lote || !lote.value)) {
+        mensagem = 'Selecione o lote que será movimentado.';
+      } else if (qtd <= 0) {
+        mensagem = 'Informe uma quantidade maior que zero.';
+      } else if (qtd > saldoReservado) {
+        mensagem = 'A quantidade é maior que o saldo reservado.';
+      } else if (controlaSerie) {
+        const marcadas = document.querySelectorAll('.serie-checkbox:checked').length;
+        if (marcadas !== qtd) {
+          mensagem = 'Selecione exatamente uma série para cada unidade movimentada.';
+        }
+      }
+
+      if (mensagem) {
+        event.preventDefault();
+        window.alert(mensagem);
+        return;
+      }
+
+      if (!window.confirm('Confirma a transferência do saldo reservado para o destino selecionado?')) {
+        event.preventDefault();
+      }
+    });
+
+    preencherDestinos();
+
+    if (controlaLote && lote && lote.options.length > 1) {
+      lote.selectedIndex = 1;
+      filtrarSeriesPorLote();
+      atualizarLimiteDoLote();
+    } else if (controlaSerie) {
+      atualizarQuantidadePorSeries();
+    } else {
+      atualizarCalculos();
+    }
+
+    if (controlaSerie && seriesVisiveis().length === 0) {
+      quantidade.value = '0';
+      atualizarCalculos();
+    }
+  })();
 </script>
 {% endblock %}
