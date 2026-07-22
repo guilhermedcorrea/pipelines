@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ assunto }}</title>
+</head>
+<body style="margin:0;padding:0;background:#F2F4F8;font-family:Arial,Helvetica,sans-serif;color:#1D2433;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;background:#F2F4F8;border-collapse:collapse;margin:0;padding:0;">
+    <tr>
+      <td align="center" style="padding:28px 14px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="660" style="width:660px;max-width:660px;background:#FFFFFF;border-collapse:separate;border-spacing:0;border:1px solid #E6EAF2;box-shadow:0 10px 28px rgba(10,22,70,.10);">
+          <tr>
+            <td style="height:12px;background:#FFD000;border-radius:14px 14px 0 0;font-size:0;line-height:0;">&nbsp;</td>
+          </tr>
+
+          <tr>
+            <td style="background:#0B0C8F;padding:28px 34px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:collapse;">
+                <tr>
+                  <td align="left" valign="middle" style="width:62%;">
+                    <div style="font-size:27px;line-height:1.08;color:#FFFFFF;font-weight:900;letter-spacing:-.5px;">Recuperação de senha</div>
+                    <div style="font-size:12px;line-height:1.4;color:#FFFFFF;font-weight:700;margin-top:7px;opacity:.95;">Solicitação de alteração do acesso do usuário.</div>
+                  </td>
+                  <td align="right" valign="middle" style="width:38%;">
+                    <img src="{{ logo_src }}" alt="Euromídia Comunicação" width="160" style="display:block;width:160px;max-width:160px;height:auto;border:0;outline:none;text-decoration:none;margin-left:auto;">
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:30px 36px 0;">
+              <p style="font-size:15px;line-height:1.65;margin:0 0 14px;color:#1D2433;">
+                Olá, <strong>{{ nome_usuario }}</strong>.
+              </p>
+              <p style="font-size:14px;line-height:1.65;margin:0;color:#4F5B6B;">
+                Recebemos uma solicitação para alterar a senha do seu usuário. Clique no botão abaixo para recuperar sua senha e cadastrar uma nova.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" style="padding:26px 36px 24px;">
+              <a href="{{ link_recuperacao }}" style="display:inline-block;background:#0B0C8F;color:#FFFFFF;text-decoration:none;font-size:14px;font-weight:900;line-height:1;padding:15px 24px;border-radius:10px;box-shadow:0 8px 18px rgba(11,12,143,.20);">
+                Alterar minha senha
+              </a>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:0 36px 24px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="width:100%;border-collapse:separate;border-spacing:0;background:#FFF8DB;border-radius:10px;overflow:hidden;">
+                <tr>
+                  <td style="width:6px;background:#FFD000;font-size:0;line-height:0;">&nbsp;</td>
+                  <td style="padding:16px 18px;">
+                    <div style="font-size:14px;font-weight:900;color:#5D4700;margin-bottom:7px;">Validade e segurança</div>
+                    <div style="font-size:12px;line-height:1.65;color:#6B560A;">
+                      O link é válido por {{ validade_minutos }} minutos e será invalidado depois que a senha for alterada. Caso você não tenha solicitado a recuperação, ignore esta mensagem.
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:0 36px 28px;">
+              <p style="font-size:11px;line-height:1.55;margin:0;color:#647084;word-break:break-all;">
+                Se o botão não funcionar, copie e cole este endereço no navegador:<br>
+                <a href="{{ link_recuperacao }}" style="color:#0B0C8F;text-decoration:underline;">{{ link_recuperacao }}</a>
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:18px 36px;color:#647084;font-size:11px;line-height:1.5;background:#F8FAFE;border-top:1px solid #E5E9F1;">
+              Mensagem automática do sistema Euromídia. Não responda este e-mail.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

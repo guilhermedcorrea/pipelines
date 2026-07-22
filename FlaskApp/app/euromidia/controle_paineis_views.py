@@ -11023,6 +11023,7 @@ def contrato_detalhe(id_fato_controle_contratos: int):
 
 @paineis_bp.get("/api/clientes/buscar/<cnpj>")
 @login_required
+@requer_item_menu_paineis("empresas")
 @limiter.limit("60 per minute", methods=["GET"])
 def paineis_api_clientes_buscar(cnpj: str):
     cnpj_limpo = _normalizar_cnpj(cnpj)
@@ -11249,6 +11250,7 @@ def _to_bool_ou_none(v):
 
 @paineis_bp.post("/api/clientes/salvar")
 @login_required
+@requer_item_menu_paineis("empresas")
 @limiter.limit("20 per minute", methods=["POST"])
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def paineis_api_clientes_salvar():
@@ -11433,6 +11435,7 @@ def paineis_api_clientes_salvar():
 
 @paineis_bp.get("/clientes/novo")
 @login_required
+@requer_item_menu_paineis("empresas")
 def paineis_clientes_novo():
     form = FormCadastroCliente()
     return render_template("euromidia/novo.html", form=form)
@@ -15183,6 +15186,7 @@ def _aplicar_filtros_clientes(query, filtros, excluir=None):
 
 @paineis_bp.get("/clientes/autocomplete")
 @login_required
+@requer_item_menu_paineis("empresas")
 @limiter.limit("120 per minute", methods=["GET"])
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def clientes_autocomplete():
@@ -15329,6 +15333,7 @@ def _ler_filtros_clientes_request_args():
 
 @paineis_bp.get("/clientes/filtros/<nome_filtro>")
 @login_required
+@requer_item_menu_paineis("empresas")
 @limiter.limit("240 per minute", methods=["GET"])
 @retry_get_view(db, attempts=2, base_delay=0.2, max_delay=0.8)
 def clientes_filtro_opcoes(nome_filtro: str):
@@ -15642,6 +15647,7 @@ def _obter_itens_clientes_cacheados(filtros, page: int, per_page: int):
 
 @paineis_bp.get("/clientes")
 @login_required
+@requer_item_menu_paineis("empresas")
 def clientes_lista():
     try:
         page = int((request.args.get("page") or "1").strip())
@@ -15862,6 +15868,7 @@ def _matriz_filial_label(valor) -> str:
 
 @paineis_bp.post("/clientes/<int:id_empresa>/carteira")
 @login_required
+@requer_item_menu_paineis("empresas")
 def cliente_carteira_atualizar(id_empresa: int):
     if _usuario_logado_eh_perfil_vendedor():
         abort(403, description="Perfil Vendedor não pode mover ou remover empresas de carteira.")
@@ -16176,6 +16183,7 @@ def cliente_carteira_atualizar(id_empresa: int):
 
 @paineis_bp.get("/clientes/<int:id_empresa>")
 @login_required
+@requer_item_menu_paineis("empresas")
 def cliente_detalhe(id_empresa: int):
 
     def _resolver_return_to_local():
@@ -16869,6 +16877,7 @@ def cliente_detalhe(id_empresa: int):
 
 @paineis_bp.route("/relatorios", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 @limiter.limit(LIMITE_GET_TELAS_NAVEGACAO, methods=["GET"])
 @retry_get_view(db, attempts=3, base_delay=0.2, max_delay=0.8)
 def relatorios_paineis():
@@ -18193,6 +18202,7 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int, dt_ini=None, dt_fim=None):
 @paineis_bp.route("/exportar_excel", methods=["GET"])
 @limiter.limit("20 per minute", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 def exportar_excel_ano():
     """
     Eu inicio a geração da grade anual em segundo plano.
@@ -18248,6 +18258,7 @@ def exportar_excel_ano():
 @paineis_bp.route("/exportar_excel/status/<task_id>", methods=["GET"])
 @limiter.limit("120 per minute", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 def exportar_excel_status(task_id: str):
     """Eu retorno o andamento da geração assíncrona do Excel."""
     task_id = str(task_id or "").strip()
@@ -18309,6 +18320,7 @@ def exportar_excel_status(task_id: str):
 @paineis_bp.route("/exportar_excel/download/<task_id>", methods=["GET"])
 @limiter.limit("60 per minute", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 def exportar_excel_download(task_id: str):
     """Eu faço o download do Excel quando a tarefa Celery terminou com sucesso."""
     task_id = str(task_id or "").strip()
@@ -18362,6 +18374,7 @@ def exportar_excel_download(task_id: str):
 @paineis_bp.route("/exportar_ocupacao_clientes", methods=["GET"])
 @limiter.limit("20 per minute", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 def exportar_ocupacao_clientes_excel():
     """
     Eu inicio a geração do relatório Ocupação Clientes em segundo plano.
@@ -18418,6 +18431,7 @@ def exportar_ocupacao_clientes_excel():
 @paineis_bp.route("/exportar_ocupacao_clientes/status/<task_id>", methods=["GET"])
 @limiter.limit("120 per minute", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 def exportar_ocupacao_clientes_status(task_id: str):
     """Eu retorno o andamento da geração assíncrona do Excel Ocupação Clientes."""
     task_id = str(task_id or "").strip()
@@ -18480,6 +18494,7 @@ def exportar_ocupacao_clientes_status(task_id: str):
 @paineis_bp.route("/exportar_ocupacao_clientes/download/<task_id>", methods=["GET"])
 @limiter.limit("60 per minute", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 def exportar_ocupacao_clientes_download(task_id: str):
     """Eu faço o download do Excel Ocupação Clientes quando a task Celery termina."""
     task_id = str(task_id or "").strip()

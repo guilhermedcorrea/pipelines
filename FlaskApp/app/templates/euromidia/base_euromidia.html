@@ -1036,7 +1036,35 @@ input:disabled, select:disabled, textarea:disabled{
         {% set menu_paineis_atendimento = (pode_acessar_menu_paineis('atendimento') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_performance = (pode_acessar_menu_paineis('performance_paineis') if pode_acessar_menu_paineis is defined else True) %}
         {% set menu_paineis_carteiras = (pode_acessar_menu_paineis('carteiras') if pode_acessar_menu_paineis is defined else True) %}
-        {% set menu_paineis_empresas = (pode_acessar_menu_paineis('empresas') if pode_acessar_menu_paineis is defined else True) %}
+        {# Empresas: IDEmpresaProprietaria = 3 ou BitFullEmpresas = 1. #}
+        {% set menu_paineis_empresas = (
+          pode_acessar_menu_paineis('empresas')
+          if pode_acessar_menu_paineis is defined
+          else (
+            current_user.is_authenticated
+            and (
+              (current_user.IDEmpresaProprietaria|default(0, true)|int) == 3
+              or (current_user.BitFullEmpresas|default(0, true)|int) == 1
+            )
+          )
+        ) %}
+        {#
+          Conta e sessão: Meu perfil, Mensagens e Relatórios.
+          A mesma regra é validada novamente nos endpoints Python para impedir
+          acesso direto por URL. O item Sair permanece disponível para que todo
+          usuário autenticado consiga encerrar a própria sessão com segurança.
+        #}
+        {% set menu_conta_sessao = (
+          pode_acessar_menu_paineis('conta_sessao')
+          if pode_acessar_menu_paineis is defined
+          else (
+            current_user.is_authenticated
+            and (
+              (current_user.IDEmpresaProprietaria|default(0, true)|int) == 3
+              or (current_user.BitFullEmpresas|default(0, true)|int) == 1
+            )
+          )
+        ) %}
         {#
           Catálogo Produtos: regra empresarial independente do perfil.
           Só aparece para IDEmpresaProprietaria = 1 ou BitFullEmpresas = 1.
@@ -1159,6 +1187,7 @@ input:disabled, select:disabled, textarea:disabled{
           {% set menu_paineis_disponibilidades = menu_paineis_disponibilidades and pode_acessar_menu_paineis('disponibilidades') %}
           {% set menu_paineis_reserva_ocupacao = menu_paineis_reserva_ocupacao and pode_acessar_menu_paineis('reserva_ocupacao') %}
           {% set menu_paineis_vencimentos_campanhas = menu_paineis_vencimentos_campanhas and pode_acessar_menu_paineis('vencimentos_campanhas_euromidia') %}
+          {% set menu_paineis_empresas = menu_paineis_empresas and pode_acessar_menu_paineis('empresas') %}
 
           {% set menu_paineis_checkin_novo = menu_paineis_checkin_novo and pode_acessar_menu_paineis('checkin_novo') %}
           {% set menu_paineis_lista_checkins = menu_paineis_lista_checkins and pode_acessar_menu_paineis('lista_checkins') %}
@@ -1602,14 +1631,16 @@ input:disabled, select:disabled, textarea:disabled{
 
         {% if current_user.is_authenticated %}
           <div class="user-menu" id="userMenu">
-            <a href="/admin/mensagens"
-               class="user-message-badge"
-               id="userMessageBadge"
-               title="Mensagens novas"
-               aria-label="Mensagens novas"
-               hidden>
-              <span id="userMessageBadgeCount">0</span>
-            </a>
+            {% if menu_conta_sessao %}
+              <a href="{{ url_for('admin.mensagens_usuario') }}"
+                 class="user-message-badge"
+                 id="userMessageBadge"
+                 title="Mensagens novas"
+                 aria-label="Mensagens novas"
+                 hidden>
+                <span id="userMessageBadgeCount">0</span>
+              </a>
+            {% endif %}
 
             <button type="button" class="user-btn" id="btnUserMenu" title="Conta">
               <span class="avatar" aria-hidden="true">
@@ -1629,31 +1660,33 @@ input:disabled, select:disabled, textarea:disabled{
             <div class="user-dropdown" id="userDropdown">
               <div class="desc">Conta e sessão</div>
 
-              <a href="{{ url_for('Autenticacao.perfil') }}">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M20 21a8 8 0 0 0-16 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                  <path d="M12 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                Meu perfil
-              </a>
+              {% if menu_conta_sessao %}
+                <a href="{{ url_for('Autenticacao.perfil') }}">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M20 21a8 8 0 0 0-16 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                  Meu perfil
+                </a>
 
-              <a href="{{ url_for('admin.mensagens_usuario') }}">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5v-11z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M5 7l7 6 7-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                Mensagens
-                <span id="userDropdownMessageCount" class="user-dropdown-badge hidden">0</span>
-              </a>
+                <a href="{{ url_for('admin.mensagens_usuario') }}">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5v-11z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M5 7l7 6 7-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                  Mensagens
+                  <span id="userDropdownMessageCount" class="user-dropdown-badge hidden">0</span>
+                </a>
 
-              <a href="{{ url_for('Paineis.relatorios_paineis') }}">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M4 19V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M14 3v6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M8 14h8M8 17h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                Relatórios
-              </a>
+                <a href="{{ url_for('Paineis.relatorios_paineis') }}">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M4 19V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M14 3v6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M8 14h8M8 17h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                  Relatórios
+                </a>
+              {% endif %}
 
               {% if usuario_logado_eh_vendedor_paineis|default(False) and minha_carteira_url %}
                 <a href="{{ minha_carteira_url }}">
@@ -2215,7 +2248,7 @@ input:disabled, select:disabled, textarea:disabled{
 </script>
 
 
-{% if current_user.is_authenticated %}
+{% if current_user.is_authenticated and menu_conta_sessao %}
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script>
   (function(){

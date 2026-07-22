@@ -1,22 +1,27 @@
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
+from functools import wraps
+from pathlib import Path
+from urllib.parse import urlparse, urljoin
 
+import hashlib
+import mimetypes
+import os
+import re
+import smtplib
+
+import requests
 from flask import Blueprint, current_app, render_template, render_template_string, request, redirect, url_for, flash, session, abort
 from flask_login import login_user, logout_user, login_required, current_user
-
-from werkzeug.security import check_password_hash
+from flask_wtf import FlaskForm
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from sqlalchemy import func, text
 from werkzeug.security import check_password_hash, generate_password_hash
+from wtforms import StringField, PasswordField, SubmitField
+from wtforms.validators import DataRequired
 
 from ..extensions import db,limiter
 from ..models.autenticacao import DimUsuarios,DimPerfilUsuario,PermissoesUsuario,DimPermissoes,PermissoesPerfil
-from functools import wraps
-
-from urllib.parse import urlparse, urljoin
-from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, SubmitField
-from wtforms.validators import DataRequired
-import os
-import requests
-from sqlalchemy import text
 
 
 
@@ -44,6 +49,289 @@ def _texto(v: str) -> str:
 def _agora():
     
     return datetime.now()
+
+
+
+
+RECUPERACAO_SENHA_SALT = "autenticacao-recuperacao-senha-v1"
+RECUPERACAO_SENHA_EXPIRACAO_SEGUNDOS = 30 * 60
+RECUPERACAO_SENHA_ASSUNTO = "Recuperação de senha Usuário"
+RECUPERACAO_SENHA_EMAIL_REMETENTE = "notificacoes@euromidia.com.br"
+_EMAIL_MINIMO_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _email_normalizado(valor: str) -> str:
+    return _texto(valor).casefold()
+
+
+def _email_tem_formato_minimo(valor: str) -> bool:
+    email = _email_normalizado(valor)
+    return bool(email and len(email) <= 254 and _EMAIL_MINIMO_RE.fullmatch(email))
+
+
+def _config_recuperacao_senha(chave: str, padrao=None):
+    """Lê a configuração de e-mail no Flask e, em seguida, no ambiente."""
+    valor = current_app.config.get(chave)
+    if valor is None or str(valor).strip() == "":
+        valor = os.getenv(chave)
+    if valor is None or str(valor).strip() == "":
+        return padrao
+    return valor
+
+
+def _serializer_recuperacao_senha() -> URLSafeTimedSerializer:
+    secret_key = current_app.secret_key or current_app.config.get("SECRET_KEY")
+    if not secret_key:
+        raise RuntimeError("SECRET_KEY não configurada; não é possível assinar o link de recuperação de senha.")
+    return URLSafeTimedSerializer(secret_key=secret_key, salt=RECUPERACAO_SENHA_SALT)
+
+
+def _assinatura_hash_senha(usuario: DimUsuarios) -> str:
+    """Vincula o token ao hash atual, invalidando-o após qualquer troca de senha."""
+    hash_atual = str(getattr(usuario, "HashSenha", "") or "")
+    return hashlib.sha256(hash_atual.encode("utf-8")).hexdigest()[:32]
+
+
+def _gerar_token_recuperacao_senha(usuario: DimUsuarios) -> str:
+    payload = {
+        "uid": int(usuario.IDDimUsuarios),
+        "email": _email_normalizado(usuario.Email),
+        "pwd": _assinatura_hash_senha(usuario),
+    }
+    return _serializer_recuperacao_senha().dumps(payload)
+
+
+def _validar_token_recuperacao_senha(token: str):
+    token = _texto(token)
+    if not token:
+        return None, "token_ausente"
+
+    try:
+        payload = _serializer_recuperacao_senha().loads(
+            token,
+            max_age=RECUPERACAO_SENHA_EXPIRACAO_SEGUNDOS,
+        )
+    except SignatureExpired:
+        return None, "token_expirado"
+    except (BadSignature, TypeError, ValueError):
+        return None, "token_invalido"
+
+    try:
+        id_usuario = int(payload.get("uid") or 0)
+    except Exception:
+        id_usuario = 0
+
+    if id_usuario <= 0:
+        return None, "usuario_invalido"
+
+    usuario = (
+        db.session.query(DimUsuarios)
+        .filter(DimUsuarios.IDDimUsuarios == id_usuario)
+        .first()
+    )
+
+    if not usuario or not bool(getattr(usuario, "BitAtivo", False)):
+        return None, "usuario_indisponivel"
+
+    if _email_normalizado(usuario.Email) != _email_normalizado(payload.get("email")):
+        return None, "email_divergente"
+
+    if _assinatura_hash_senha(usuario) != str(payload.get("pwd") or ""):
+        return None, "token_ja_utilizado"
+
+    return usuario, None
+
+
+def _carregar_logo_recuperacao_senha():
+    """Carrega o mesmo logo usado nos e-mails do módulo de Painéis."""
+    candidatos = []
+    for candidato in (
+        os.getenv("EMAIL_RESERVA_LOGO_PATH"),
+        "/app/app/static/imagens/logoeuro.png",
+        str(Path(current_app.root_path) / "static" / "imagens" / "logoeuro.png"),
+        str(Path(current_app.static_folder or "") / "imagens" / "logoeuro.png"),
+        "/home/euromidia/projetos/pipelines/FlaskApp/app/static/imagens/logoeuro.png",
+        "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/app/static/imagens/logoeuro.png",
+    ):
+        candidato = _texto(candidato)
+        if candidato and candidato not in candidatos:
+            candidatos.append(candidato)
+
+    for candidato in candidatos:
+        try:
+            caminho = Path(candidato)
+            if not caminho.is_file():
+                continue
+            conteudo = caminho.read_bytes()
+            mime_type, _ = mimetypes.guess_type(str(caminho))
+            subtype = "png"
+            if mime_type and "/" in mime_type:
+                subtype = mime_type.split("/", 1)[1].lower() or "png"
+            return conteudo, subtype, candidato
+        except Exception:
+            current_app.logger.exception(
+                "RECUPERACAO_SENHA | falha ao carregar logo | caminho=%s",
+                candidato,
+            )
+
+    return None, "png", None
+
+
+def _enviar_email_recuperacao_senha(usuario: DimUsuarios, link_recuperacao: str) -> None:
+    destinatario = _email_normalizado(usuario.Email)
+    if not _email_tem_formato_minimo(destinatario):
+        raise ValueError("E-mail do usuário inválido.")
+
+    smtp_host = _texto(_config_recuperacao_senha("SMTP", "smtp.office365.com"))
+    smtp_port_raw = _config_recuperacao_senha("porta", 587)
+    criptografia = _texto(_config_recuperacao_senha("criptografia", "STARTTLS")).upper()
+    smtp_user = _texto(_config_recuperacao_senha("EMAIL_NOTIFICACOES_USUARIO", RECUPERACAO_SENHA_EMAIL_REMETENTE))
+    smtp_password = _config_recuperacao_senha("SENHA_EMAIL")
+    remetente_nome = _texto(_config_recuperacao_senha("EMAIL_NOTIFICACOES_NOME", "Euromídia")) or "Euromídia"
+
+    try:
+        smtp_port = int(str(smtp_port_raw or "587").strip())
+    except Exception:
+        smtp_port = 587
+
+    if not smtp_host or not smtp_user or not smtp_password:
+        raise RuntimeError("Configuração SMTP incompleta: verifique SMTP, porta, criptografia e SENHA_EMAIL.")
+
+    nome_usuario = _texto(getattr(usuario, "NomeUsuario", None)) or "Usuário"
+    logo_cid = "euromidia_logo_recuperacao"
+    logo_bytes, logo_subtype, logo_path = _carregar_logo_recuperacao_senha()
+
+    if logo_bytes:
+        logo_src = f"cid:{logo_cid}"
+    else:
+        try:
+            logo_src = url_for("static", filename="imagens/logoeuro.png", _external=True)
+        except Exception:
+            logo_src = "/static/imagens/logoeuro.png"
+
+    corpo_texto = (
+        f"Olá, {nome_usuario}.\n\n"
+        "Recebemos uma solicitação para alterar a senha do seu usuário.\n"
+        "Clique no link abaixo para recuperar sua senha:\n\n"
+        f"{link_recuperacao}\n\n"
+        "Este link é válido por 30 minutos e pode ser utilizado apenas enquanto sua senha atual não for alterada.\n"
+        "Caso você não tenha solicitado a recuperação, ignore esta mensagem.\n"
+    )
+
+    corpo_html = render_template(
+        "autenticacao/email_recuperacao_senha.html",
+        nome_usuario=nome_usuario,
+        link_recuperacao=link_recuperacao,
+        validade_minutos=RECUPERACAO_SENHA_EXPIRACAO_SEGUNDOS // 60,
+        logo_src=logo_src,
+        assunto=RECUPERACAO_SENHA_ASSUNTO,
+    )
+
+    mensagem = EmailMessage()
+    mensagem["Subject"] = RECUPERACAO_SENHA_ASSUNTO
+    mensagem["From"] = f"{remetente_nome} <{smtp_user}>"
+    mensagem["To"] = destinatario
+    mensagem.set_content(corpo_texto)
+    mensagem.add_alternative(corpo_html, subtype="html")
+
+    if logo_bytes:
+        try:
+            html_part = mensagem.get_payload()[-1]
+            html_part.add_related(
+                logo_bytes,
+                maintype="image",
+                subtype=logo_subtype,
+                cid=f"<{logo_cid}>",
+                filename="logoeuro.png",
+            )
+        except Exception:
+            current_app.logger.exception(
+                "RECUPERACAO_SENHA | falha ao anexar logo inline | caminho=%s",
+                logo_path,
+            )
+
+    current_app.logger.info(
+        "RECUPERACAO_SENHA | tentando enviar e-mail | usuario_id=%s | destinatario=%s | smtp_host=%s | smtp_port=%s | criptografia=%s",
+        usuario.IDDimUsuarios,
+        destinatario,
+        smtp_host,
+        smtp_port,
+        criptografia,
+    )
+
+    if criptografia in {"SSL", "TLS", "SMTPS"}:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20) as smtp:
+            smtp.login(smtp_user, smtp_password)
+            smtp.send_message(mensagem, from_addr=smtp_user, to_addrs=[destinatario])
+    else:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as smtp:
+            smtp.ehlo()
+            if criptografia in {"STARTTLS", "START_TLS", "TLS_STARTTLS"}:
+                smtp.starttls()
+                smtp.ehlo()
+            smtp.login(smtp_user, smtp_password)
+            smtp.send_message(mensagem, from_addr=smtp_user, to_addrs=[destinatario])
+
+    current_app.logger.info(
+        "RECUPERACAO_SENHA | e-mail enviado | usuario_id=%s | destinatario=%s",
+        usuario.IDDimUsuarios,
+        destinatario,
+    )
+
+
+def _montar_link_recuperacao_senha(token: str) -> str:
+    """
+    Monta o link público da recuperação sempre em HTTP.
+
+    O servidor recebe cabeçalhos do proxy que podem indicar HTTPS e remover a
+    porta 5000. Usar ``url_for(..., _external=True)`` nessas condições gera
+    incorretamente ``https://IP/...`` e envia o usuário para outro serviço que
+    responde nas portas 80/443.
+
+    Configurações opcionais:
+    - RECUPERACAO_SENHA_BASE_URL: host público da aplicação. Ex.:
+      http://189.45.251.100:5000
+    - RECUPERACAO_SENHA_PORTA_PUBLICA: porta usada quando o host recebido não
+      contém porta. O padrão deste projeto é 5000.
+    """
+    caminho = url_for(
+        "Autenticacao.redefinir_senha",
+        token=token,
+        _external=False,
+    )
+
+    base_configurada = _texto(
+        _config_recuperacao_senha("RECUPERACAO_SENHA_BASE_URL", "")
+    )
+
+    if base_configurada:
+        if "://" not in base_configurada:
+            base_configurada = f"http://{base_configurada}"
+        partes_base = urlparse(base_configurada)
+        host_publico = partes_base.hostname or ""
+        porta_publica = partes_base.port
+    else:
+        host_recebido = _texto(request.host)
+        partes_host = urlparse(f"//{host_recebido}")
+        host_publico = partes_host.hostname or _texto(request.remote_addr)
+        porta_publica = partes_host.port
+
+    if not host_publico:
+        raise RuntimeError("Não foi possível determinar o host público para o link de recuperação de senha.")
+
+    if porta_publica is None:
+        try:
+            porta_publica = int(
+                _config_recuperacao_senha("RECUPERACAO_SENHA_PORTA_PUBLICA", 5000)
+            )
+        except (TypeError, ValueError):
+            porta_publica = 5000
+
+    # IPv6 precisa ficar entre colchetes quando usado em uma URL.
+    host_url = f"[{host_publico}]" if ":" in host_publico else host_publico
+    netloc = host_url if int(porta_publica) == 80 else f"{host_url}:{int(porta_publica)}"
+
+    return f"http://{netloc}{caminho}"
 
 
 def _url_segura(url: str) -> bool:
@@ -118,6 +406,110 @@ def login():
 
     return redirect(url_for("Paineis.lista_paineis"))
 
+
+
+
+
+@autenticacao_bp.route("/esqueci-senha", methods=["GET", "POST"])
+@limiter.limit("5 per 15 minutes", methods=["POST"])
+def esqueci_senha():
+    if request.method == "GET":
+        return render_template("autenticacao/esqueci_senha.html")
+
+    email = _email_normalizado(request.form.get("email"))
+    if not _email_tem_formato_minimo(email):
+        flash("Informe um e-mail válido.", "warning")
+        return redirect(url_for("Autenticacao.esqueci_senha"))
+
+    usuario = (
+        db.session.query(DimUsuarios)
+        .filter(func.lower(DimUsuarios.Email) == email)
+        .first()
+    )
+
+    if usuario and bool(getattr(usuario, "BitAtivo", False)):
+        try:
+            token = _gerar_token_recuperacao_senha(usuario)
+            link_recuperacao = _montar_link_recuperacao_senha(token)
+            _enviar_email_recuperacao_senha(usuario, link_recuperacao)
+        except Exception:
+            current_app.logger.exception(
+                "RECUPERACAO_SENHA | falha no envio | usuario_id=%s | email=%s",
+                getattr(usuario, "IDDimUsuarios", None),
+                email,
+            )
+    else:
+        current_app.logger.info(
+            "RECUPERACAO_SENHA | solicitação para e-mail inexistente ou usuário inativo | email=%s",
+            email,
+        )
+
+    # A resposta é propositalmente igual para e-mail existente ou inexistente,
+    # impedindo que a tela seja usada para descobrir usuários cadastrados.
+    flash(
+        "Se o e-mail estiver cadastrado em um usuário ativo, você receberá um link para alterar a senha.",
+        "info",
+    )
+    return redirect(url_for("Autenticacao.login"))
+
+
+@autenticacao_bp.route("/redefinir-senha/<token>", methods=["GET", "POST"])
+@limiter.limit("10 per hour", methods=["POST"])
+def redefinir_senha(token: str):
+    usuario, erro_token = _validar_token_recuperacao_senha(token)
+    if not usuario:
+        mensagem = (
+            "Este link de recuperação expirou. Solicite um novo link."
+            if erro_token == "token_expirado"
+            else "Este link de recuperação é inválido ou já foi utilizado."
+        )
+        flash(mensagem, "danger")
+        return redirect(url_for("Autenticacao.esqueci_senha"))
+
+    if request.method == "GET":
+        return render_template(
+            "autenticacao/redefinir_senha.html",
+            token=token,
+            email=_email_normalizado(usuario.Email),
+        )
+
+    nova_senha = _texto(request.form.get("nova_senha"))
+    confirmar_senha = _texto(request.form.get("confirmar_senha"))
+
+    if not nova_senha or not confirmar_senha:
+        flash("Preencha a nova senha e a confirmação.", "warning")
+        return redirect(url_for("Autenticacao.redefinir_senha", token=token))
+
+    if nova_senha != confirmar_senha:
+        flash("A confirmação da nova senha não confere.", "danger")
+        return redirect(url_for("Autenticacao.redefinir_senha", token=token))
+
+    if len(nova_senha) < 10:
+        flash("A nova senha deve ter pelo menos 10 caracteres.", "danger")
+        return redirect(url_for("Autenticacao.redefinir_senha", token=token))
+
+    if len(nova_senha) > 128:
+        flash("A nova senha deve ter no máximo 128 caracteres.", "danger")
+        return redirect(url_for("Autenticacao.redefinir_senha", token=token))
+
+    try:
+        usuario.HashSenha = generate_password_hash(nova_senha)
+        usuario.UpdateAt = _agora()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "RECUPERACAO_SENHA | falha ao atualizar senha | usuario_id=%s",
+            getattr(usuario, "IDDimUsuarios", None),
+        )
+        flash("Não foi possível alterar a senha. Tente novamente.", "danger")
+        return redirect(url_for("Autenticacao.redefinir_senha", token=token))
+
+    if current_user.is_authenticated:
+        logout_user()
+
+    flash("Senha alterada com sucesso. Faça o login com a nova senha.", "success")
+    return redirect(url_for("Autenticacao.login"))
 
 
 @autenticacao_bp.route("/logout", methods=["POST", "GET"])

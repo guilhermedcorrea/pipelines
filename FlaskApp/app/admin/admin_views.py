@@ -8,6 +8,7 @@ from flask_login import login_required, current_user
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 from ..autenticacao.autenticacao_views import requer_permissao
+from ..autenticacao.acl_menu_paineis import requer_item_menu_paineis
 from pathlib import Path
 from typing import Any
 import base64
@@ -19862,6 +19863,7 @@ def _mensagens_payload_detalhe(row_mensagem, id_usuario_logado: int) -> dict:
 
 @admin.route("/mensagens", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 @limiter.limit("80 per minute", methods=["GET"])
 def mensagens_usuario():
     return render_template("admin/mensagens_usuario.html")
@@ -19869,6 +19871,7 @@ def mensagens_usuario():
 
 @admin.route("/api/mensagens/resumo", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 @limiter.limit("120 per minute", methods=["GET"])
 def api_mensagens_resumo():
     id_usuario = _id_usuario_logado()
@@ -19903,6 +19906,7 @@ def api_mensagens_resumo():
 
 @admin.route("/api/mensagens", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 @limiter.limit("120 per minute", methods=["GET"])
 def api_mensagens_lista():
     id_usuario = _id_usuario_logado()
@@ -20038,6 +20042,7 @@ def api_mensagens_lista():
 
 @admin.route("/api/mensagens/<int:id_mensagem>", methods=["GET"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 @limiter.limit("120 per minute", methods=["GET"])
 def api_mensagens_detalhe(id_mensagem: int):
     id_usuario = _id_usuario_logado()
@@ -20085,6 +20090,7 @@ def api_mensagens_detalhe(id_mensagem: int):
 
 @admin.route("/api/mensagens/<int:id_mensagem>/marcar-lida", methods=["POST"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 @limiter.limit("120 per minute", methods=["POST"])
 def api_mensagens_marcar_lida(id_mensagem: int):
     id_usuario = _id_usuario_logado()
@@ -20119,6 +20125,7 @@ def api_mensagens_marcar_lida(id_mensagem: int):
 
 @admin.route("/api/mensagens/marcar-todas-lidas", methods=["POST"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 @limiter.limit("60 per minute", methods=["POST"])
 def api_mensagens_marcar_todas_lidas():
     id_usuario = _id_usuario_logado()
@@ -20150,6 +20157,7 @@ def api_mensagens_marcar_todas_lidas():
 
 @admin.route("/api/mensagens/<int:id_mensagem>/excluir", methods=["POST", "DELETE"])
 @login_required
+@requer_item_menu_paineis("conta_sessao")
 @limiter.limit("120 per minute", methods=["POST", "DELETE"])
 def api_mensagens_excluir(id_mensagem: int):
     id_usuario = _id_usuario_logado()

@@ -410,6 +410,59 @@ def usuario_pode_acessar_catalogo_produtos() -> bool:
     return id_empresa == 1 or possui_acesso_total_empresas
 
 
+def _usuario_ativo_com_acesso_empresa_3_ou_full() -> bool:
+    """
+    Centraliza a regra empresarial compartilhada por Empresas e pelo bloco
+    Conta e sessão:
+
+    - usuário autenticado e ativo; e
+    - IDEmpresaProprietaria = 3 ou BitFullEmpresas = 1.
+
+    A consulta tolerante em ``_dados_empresariais_usuario_catalogo`` evita
+    liberar ou negar acesso incorretamente quando o objeto Flask-Login não
+    tiver todos os campos empresariais carregados.
+    """
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    dados = _dados_empresariais_usuario_catalogo()
+
+    bit_ativo = dados.get("BitAtivo")
+    if bit_ativo is not None and not _flag_ativa_acl(bit_ativo):
+        return False
+
+    id_empresa = _converter_int_acl(dados.get("IDEmpresaProprietaria"))
+    possui_acesso_total_empresas = _flag_ativa_acl(
+        dados.get("BitFullEmpresas")
+    )
+
+    return id_empresa == 3 or possui_acesso_total_empresas
+
+
+def usuario_pode_acessar_empresas() -> bool:
+    """
+    Autoriza o menu e as telas de Empresas somente para a empresa 3 ou para
+    usuários com BitFullEmpresas = 1.
+
+    A regra empresarial tem prioridade sobre perfil e permissões, inclusive
+    ADMIN_TUDO, para impedir acesso direto por URL fora do escopo autorizado.
+    """
+    return _usuario_ativo_com_acesso_empresa_3_ou_full()
+
+
+def usuario_pode_acessar_conta_sessao() -> bool:
+    """
+    Autoriza Meu perfil, Mensagens e Relatórios somente quando:
+
+    - IDEmpresaProprietaria = 3; ou
+    - BitFullEmpresas = 1.
+
+    Esta função é usada tanto no template quanto nos endpoints, evitando que
+    esconder o link seja confundido com controle real de autorização.
+    """
+    return _usuario_ativo_com_acesso_empresa_3_ou_full()
+
+
 def usuario_pode_acessar_reserva_ocupacao() -> bool:
     """
     Autoriza a tela Reserva somente quando o usuário está ativo e atende
@@ -676,6 +729,18 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
         return False
 
     chave = _normalizar_texto_acl(item_menu)
+
+    if chave in {"empresas", "clientes", "clientes_lista", "clientes_detalhe"}:
+        return usuario_pode_acessar_empresas()
+
+    if chave in {
+        "conta_sessao",
+        "conta_e_sessao",
+        "meu_perfil",
+        "mensagens_usuario",
+        "relatorios_usuario",
+    }:
+        return usuario_pode_acessar_conta_sessao()
 
     if chave in {"catalogo_produtos", "catalogo_de_produtos", "lista_produtos"}:
         return usuario_pode_acessar_catalogo_produtos()

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Identifique-se</title>
+  <title>Esqueci minha senha</title>
 
   <style>
     :root{
@@ -17,7 +17,7 @@
       --warning:#D97706;
       --info:#2563EB;
       --success:#16A34A;
-      --shadow:0 12px 28px rgba(2, 6, 23, .10);
+      --shadow:0 12px 28px rgba(2,6,23,.10);
       --radius:16px;
     }
 
@@ -31,7 +31,7 @@
       justify-content:center;
       padding:24px;
       background:var(--bg);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
       color:var(--text);
     }
 
@@ -46,10 +46,28 @@
     }
 
     .head{
-      padding:18px 18px 14px 18px;
+      padding:18px 18px 14px;
       border-bottom:1px solid var(--border);
       background:rgba(0,40,132,.03);
     }
+
+    .title-row{
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+
+    .title-icon{
+      width:36px;
+      height:36px;
+      display:grid;
+      place-items:center;
+      border-radius:12px;
+      color:var(--blue);
+      background:rgba(0,40,132,.08);
+      flex:0 0 36px;
+    }
+    .title-icon svg{ width:20px; height:20px; }
 
     .head h1{
       margin:0;
@@ -60,14 +78,15 @@
     }
 
     .head p{
-      margin:6px 0 0 0;
+      margin:8px 0 0;
       font-size:13px;
       color:var(--muted);
       font-weight:700;
-      line-height:1.35;
+      line-height:1.45;
     }
 
     .body{ padding:18px; }
+    .row{ margin-bottom:14px; }
 
     label{
       display:block;
@@ -79,7 +98,7 @@
 
     .input{
       width:100%;
-      padding:12px 12px;
+      padding:12px;
       border:1px solid var(--border);
       border-radius:12px;
       font-size:14px;
@@ -87,30 +106,9 @@
       background:#fff;
     }
     .input:focus{
-      border-color: rgba(0,40,132,.45);
+      border-color:rgba(0,40,132,.45);
       box-shadow:0 0 0 4px rgba(0,40,132,.10);
     }
-
-    .row{ margin-bottom:12px; }
-
-    .row-2{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      margin:12px 0 14px 0;
-    }
-
-    .check{
-      display:flex;
-      align-items:center;
-      gap:8px;
-      font-size:13px;
-      color:var(--muted);
-      font-weight:700;
-      user-select:none;
-    }
-    .check input{ width:16px; height:16px; }
 
     .btn{
       width:100%;
@@ -122,22 +120,20 @@
       font-size:14px;
       color:#fff;
       background:var(--blue);
-      box-shadow: 0 10px 22px rgba(0,40,132,.18);
+      box-shadow:0 10px 22px rgba(0,40,132,.18);
     }
     .btn:hover{ filter:brightness(1.03); }
-    .btn:active{ transform: translateY(1px); }
+    .btn:active{ transform:translateY(1px); }
 
-    .forgot-wrap{
+    .back{
       display:flex;
       justify-content:center;
       margin-top:14px;
     }
-
-    .forgot-link{
+    .back a{
       display:inline-flex;
       align-items:center;
-      justify-content:center;
-      gap:7px;
+      gap:6px;
       color:var(--blue);
       text-decoration:none;
       font-size:13px;
@@ -145,17 +141,13 @@
       padding:7px 10px;
       border-radius:10px;
     }
-    .forgot-link:hover{
+    .back a:hover{
       background:rgba(0,40,132,.06);
       text-decoration:underline;
     }
-    .forgot-link svg{
-      width:17px;
-      height:17px;
-      flex:0 0 17px;
-    }
+    .back svg{ width:16px; height:16px; }
 
-    .flashes{ margin:0 0 14px 0; padding:0; list-style:none; }
+    .flashes{ margin:0 0 14px; padding:0; list-style:none; }
     .flash{
       border:1px solid var(--border);
       border-radius:14px;
@@ -165,35 +157,42 @@
       font-weight:800;
       background:#fff;
     }
-    .flash.danger{ border-color: rgba(220,38,38,.25); background:rgba(220,38,38,.06); color:var(--danger); }
-    .flash.warning{ border-color: rgba(217,119,6,.25); background:rgba(217,119,6,.06); color:var(--warning); }
-    .flash.info{ border-color: rgba(37,99,235,.25); background:rgba(37,99,235,.06); color:var(--info); }
-    .flash.success{ border-color: rgba(22,163,74,.25); background:rgba(22,163,74,.06); color:var(--success); }
+    .flash.danger{ border-color:rgba(220,38,38,.25); background:rgba(220,38,38,.06); color:var(--danger); }
+    .flash.warning{ border-color:rgba(217,119,6,.25); background:rgba(217,119,6,.06); color:var(--warning); }
+    .flash.info{ border-color:rgba(37,99,235,.25); background:rgba(37,99,235,.06); color:var(--info); }
+    .flash.success{ border-color:rgba(22,163,74,.25); background:rgba(22,163,74,.06); color:var(--success); }
 
-    .foot{
-      margin-top:12px;
-      font-size:12px;
+    .note{
+      margin-top:14px;
+      padding:11px 12px;
+      border-radius:12px;
+      background:#F8FAFC;
+      border:1px solid var(--border);
       color:var(--muted);
+      font-size:12px;
       font-weight:700;
-      text-align:center;
-      line-height:1.4;
+      line-height:1.45;
     }
-
   </style>
 </head>
-
 <body>
   <div class="wrap">
     <div class="card">
-
       <div class="head">
-        <h1>Identifique-se</h1>
-        <p>Informe seu e-mail e sua senha para acessar.</p>
+        <div class="title-row">
+          <div class="title-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M7 10V8a5 5 0 0 1 10 0v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              <rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" stroke-width="2"></rect>
+              <path d="M12 14v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+            </svg>
+          </div>
+          <h1>Esqueci minha senha</h1>
+        </div>
+        <p>Informe o e-mail cadastrado no seu usuário. Enviaremos um link seguro para criar uma nova senha.</p>
       </div>
 
       <div class="body">
-
-        <!-- Flash messages -->
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
             <ul class="flashes">
@@ -204,47 +203,41 @@
           {% endif %}
         {% endwith %}
 
-        <form method="POST" action="{{ url_for('Autenticacao.login', next=request.args.get('next')) }}" autocomplete="off">
-          {# ✅ CSRF: mantém seu padrão atual #}
+        <form method="POST" action="{{ url_for('Autenticacao.esqueci_senha') }}" autocomplete="off">
           {% if csrf_token is defined %}
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           {% endif %}
 
           <div class="row">
             <label for="email">E-mail</label>
-            <input class="input" id="email" name="email" type="email" placeholder="seu@email.com" required autofocus value="{{ request.form.get('email','') }}">
+            <input
+              class="input"
+              id="email"
+              name="email"
+              type="email"
+              placeholder="seu@email.com"
+              autocomplete="email"
+              maxlength="254"
+              required
+              autofocus
+            >
           </div>
 
-          <div class="row">
-            <label for="senha">Senha</label>
-            <input class="input" id="senha" name="senha" type="password" placeholder="••••••••" required>
-          </div>
-
-          <div class="row-2">
-            <label class="check" for="lembrar" style="margin:0;">
-              <input id="lembrar" name="lembrar" type="checkbox" value="1" {% if request.form.get('lembrar') %}checked{% endif %}>
-              Manter conectado
-            </label>
-          </div>
-
-          <button class="btn" type="submit">Entrar</button>
+          <button class="btn" type="submit">Enviar link de recuperação</button>
         </form>
 
-        <div class="forgot-wrap">
-          <a class="forgot-link" href="{{ url_for('Autenticacao.esqueci_senha') }}">
+        <div class="note">
+          Por segurança, a tela exibirá a mesma confirmação mesmo quando o e-mail não estiver cadastrado.
+        </div>
+
+        <div class="back">
+          <a href="{{ url_for('Autenticacao.login') }}">
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M7 10V8a5 5 0 0 1 10 0v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-              <rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" stroke-width="2"></rect>
-              <path d="M12 14v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
             </svg>
-            Esqueci minha senha
+            Voltar para o login
           </a>
         </div>
-
-        <div class="foot">
-          Se você não tem acesso, solicite ao administrador.
-        </div>
-
       </div>
     </div>
   </div>

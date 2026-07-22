@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Redefinir senha</title>
+
+  <style>
+    :root{
+      --blue:#002884;
+      --bg:#F5F7FA;
+      --card:#FFFFFF;
+      --text:#0F172A;
+      --muted:#64748B;
+      --border:#E5E7EB;
+      --danger:#DC2626;
+      --warning:#D97706;
+      --info:#2563EB;
+      --success:#16A34A;
+      --shadow:0 12px 28px rgba(2,6,23,.10);
+      --radius:16px;
+    }
+
+    *{ box-sizing:border-box; }
+
+    body{
+      margin:0;
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+      background:var(--bg);
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      color:var(--text);
+    }
+
+    .wrap{ width:100%; max-width:440px; }
+
+    .card{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+
+    .head{
+      padding:18px 18px 14px;
+      border-bottom:1px solid var(--border);
+      background:rgba(0,40,132,.03);
+    }
+
+    .title-row{
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+
+    .title-icon{
+      width:36px;
+      height:36px;
+      display:grid;
+      place-items:center;
+      border-radius:12px;
+      color:var(--blue);
+      background:rgba(0,40,132,.08);
+      flex:0 0 36px;
+    }
+    .title-icon svg{ width:20px; height:20px; }
+
+    .head h1{
+      margin:0;
+      font-size:20px;
+      font-weight:900;
+      color:var(--blue);
+      letter-spacing:.2px;
+    }
+
+    .head p{
+      margin:8px 0 0;
+      font-size:13px;
+      color:var(--muted);
+      font-weight:700;
+      line-height:1.45;
+      overflow-wrap:anywhere;
+    }
+
+    .body{ padding:18px; }
+    .row{ margin-bottom:13px; }
+
+    label{
+      display:block;
+      font-size:12px;
+      font-weight:900;
+      color:#334155;
+      margin-bottom:6px;
+    }
+
+    .input{
+      width:100%;
+      padding:12px;
+      border:1px solid var(--border);
+      border-radius:12px;
+      font-size:14px;
+      outline:none;
+      background:#fff;
+    }
+    .input:focus{
+      border-color:rgba(0,40,132,.45);
+      box-shadow:0 0 0 4px rgba(0,40,132,.10);
+    }
+
+    .password-shell{ position:relative; }
+    .password-shell .input{ padding-right:52px; }
+    .toggle-password{
+      position:absolute;
+      right:5px;
+      top:50%;
+      transform:translateY(-50%);
+      width:40px;
+      height:34px;
+      border:0;
+      border-radius:9px;
+      background:transparent;
+      color:var(--muted);
+      cursor:pointer;
+      display:grid;
+      place-items:center;
+    }
+    .toggle-password:hover{ background:#F1F5F9; color:var(--blue); }
+    .toggle-password svg{ width:18px; height:18px; }
+
+    .btn{
+      width:100%;
+      border:none;
+      border-radius:14px;
+      padding:12px 14px;
+      cursor:pointer;
+      font-weight:900;
+      font-size:14px;
+      color:#fff;
+      background:var(--blue);
+      box-shadow:0 10px 22px rgba(0,40,132,.18);
+      margin-top:2px;
+    }
+    .btn:hover{ filter:brightness(1.03); }
+    .btn:active{ transform:translateY(1px); }
+
+    .flashes{ margin:0 0 14px; padding:0; list-style:none; }
+    .flash{
+      border:1px solid var(--border);
+      border-radius:14px;
+      padding:10px 12px;
+      margin-bottom:10px;
+      font-size:13px;
+      font-weight:800;
+      background:#fff;
+    }
+    .flash.danger{ border-color:rgba(220,38,38,.25); background:rgba(220,38,38,.06); color:var(--danger); }
+    .flash.warning{ border-color:rgba(217,119,6,.25); background:rgba(217,119,6,.06); color:var(--warning); }
+    .flash.info{ border-color:rgba(37,99,235,.25); background:rgba(37,99,235,.06); color:var(--info); }
+    .flash.success{ border-color:rgba(22,163,74,.25); background:rgba(22,163,74,.06); color:var(--success); }
+
+    .requirements{
+      margin:2px 0 15px;
+      padding:11px 12px;
+      border-radius:12px;
+      background:#F8FAFC;
+      border:1px solid var(--border);
+      color:var(--muted);
+      font-size:12px;
+      font-weight:700;
+      line-height:1.45;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="head">
+        <div class="title-row">
+          <div class="title-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M12 15v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              <rect x="5" y="9" width="14" height="11" rx="2" stroke="currentColor" stroke-width="2"></rect>
+              <path d="M8 9V7a4 4 0 0 1 8 0v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+            </svg>
+          </div>
+          <h1>Crie uma nova senha</h1>
+        </div>
+        <p>Usuário: {{ email }}</p>
+      </div>
+
+      <div class="body">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <ul class="flashes">
+              {% for category, message in messages %}
+                <li class="flash {{ category|e }}">{{ message }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('Autenticacao.redefinir_senha', token=token) }}" autocomplete="off">
+          {% if csrf_token is defined %}
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {% endif %}
+
+          <div class="row">
+            <label for="nova_senha">Nova senha</label>
+            <div class="password-shell">
+              <input
+                class="input"
+                id="nova_senha"
+                name="nova_senha"
+                type="password"
+                minlength="10"
+                maxlength="128"
+                autocomplete="new-password"
+                required
+                autofocus
+              >
+              <button class="toggle-password" type="button" data-target="nova_senha" aria-label="Mostrar ou ocultar nova senha">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" stroke="currentColor" stroke-width="2"></path>
+                  <circle cx="12" cy="12" r="2.5" stroke="currentColor" stroke-width="2"></circle>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="row">
+            <label for="confirmar_senha">Confirmar senha</label>
+            <div class="password-shell">
+              <input
+                class="input"
+                id="confirmar_senha"
+                name="confirmar_senha"
+                type="password"
+                minlength="10"
+                maxlength="128"
+                autocomplete="new-password"
+                required
+              >
+              <button class="toggle-password" type="button" data-target="confirmar_senha" aria-label="Mostrar ou ocultar confirmação da senha">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" stroke="currentColor" stroke-width="2"></path>
+                  <circle cx="12" cy="12" r="2.5" stroke="currentColor" stroke-width="2"></circle>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="requirements">
+            A senha precisa ter entre 10 e 128 caracteres. Os dois campos devem ser exatamente iguais.
+          </div>
+
+          <button class="btn" type="submit">Confirmar nova senha</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.querySelectorAll('.toggle-password').forEach(function(button){
+      button.addEventListener('click', function(){
+        var target = document.getElementById(button.getAttribute('data-target'));
+        if (!target) return;
+        target.type = target.type === 'password' ? 'text' : 'password';
+      });
+    });
+  </script>
+</body>
+</html>
