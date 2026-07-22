@@ -761,10 +761,11 @@
 
           <div class="periodo-shell" id="periodoShell">
             <div class="periodo-topbar">
-              <span class="periodo-chip ativo" data-modo="dia">Dia</span>
-              <span class="periodo-chip" data-modo="semana">Semana</span>
-              <span class="periodo-chip" data-modo="mes">Mês</span>
-              <span class="periodo-chip" data-modo="ano">Ano</span>
+              {% set _modo_periodo_ativo = request.args.get('modo','')|trim|lower %}
+              <span class="periodo-chip{% if _modo_periodo_ativo == 'dia' %} ativo{% endif %}" data-modo="dia">Dia</span>
+              <span class="periodo-chip{% if _modo_periodo_ativo == 'semana' %} ativo{% endif %}" data-modo="semana">Semana</span>
+              <span class="periodo-chip{% if _modo_periodo_ativo == 'mes' %} ativo{% endif %}" data-modo="mes">Mês</span>
+              <span class="periodo-chip{% if _modo_periodo_ativo == 'ano' %} ativo{% endif %}" data-modo="ano">Ano</span>
 
               <span class="periodo-chip" id="btnHoje">Hoje</span>
 
@@ -801,11 +802,19 @@
               <div class="periodo-range">
                 <div>
                   <label>De</label>
-                  <input type="date" id="pickerDe" value="">
+                  <input
+                    type="date"
+                    id="pickerDe"
+                    value="{{ dt_ini.strftime('%Y-%m-%d') if dt_ini is defined and dt_ini else '' }}"
+                  >
                 </div>
                 <div>
                   <label>Até</label>
-                  <input type="date" id="pickerAte" value="">
+                  <input
+                    type="date"
+                    id="pickerAte"
+                    value="{{ dt_fim.strftime('%Y-%m-%d') if dt_fim is defined and dt_fim else '' }}"
+                  >
                 </div>
               </div>
 
@@ -3589,12 +3598,6 @@ document.addEventListener("DOMContentLoaded", () => {
       return `${y}-${m}-${day}`;
     }
 
-    function dataRefAtual(){
-      const di = String(pickerDe && pickerDe.value ? pickerDe.value : "").trim();
-      if (di && di.length >= 10) return di.slice(0,10);
-      return hojeYMD();
-    }
-
     function ultimoDiaDoMes(ano, mes){
       const a = Number(ano);
       const m = Number(mes);
@@ -3648,7 +3651,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function initDeInputsAtuais(){
-      const base = mesRefDoInputMonth(inpMesDeReal.value) || (function(){
+      // dt_ini/dt_fim são as datas efetivamente calculadas e exibidas na
+      // grade. Elas têm prioridade sobre mes_de, que guarda apenas AAAA-MM e
+      // perderia o dia inicial (por exemplo, 19/07 viraria 01/07).
+      const diAtual = String(pickerDe.value || "").trim();
+      const dfAtual = String(pickerAte.value || "").trim();
+
+      const base = mesRefDoInputMonth(diAtual.slice(0,7)) || mesRefDoInputMonth(inpMesDeReal.value) || (function(){
         const hj = new Date();
         return { ano: String(hj.getFullYear()), mes: pad2(hj.getMonth()+1) };
       })();
@@ -3658,7 +3667,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
       setTopo(ano, mes);
 
-      if(!inpMesAteReal.value){
+      if(diAtual && dfAtual){
+        inpMesDeReal.value = diAtual.slice(0,7);
+        inpMesAteReal.value = dfAtual;
+      }else if(!inpMesAteReal.value){
         setPeriodoPorMes(ano, mes);
       }else{
         const df = String(inpMesAteReal.value || "").trim();
@@ -3717,16 +3729,19 @@ document.addEventListener("DOMContentLoaded", () => {
         const ano = String(lblAno.textContent || "").trim() || String(new Date().getFullYear());
         setPeriodoPorMes(ano, mes);
 
-        if (inpModo) inpModo.value = "";
-        if (inpDataRef) inpDataRef.value = "";
+        // Preserva também o dia inicial. Enviar apenas mes_de faria o
+        // backend reconstruir o começo como o dia 01 do mês.
+        if (inpModo) inpModo.value = "intervalo";
+        if (inpDataRef) inpDataRef.value = pickerDe.value;
       });
     });
 
     btnHoje.addEventListener("click", (e)=>{
       e.preventDefault();
 
-      if (inpModo) inpModo.value = "mes";
+      if (inpModo) inpModo.value = "dia";
       if (inpDataRef) inpDataRef.value = hojeYMD();
+      if (selBiSemana) selBiSemana.value = "";
 
       submeterFormFiltroGrade(form);
     });
@@ -3741,8 +3756,12 @@ document.addEventListener("DOMContentLoaded", () => {
         shell.querySelectorAll(".periodo-chip[data-modo]").forEach(x=>x.classList.remove("ativo"));
         ch.classList.add("ativo");
 
+        // Dia/Semana/Mês/Ano são atalhos do período atual. O primeiro dia
+        // que estiver no seletor pode pertencer a um filtro antigo e não
+        // deve ser reutilizado como referência para esses atalhos.
         if (inpModo) inpModo.value = modo;
-        if (inpDataRef) inpDataRef.value = dataRefAtual();
+        if (inpDataRef) inpDataRef.value = hojeYMD();
+        if (selBiSemana) selBiSemana.value = "";
 
         submeterFormFiltroGrade(form);
       });
@@ -3872,8 +3891,10 @@ document.addEventListener("DOMContentLoaded", () => {
         inpMesDeReal.value = (pickerDe.value || "").slice(0,7);
         inpMesAteReal.value = (pickerAte.value || "");
 
-        if (inpModo) inpModo.value = "";
-        if (inpDataRef) inpDataRef.value = "";
+        // A alteração direta de De/Até também precisa manter o dia inicial
+        // exato durante o recarregamento automático.
+        if (inpModo) inpModo.value = "intervalo";
+        if (inpDataRef) inpDataRef.value = pickerDe.value;
 
         if (selBiSemana) selBiSemana.value = "";
 
@@ -3928,8 +3949,9 @@ document.addEventListener("DOMContentLoaded", () => {
         inpMesAteReal.value = df;
       }
 
-      if (inpModo) inpModo.value = "";
-      if (inpDataRef) inpDataRef.value = "";
+      // O intervalo manual usa data_ref como início exato e mes_ate como fim.
+      if (inpModo) inpModo.value = "intervalo";
+      if (inpDataRef) inpDataRef.value = di;
 
       submeterFormFiltroGrade(form);
     });

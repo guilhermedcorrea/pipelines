@@ -2393,7 +2393,12 @@ def lista_paineis():
                 return hoje_ref, hoje_ref
 
             if p == "semana":
-                inicio = hoje_ref - timedelta(days=hoje_ref.weekday())
+                # Python considera segunda-feira como 0 em weekday(). Para a
+                # regra da aplicação, a semana começa no domingo e termina no
+                # sábado. O deslocamento abaixo transforma domingo em 0,
+                # segunda em 1, ..., sábado em 6.
+                dias_desde_domingo = (hoje_ref.weekday() + 1) % 7
+                inicio = hoje_ref - timedelta(days=dias_desde_domingo)
                 fim = inicio + timedelta(days=6)
                 return inicio, fim
 
@@ -4534,10 +4539,12 @@ def lista_paineis():
         else:
             periodo_label = f"Mês atual ({dt_ini_ocup.strftime('%d/%m/%Y')} até {dt_fim_ocup.strftime('%d/%m/%Y')})"
 
+    inicio_semana_atual, fim_semana_atual = _calcular_periodo_rapido("semana", hoje)
+
     ranges_rapidos = {
         "dia": (hoje, hoje),
         "hoje": (hoje, hoje),
-        "semana": (hoje - timedelta(days=hoje.weekday()), (hoje - timedelta(days=hoje.weekday())) + timedelta(days=6)),
+        "semana": (inicio_semana_atual, fim_semana_atual),
         "mes": (
             primeiro_dia_mes_atual,
             date(hoje.year, hoje.month, calendar.monthrange(hoje.year, hoje.month)[1]),
@@ -5117,8 +5124,13 @@ def grade_painel(codponto: int):
                 dt_fim = cal_ref.data
 
             elif modo == "semana":
-                dt_ini = cal_ref.inicio_semana
-                dt_fim = cal_ref.fim_semana
+                # A DimCalendario pode estar cadastrada com semana ISO
+                # (segunda a domingo). Nesta tela, a regra funcional é
+                # domingo a sábado, calculada diretamente pela data de
+                # referência para não depender dessa configuração.
+                dias_desde_domingo = (dt_ref.weekday() + 1) % 7
+                dt_ini = dt_ref - timedelta(days=dias_desde_domingo)
+                dt_fim = dt_ini + timedelta(days=6)
 
             elif modo == "mes":
                 ini_mes = (
@@ -8533,6 +8545,16 @@ def grade_painel_multi():
     def _resolver_mes_ref_base():
         hoje = date.today()
 
+        # Os atalhos rápidos sempre usam a data atual/data_ref. Não permita
+        # que mes_ref, mes_de ou mes_ate de uma navegação anterior definam o
+        # cabeçalho de um novo período rápido.
+        modo_ref = _normalizar_texto(request.args.get("modo")).lower()
+        if modo_ref in ("dia", "semana", "mes", "ano"):
+            mes_data_ref = _extrair_mes_referencia(request.args.get("data_ref"))
+            if mes_data_ref:
+                return mes_data_ref
+            return f"{hoje.year:04d}-{hoje.month:02d}"
+
         for chave in ("dt_ini", "dt_fim", "mes_ref", "mes_de", "mes_ate", "data_ref"):
             mes_ref_tmp = _extrair_mes_referencia(request.args.get(chave))
             if mes_ref_tmp:
@@ -8596,6 +8618,26 @@ def grade_painel_multi():
             dt_fim = mes_ate_arg or data_ref_arg
             if dt_fim < dt_ini:
                 dt_ini, dt_fim = dt_fim, dt_ini
+        elif modo in ("dia", "semana", "mes", "ano"):
+            data_ref_periodo = data_ref_arg or date.today()
+
+            if modo == "dia":
+                dt_ini = data_ref_periodo
+                dt_fim = data_ref_periodo
+            elif modo == "semana":
+                dias_desde_domingo = (data_ref_periodo.weekday() + 1) % 7
+                dt_ini = data_ref_periodo - timedelta(days=dias_desde_domingo)
+                dt_fim = dt_ini + timedelta(days=6)
+            elif modo == "mes":
+                dt_ini = date(data_ref_periodo.year, data_ref_periodo.month, 1)
+                dt_fim = date(
+                    data_ref_periodo.year,
+                    data_ref_periodo.month,
+                    calendar.monthrange(data_ref_periodo.year, data_ref_periodo.month)[1],
+                )
+            else:
+                dt_ini = date(data_ref_periodo.year, 1, 1)
+                dt_fim = date(data_ref_periodo.year, 12, 31)
         elif mes_de_arg and mes_ate_arg:
             dt_ini = mes_de_arg
             dt_fim = mes_ate_arg
@@ -8611,14 +8653,6 @@ def grade_painel_multi():
             dt_fim = mes_ate_arg
             if dt_fim < dt_ini:
                 dt_ini = dt_fim
-        elif modo == "dia" and data_ref_arg:
-            dt_ini = data_ref_arg
-            dt_fim = data_ref_arg
-        elif modo == "semana" and data_ref_arg:
-            inicio_semana = data_ref_arg - timedelta(days=data_ref_arg.weekday())
-            fim_semana = inicio_semana + timedelta(days=6)
-            dt_ini = inicio_semana
-            dt_fim = fim_semana
         else:
             dt_ini = dt_ini_mes
             dt_fim = dt_fim_mes
