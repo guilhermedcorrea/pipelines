@@ -23,9 +23,11 @@
     --st-danger: #b42318;
     --st-shadow: 0 12px 34px rgba(19, 34, 56, 0.08);
     box-sizing: border-box;
-    width: min(100%, 1440px);
-    margin: 0 auto;
-    padding: clamp(16px, 2.2vw, 32px);
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    margin: 0;
+    padding: clamp(12px, 1.35vw, 28px);
     color: var(--st-text);
   }
 
@@ -586,6 +588,29 @@
     transform: none;
   }
 
+  @media (min-width: 1600px) {
+    .stock-transfer-page {
+      padding: 24px 32px 32px;
+    }
+
+    .st-form {
+      gap: 24px;
+    }
+
+    .st-panel-body {
+      padding: 28px 30px;
+    }
+
+    .st-location-card {
+      padding: 24px 26px;
+    }
+
+    .st-control {
+      min-height: 50px;
+      font-size: 1rem;
+    }
+  }
+
   @media (max-width: 900px) {
     .st-route-grid {
       grid-template-columns: 1fr;
@@ -650,6 +675,29 @@
     }
 
     .st-btn {
+      width: 100%;
+    }
+  }
+
+  @media (max-width: 460px) {
+    .stock-transfer-page {
+      padding: 8px;
+    }
+
+    .st-panel-title {
+      align-items: flex-start;
+    }
+
+    .st-actions {
+      grid-template-columns: 1fr;
+    }
+
+    .st-series-select-row {
+      align-items: stretch;
+      flex-wrap: wrap;
+    }
+
+    .st-series-select-row .st-btn-danger {
       width: 100%;
     }
   }
@@ -1005,6 +1053,27 @@
       return `${idEstoque}|${idProprietario}|${codPonto}`;
     }
 
+    function identidadeRegistro(nomeEstoque, registro) {
+      if (!registro) return null;
+
+      const tipo = String(nomeEstoque || registro.NomeEstoque || '').trim().toLowerCase();
+      const proprietario = String(registro.IDProprietario ?? '').trim();
+      const codPonto = String(registro.CodPonto ?? '').trim().toLowerCase();
+      const idEstoque = registro.IDEstoque;
+
+      // Estoques Euro/Shempo podem aparecer no destino sem IDEstoque criado.
+      // Nesses casos, proprietário + ponto identificam o mesmo local físico.
+      if ((proprietario && proprietario !== '0') || codPonto) {
+        return `${tipo}|proprietario:${proprietario}|ponto:${codPonto}`;
+      }
+
+      if (idEstoque !== null && idEstoque !== undefined && idEstoque !== '') {
+        return `${tipo}|estoque:${idEstoque}`;
+      }
+
+      return `${tipo}|generico:${proprietario}|ponto:${codPonto}`;
+    }
+
     function textoRegistro(registro) {
       const partes = [registro.NomeEstoque || 'Estoque'];
       if (registro.IDEstoque !== null && registro.IDEstoque !== undefined && registro.IDEstoque !== '') {
@@ -1032,11 +1101,65 @@
       const proprietario = tipo === 'origem' ? origemPropSelect : destinoPropSelect;
       const grupos = tipo === 'origem' ? origemGroups : destinoGroups;
       const lista = grupos[estoque.value] || [];
-      return lista.find((registro) => chaveRegistro(registro) === proprietario.value) || lista[0] || null;
+      const selecionado = lista.find((registro) => chaveRegistro(registro) === proprietario.value);
+
+      if (tipo === 'origem') return selecionado || lista[0] || null;
+      if (selecionado && !registroEhOrigem(estoque.value, selecionado)) return selecionado;
+      return lista.find((registro) => !registroEhOrigem(estoque.value, registro)) || null;
     }
 
     function saldoRegistro(registro) {
       return registro ? numero(registro.Saldo ?? registro.Quantidade) : 0;
+    }
+
+    function registroEhOrigem(nomeDestino, registroDestino) {
+      const origem = registroSelecionado('origem');
+      if (!origem || !registroDestino) return false;
+
+      return identidadeRegistro(origemSelect.value, origem)
+        === identidadeRegistro(nomeDestino, registroDestino);
+    }
+
+    function mesmaLocalizacaoSelecionada() {
+      const origem = registroSelecionado('origem');
+      const destino = registroSelecionado('destino');
+      if (!origem || !destino) return false;
+
+      return identidadeRegistro(origemSelect.value, origem)
+        === identidadeRegistro(destinoSelect.value, destino);
+    }
+
+    function atualizarTiposDestino() {
+      Array.from(destinoSelect.options).forEach((opcao) => {
+        if (!opcao.dataset.rotuloOriginal) {
+          opcao.dataset.rotuloOriginal = opcao.textContent;
+        }
+
+        const lista = destinoGroups[opcao.value] || [];
+        const temLocalDiferente = lista.some(
+          (registro) => !registroEhOrigem(opcao.value, registro)
+        );
+
+        opcao.disabled = !temLocalDiferente;
+        opcao.textContent = temLocalDiferente
+          ? opcao.dataset.rotuloOriginal
+          : `${opcao.dataset.rotuloOriginal} — mesmo estoque da origem`;
+      });
+
+      const opcaoAtual = destinoSelect.selectedOptions[0];
+      if (!opcaoAtual || opcaoAtual.disabled) {
+        const primeiraValida = Array.from(destinoSelect.options).find(
+          (opcao) => !opcao.disabled && opcao.value
+        );
+
+        if (primeiraValida) {
+          destinoSelect.value = primeiraValida.value;
+        } else {
+          destinoSelect.selectedIndex = -1;
+        }
+      }
+
+      atualizarProprietario('destino');
     }
 
     function atualizarProprietario(tipo) {
@@ -1052,16 +1175,34 @@
         const chave = chaveRegistro(registro);
         if (vistos.has(chave)) return;
         vistos.add(chave);
-        adicionarOpcao(proprietario, chave, textoRegistro(registro));
+        const ehMesmoLocal = tipo === 'destino' && registroEhOrigem(estoque.value, registro);
+        const texto = ehMesmoLocal
+          ? `${textoRegistro(registro)} — mesmo estoque da origem`
+          : textoRegistro(registro);
+        adicionarOpcao(proprietario, chave, texto, ehMesmoLocal);
       });
 
-      if (!proprietario.options.length) {
-        adicionarOpcao(proprietario, '', 'Nenhum local disponível', true).selected = true;
+      const primeiraOpcaoValida = Array.from(proprietario.options).find(
+        (opcao) => !opcao.disabled && opcao.value
+      );
+
+      if (primeiraOpcaoValida) {
+        primeiraOpcaoValida.selected = true;
+      } else {
+        const mensagem = tipo === 'destino'
+          ? 'Escolha um estoque de destino diferente da origem'
+          : 'Nenhum local disponível';
+        adicionarOpcao(proprietario, '', mensagem, true).selected = true;
       }
 
       {% if item.ControlaLote %}
       if (tipo === 'origem') popularLotes();
       {% endif %}
+
+      if (tipo === 'origem') {
+        atualizarTiposDestino();
+        return;
+      }
 
       atualizarCalculos();
     }
@@ -1178,14 +1319,28 @@
       const saldoDestino = saldoRegistro(destino);
       const quantidade = Math.max(0, Math.trunc(numero(quantidadeInput.value)));
       const limite = limiteDisponivel();
-      const saldoFinalOrigem = Math.max(0, saldoOrigem - quantidade);
-      const saldoFinalDestino = saldoDestino + quantidade;
+      const mesmaLocalizacao = mesmaLocalizacaoSelecionada();
+      const destinoValido = Boolean(destino) && !mesmaLocalizacao;
+      const saldoFinalOrigem = destinoValido
+        ? Math.max(0, saldoOrigem - quantidade)
+        : saldoOrigem;
+      const saldoFinalDestino = destinoValido
+        ? saldoDestino + quantidade
+        : null;
       const ultrapassouSaldo = quantidade > limite;
+      const loteSelecionadoValido = {% if item.ControlaLote %}Boolean(loteControl && loteControl.value){% else %}true{% endif %};
 
       quantidadeInput.max = String(Math.max(0, limite));
-      quantidadeStatus.classList.toggle('is-error', ultrapassouSaldo || limite <= 0);
+      quantidadeStatus.classList.toggle(
+        'is-error',
+        mesmaLocalizacao || !destino || ultrapassouSaldo || limite <= 0
+      );
 
-      if (limite <= 0) {
+      if (mesmaLocalizacao) {
+        quantidadeStatus.textContent = 'Origem e destino não podem representar o mesmo estoque.';
+      } else if (!destino) {
+        quantidadeStatus.textContent = 'Selecione um estoque de destino diferente da origem.';
+      } else if (limite <= 0) {
         quantidadeStatus.textContent = 'Não há saldo disponível para esta seleção.';
       } else if (ultrapassouSaldo) {
         quantidadeStatus.textContent = `Quantidade acima do disponível. Máximo: ${limite}.`;
@@ -1194,11 +1349,18 @@
       }
 
       document.getElementById('origem_restante').textContent = saldoFinalOrigem;
-      document.getElementById('destino_restante').textContent = saldoFinalDestino;
+      document.getElementById('destino_restante').textContent = saldoFinalDestino ?? '—';
       document.getElementById('origem_atual').textContent = saldoOrigem;
       document.getElementById('origem_transferido').textContent = saldoFinalOrigem;
-      document.getElementById('destino_atual').textContent = saldoDestino;
-      document.getElementById('destino_transferido').textContent = saldoFinalDestino;
+      document.getElementById('destino_atual').textContent = destinoValido ? saldoDestino : '—';
+      document.getElementById('destino_transferido').textContent = saldoFinalDestino ?? '—';
+
+      confirmarButton.disabled = !origem
+        || !destinoValido
+        || quantidade <= 0
+        || ultrapassouSaldo
+        || limite <= 0
+        || !loteSelecionadoValido;
     }
 
     {% if item.ControlaNumerodeSerie and pedido is not defined %}
@@ -1284,7 +1446,7 @@
     destinoSelect.addEventListener('change', () => atualizarProprietario('destino'));
     origemPropSelect.addEventListener('change', () => {
       {% if item.ControlaLote %}popularLotes();{% endif %}
-      atualizarCalculos();
+      atualizarTiposDestino();
     });
     destinoPropSelect.addEventListener('change', atualizarCalculos);
     quantidadeInput.addEventListener('input', atualizarCalculos);
@@ -1298,20 +1460,24 @@
 
     form.addEventListener('submit', (evento) => {
       quantidadeInput.setCustomValidity('');
+      destinoPropSelect.setCustomValidity('');
       const quantidade = Math.trunc(numero(quantidadeInput.value));
       const limite = limiteDisponivel();
-      const mesmaLocalizacao = origemSelect.value === destinoSelect.value
-        && origemPropSelect.value === destinoPropSelect.value;
+      const destino = registroSelecionado('destino');
+      const mesmaLocalizacao = mesmaLocalizacaoSelecionada();
 
       if (quantidade <= 0) {
         quantidadeInput.setCustomValidity('Informe uma quantidade maior que zero.');
       } else if (quantidade > limite) {
         quantidadeInput.setCustomValidity(`A quantidade máxima disponível é ${limite}.`);
       } else if (mesmaLocalizacao) {
-        evento.preventDefault();
-        window.alert('O estoque de destino deve ser diferente do estoque de origem.');
-        destinoSelect.focus();
-        return;
+        destinoPropSelect.setCustomValidity(
+          'O estoque de destino deve ser diferente do estoque de origem.'
+        );
+      } else if (!destino) {
+        destinoPropSelect.setCustomValidity(
+          'Selecione um estoque de destino diferente da origem.'
+        );
       }
 
       if (!form.checkValidity()) {
@@ -1325,7 +1491,6 @@
     });
 
     atualizarProprietario('origem');
-    atualizarProprietario('destino');
     atualizarCalculos();
   })();
 </script>

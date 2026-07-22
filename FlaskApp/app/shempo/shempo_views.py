@@ -1842,6 +1842,14 @@ def movimentar_estoque(item_id):
         except ValueError:
             qtd = 0
 
+        if not esc_origem or not prop_origem or not esc_dest or not prop_dest:
+            flash('Selecione corretamente os estoques de origem e de destino.', 'error')
+            return redirect(url_for('euro.movimentar_estoque', item_id=item_id))
+
+        if qtd <= 0:
+            flash('A quantidade a transferir deve ser maior que zero.', 'error')
+            return redirect(url_for('euro.movimentar_estoque', item_id=item_id))
+
         lote_num = request.form.get('numero_lote_escolhido', '').strip()
         if item.ControlaLote and not lote_num:
             flash('Informe obrigatoriamente o número do lote.', 'error')
@@ -1885,13 +1893,14 @@ def movimentar_estoque(item_id):
                 model.IDItem == item_id,
                 model.IDTipoEstoque == tipo_ids[tipo],
             )
+            id_est, prop_id, cod = parse_prop(prop_val)
+            if id_est is not None:
+                q = q.filter(model.IDEstoque == id_est)
             if tipo in ('EstoqueEuroMidia', 'EstoqueEuroMatriz'):
-                _, prop_id, cod = parse_prop(prop_val)
                 q = q.filter(model.EuroID == prop_id)
                 if cod:
                     q = q.filter(model.CodPonto == cod)
             elif tipo == 'EstoqueShempo':
-                _, prop_id, _ = parse_prop(prop_val)
                 q = q.filter(model.ShempoId == prop_id)
             if lock:
                 q = q.with_for_update()
@@ -1900,16 +1909,42 @@ def movimentar_estoque(item_id):
         tipo_o = resolve(esc_origem)
         tipo_d = resolve(esc_dest)
 
+        def chave_localizacao(tipo: str, prop_val: str):
+            """Identifica o local físico, mesmo quando o destino ainda não tem IDEstoque."""
+            id_est, proprietario, cod_ponto = parse_prop(prop_val)
+            proprietario = str(proprietario or '').strip()
+            cod_ponto = str(cod_ponto or '').strip().casefold()
+
+            if (proprietario and proprietario != '0') or cod_ponto:
+                return tipo, 'proprietario', proprietario, cod_ponto
+            if id_est is not None:
+                return tipo, 'estoque', id_est
+            return tipo, 'generico', proprietario, cod_ponto
+
+        if chave_localizacao(tipo_o, prop_origem) == chave_localizacao(tipo_d, prop_dest):
+            flash('O estoque de destino deve ser diferente do estoque de origem.', 'error')
+            return redirect(url_for('euro.movimentar_estoque', item_id=item_id))
+
         try:
             with db.session.begin_nested():
                
                 origem = get_reg(tipo_o, item_id, prop_origem, lock=True)
                 if not origem or origem.Saldo < qtd:
                     raise ValueError('Saldo insuficiente ou origem não encontrada')
+
+                destino = get_reg(tipo_d, item_id, prop_dest, lock=True)
+                if (
+                    destino is not None
+                    and tipo_o == tipo_d
+                    and origem.IDEstoque == destino.IDEstoque
+                ):
+                    raise ValueError(
+                        'O estoque de destino deve ser diferente do estoque de origem.'
+                    )
+
                 origem.Saldo -= qtd
                 db.session.flush()
 
-                destino = get_reg(tipo_d, item_id, prop_dest, lock=True)
                 if destino:
                     destino.Saldo += qtd
                 else:
