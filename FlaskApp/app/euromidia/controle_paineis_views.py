@@ -39162,7 +39162,7 @@ def _cadastro_painel_imagem_sanitizada(arquivo) -> dict:
 
 @paineis_bp.route("/cadastrar-paineis", methods=["GET", "POST"])
 @login_required
-@requer_permissao("ADMIN_TUDO")
+@requer_item_menu_paineis("cadastrar_paineis")
 @limiter.limit("10 per minute", methods=["POST"])
 @retry_get_view(db, attempts=6, base_delay=0.2, max_delay=1.5)
 def cadastrar_paineis():

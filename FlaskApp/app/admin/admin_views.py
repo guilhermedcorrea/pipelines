@@ -11,6 +11,7 @@ from ..autenticacao.autenticacao_views import requer_permissao
 from ..autenticacao.acl_menu_paineis import requer_item_menu_paineis
 from pathlib import Path
 from typing import Any
+from decimal import Decimal, InvalidOperation
 import base64
 import hashlib
 import hmac
@@ -24730,3 +24731,1370 @@ def vencimentos_campanhas_sugestoes():
 
     return jsonify({"ok": True, "items": items})
 
+
+
+# ==========================================================
+# CADASTRO E EDIÇÃO COMPLETA DE PAINÉIS / FACES
+# ==========================================================
+
+CADASTRO_PAINEL_DIRETORIO_IMAGENS_PADRAO = Path(
+    "/home/euromidia/projetos/pipelines/FlaskApp/app/static/imagens/painéis"
+)
+CADASTRO_PAINEL_URL_IMAGENS = "/static/imagens/painéis"
+CADASTRO_PAINEL_EXTENSOES_IMAGEM = {".jpg", ".jpeg", ".png", ".webp"}
+CADASTRO_PAINEL_TIPOS_COM_EXIBICOES = {
+    "PAINEL DIGITAL",
+    "RELÓGIO MULTIMENSAGEM DIGITAL",
+}
+
+
+def _cadpainel_texto(valor, limite: int | None = None) -> str | None:
+    texto_valor = str(valor or "").strip()
+    if not texto_valor:
+        return None
+    if limite is not None:
+        texto_valor = texto_valor[:limite]
+    return texto_valor
+
+
+def _cadpainel_int(valor, *, padrao=None, minimo=None, maximo=None):
+    try:
+        if valor is None or str(valor).strip() == "":
+            return padrao
+        numero = int(str(valor).strip())
+    except (TypeError, ValueError):
+        return padrao
+
+    if minimo is not None and numero < minimo:
+        return padrao
+    if maximo is not None and numero > maximo:
+        return padrao
+    return numero
+
+
+def _cadpainel_decimal(valor, *, padrao=None, minimo=None, casas: int = 2):
+    if valor is None:
+        return padrao
+
+    texto_valor = str(valor).strip()
+    if not texto_valor:
+        return padrao
+
+    # Aceito tanto o padrão HTML/SQL (1234.56) quanto o brasileiro (1.234,56).
+    if "," in texto_valor:
+        texto_valor = texto_valor.replace(".", "").replace(",", ".")
+
+    try:
+        numero = Decimal(texto_valor)
+    except (InvalidOperation, ValueError, TypeError):
+        return padrao
+
+    if minimo is not None and numero < Decimal(str(minimo)):
+        return padrao
+    quantizador = Decimal("1").scaleb(-max(0, int(casas)))
+    return numero.quantize(quantizador)
+
+
+def _cadpainel_bit(nome_campo: str) -> int:
+    valor = str(request.form.get(nome_campo) or "").strip().lower()
+    return 1 if valor in {"1", "true", "on", "sim", "s", "yes"} else 0
+
+
+def _cadpainel_data(valor):
+    texto_valor = str(valor or "").strip()
+    if not texto_valor:
+        return None
+
+    for formato in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(texto_valor, formato).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _cadpainel_datetime(valor):
+    texto_valor = str(valor or "").strip()
+    if not texto_valor:
+        return datetime.now()
+
+    for formato in (
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+    ):
+        try:
+            return datetime.strptime(texto_valor, formato)
+        except ValueError:
+            continue
+    return datetime.now()
+
+
+def _cadpainel_normalizar_tipo(valor) -> str:
+    import unicodedata
+
+    texto_tipo = str(valor or "").strip().upper()
+    texto_tipo = unicodedata.normalize("NFKC", texto_tipo)
+    return " ".join(texto_tipo.split())
+
+
+def _cadpainel_tipo_exige_exibicoes(tipo_painel) -> bool:
+    return _cadpainel_normalizar_tipo(tipo_painel) in CADASTRO_PAINEL_TIPOS_COM_EXIBICOES
+
+
+def _cadpainel_id_usuario() -> int | None:
+    try:
+        return _id_usuario_logado_admin_ou_none()
+    except Exception:
+        return None
+
+
+def _cadpainel_diretorio_imagens() -> Path:
+    configurado = current_app.config.get("PAINEIS_IMAGENS_DIRETORIO")
+    diretorio = Path(configurado) if configurado else CADASTRO_PAINEL_DIRETORIO_IMAGENS_PADRAO
+    diretorio.mkdir(parents=True, exist_ok=True)
+    return diretorio
+
+
+def _cadpainel_codface_arquivo(cod_face: str) -> str:
+    valor = str(cod_face or "").strip()
+    if not valor or not re.fullmatch(r"[A-Za-z0-9_-]+", valor):
+        raise ValueError("O CodFace possui caracteres inválidos para formar o nome da imagem.")
+    return valor
+
+
+def _cadpainel_arquivos_do_tipo(diretorio: Path, cod_face: str, bit_orcamento: int) -> list[Path]:
+    stem_esperado = f"{cod_face}_2" if int(bit_orcamento) == 1 else cod_face
+    encontrados: list[Path] = []
+    for caminho in diretorio.iterdir():
+        if not caminho.is_file():
+            continue
+        if caminho.stem == stem_esperado and caminho.suffix.lower() in CADASTRO_PAINEL_EXTENSOES_IMAGEM:
+            encontrados.append(caminho)
+    return encontrados
+
+
+def _cadpainel_preparar_upload(arquivo, cod_face: str, bit_orcamento: int):
+    if not arquivo or not getattr(arquivo, "filename", ""):
+        return None
+
+    extensao = Path(secure_filename(arquivo.filename)).suffix.lower()
+    if extensao not in CADASTRO_PAINEL_EXTENSOES_IMAGEM:
+        raise ValueError("Formato de imagem não permitido. Use JPG, JPEG, PNG ou WEBP.")
+
+    diretorio = _cadpainel_diretorio_imagens()
+    cod_face_arquivo = _cadpainel_codface_arquivo(cod_face)
+    nome_base = f"{cod_face_arquivo}_2" if int(bit_orcamento) == 1 else cod_face_arquivo
+    nome_final = f"{nome_base}{extensao}"
+    caminho_temporario = diretorio / f".upload_{uuid.uuid4().hex}{extensao}"
+    caminho_final = diretorio / nome_final
+    arquivo.save(caminho_temporario)
+
+    return {
+        "temporario": caminho_temporario,
+        "final": caminho_final,
+        "nome_final": nome_final,
+        "url": f"{CADASTRO_PAINEL_URL_IMAGENS}/{nome_final}",
+        "bit_orcamento": int(bit_orcamento),
+    }
+
+
+def _cadpainel_mover_para_backup(caminho: Path, backups: list[tuple[Path, Path]]):
+    if not caminho.exists():
+        return
+    backup = caminho.with_name(f".{caminho.name}.backup_{uuid.uuid4().hex}")
+    os.replace(caminho, backup)
+    backups.append((backup, caminho))
+
+
+def _cadpainel_restaurar_arquivos(backups, finais_criados, temporarios):
+    for caminho in temporarios:
+        try:
+            if caminho and caminho.exists():
+                caminho.unlink()
+        except Exception:
+            pass
+
+    for caminho in finais_criados:
+        try:
+            if caminho and caminho.exists():
+                caminho.unlink()
+        except Exception:
+            pass
+
+    for backup, original in reversed(backups):
+        try:
+            if backup.exists():
+                os.replace(backup, original)
+        except Exception:
+            pass
+
+
+def _cadpainel_finalizar_backups(backups):
+    for backup, _original in backups:
+        try:
+            if backup.exists():
+                backup.unlink()
+        except Exception:
+            current_app.logger.warning("Não foi possível remover backup temporário de imagem: %s", backup)
+
+
+def _cadpainel_buscar_face(id_face: int):
+    return db.session.execute(
+        text("""
+            SELECT TOP (1)
+                   f.IDDimFacesPaineis,
+                   f.IDDimPaineisEuromidia,
+                   f.CodPonto AS CodPontoFace,
+                   f.Face,
+                   f.CodFace,
+                   f.Tipo AS TipoFace,
+                   p.DataAtualizacao,
+                   p.CodPonto,
+                   p.QuantidadeFaces,
+                   p.Tipo,
+                   p.Cidade,
+                   p.UF,
+                   p.Logradouro,
+                   p.Sentido,
+                   p.Bairro,
+                   p.Referencia,
+                   p.Numero,
+                   p.CEP,
+                   p.Latitude,
+                   p.Longitude,
+                   p.FormatoLxA,
+                   p.FormatoLonaAcabadaLxAm,
+                   p.AreaTotalm,
+                   p.BitIluminado,
+                   p.Restricoes,
+                   p.TipoSolo,
+                   p.DataInstalacao,
+                   p.DataRetirada,
+                   p.Exibidora,
+                   p.BitProprio,
+                   p.BitAtivo,
+                   p.BitAluguel,
+                   p.BitEnergia,
+                   p.BitInternet,
+                   p.IDProduto,
+                   p.IDDimPublicoAlvo,
+                   p.QuantidadeEmpresasRegiao,
+                   p.QuantidadeSegmentosRegiao,
+                   p.ClasseSegmentoPredominante
+            FROM [Integracao].[Silver].[DimFacesPaineis] AS f WITH (NOLOCK)
+            INNER JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS p WITH (NOLOCK)
+                ON p.IDDimPaineisEuromidia = f.IDDimPaineisEuromidia
+            WHERE f.IDDimFacesPaineis = :id_face
+        """),
+        {"id_face": int(id_face)},
+    ).mappings().first()
+
+
+def _cadpainel_carregar_edicao(id_face: int):
+    face_painel = _cadpainel_buscar_face(id_face)
+    if not face_painel:
+        return None
+
+    id_painel = int(face_painel["IDDimPaineisEuromidia"])
+
+    classificacao = db.session.execute(
+        text("""
+            SELECT TOP (1) *
+            FROM [Integracao].[Silver].[FatoClassificacaoFacesPaineis] WITH (NOLOCK)
+            WHERE IDDimFacesPaineis = :id_face
+            ORDER BY IDFatoClassificacaoFacesPaineis DESC
+        """),
+        {"id_face": int(id_face)},
+    ).mappings().first()
+
+    classificacao_detalhes = db.session.execute(
+        text("""
+            SELECT TOP (1) *
+            FROM [Integracao].[Silver].[FatoClassificacaoPaineisDetalhes] WITH (NOLOCK)
+            WHERE IDDimFacesPaineis = :id_face
+            ORDER BY IDFatoClassificacaoPaineisDetalhes DESC
+        """),
+        {"id_face": int(id_face)},
+    ).mappings().first()
+
+    custo = db.session.execute(
+        text("""
+            SELECT TOP (1) *
+            FROM [Integracao].[Silver].[FatoCustoFacesPainel] WITH (NOLOCK)
+            WHERE IDDimFacesPaineis = :id_face
+              AND IDDimPaineisEuromidia = :id_painel
+            ORDER BY IDFatoCustoFacesPainel DESC
+        """),
+        {"id_face": int(id_face), "id_painel": id_painel},
+    ).mappings().first()
+
+    composicoes = []
+    if custo:
+        composicoes = db.session.execute(
+            text("""
+                SELECT *
+                FROM [Integracao].[Silver].[FatoComposicaoCustosPainel] WITH (NOLOCK)
+                WHERE IDFatoCustoFacesPainel = :id_custo
+                ORDER BY IDFatoComposicaoCustosPainel ASC
+            """),
+            {"id_custo": int(custo["IDFatoCustoFacesPainel"])},
+        ).mappings().all()
+
+    precos = db.session.execute(
+        text("""
+            SELECT *
+            FROM [Integracao].[Silver].[FatoPrecoFacePainel] WITH (NOLOCK)
+            WHERE IDDimFacesPaineis = :id_face
+              AND IDDimPaineisEuromidia = :id_painel
+            ORDER BY IDFatoPrecoFacePainel ASC
+        """),
+        {"id_face": int(id_face), "id_painel": id_painel},
+    ).mappings().all()
+
+    imagens = db.session.execute(
+        text("""
+            SELECT *
+            FROM [Integracao].[Silver].[DimImagemPainel] WITH (NOLOCK)
+            WHERE IDDimFacesPaineis = :id_face
+              AND ISNULL(BitAtivo, 1) = 1
+            ORDER BY ISNULL(BitImagemOrcamento, 0), NumeroImagem, IDDimImagemPainel DESC
+        """),
+        {"id_face": int(id_face)},
+    ).mappings().all()
+
+    imagem_principal = next((dict(x) for x in imagens if int(x.get("BitImagemOrcamento") or 0) == 0), None)
+    imagem_orcamento = next((dict(x) for x in imagens if int(x.get("BitImagemOrcamento") or 0) == 1), None)
+
+    return {
+        "painel": dict(face_painel),
+        "classificacao": dict(classificacao) if classificacao else {},
+        "classificacao_detalhes": dict(classificacao_detalhes) if classificacao_detalhes else {},
+        "custo": dict(custo) if custo else None,
+        "composicoes": [dict(x) for x in composicoes],
+        "precos": [dict(x) for x in precos],
+        "imagem_principal": imagem_principal,
+        "imagem_orcamento": imagem_orcamento,
+    }
+
+
+def _cadpainel_valor_comparavel(valor):
+    if isinstance(valor, Decimal):
+        return valor.quantize(Decimal("0.01"))
+    if isinstance(valor, datetime):
+        return valor.replace(microsecond=0)
+    if isinstance(valor, date):
+        return valor
+    if valor is None:
+        return None
+    return str(valor).strip()
+
+
+def _cadpainel_composicoes_formulario():
+    categorias = request.form.getlist("composicao_categoria[]")
+    valores = request.form.getlist("composicao_valor[]")
+    quantidade = max(len(categorias), len(valores))
+    itens = []
+
+    for indice in range(quantidade):
+        categoria = _cadpainel_texto(categorias[indice] if indice < len(categorias) else None, 100)
+        valor_raw = valores[indice] if indice < len(valores) else None
+
+        if not categoria and not str(valor_raw or "").strip():
+            continue
+        if not categoria:
+            raise ValueError("Informe a categoria em todas as linhas de composição de custos.")
+
+        valor = _cadpainel_decimal(valor_raw, minimo=0)
+        if valor is None:
+            raise ValueError(f"Informe um valor válido para a categoria {categoria}.")
+
+        itens.append({"Categoria": categoria, "Valor": valor})
+
+    return itens
+
+
+def _cadpainel_precos_formulario(tipo_painel):
+    ids = request.form.getlist("preco_id[]")
+    periodos = request.form.getlist("preco_periodo[]")
+    exibicoes = request.form.getlist("preco_exibicoes[]")
+    valores = request.form.getlist("preco_valor[]")
+    politicas = request.form.getlist("preco_politica[]")
+    valores_troca = request.form.getlist("preco_valor_troca[]")
+    validades = request.form.getlist("preco_data_validade[]")
+
+    quantidade = max(
+        len(ids), len(periodos), len(exibicoes), len(valores),
+        len(politicas), len(valores_troca), len(validades),
+    )
+    exige_exibicoes = _cadpainel_tipo_exige_exibicoes(tipo_painel)
+    itens = []
+
+    for indice in range(quantidade):
+        def pegar(lista):
+            return lista[indice] if indice < len(lista) else None
+
+        id_preco = _cadpainel_int(pegar(ids), minimo=1)
+        periodo = _cadpainel_texto(pegar(periodos))
+        valor_raw = pegar(valores)
+        politica = _cadpainel_texto(pegar(politicas), 100)
+        valor_troca_raw = pegar(valores_troca)
+        validade_raw = pegar(validades)
+        exibicoes_raw = pegar(exibicoes)
+
+        linha_vazia = not any(
+            str(valor or "").strip()
+            for valor in (periodo, valor_raw, politica, valor_troca_raw, validade_raw, exibicoes_raw)
+        )
+        if linha_vazia and not id_preco:
+            continue
+
+        if not periodo:
+            raise ValueError("Informe o período em todas as linhas de preço.")
+        if len(periodo) > 10:
+            raise ValueError("O período deve possuir no máximo 10 caracteres.")
+
+        valor = _cadpainel_decimal(valor_raw, minimo=0)
+        if valor is None:
+            raise ValueError(f"Informe um valor válido para o preço do período {periodo}.")
+
+        valor_troca = _cadpainel_decimal(valor_troca_raw, padrao=Decimal("0.00"), minimo=0)
+        exibicoes_dia = None
+        if exige_exibicoes:
+            exibicoes_dia = _cadpainel_int(exibicoes_raw)
+            if exibicoes_dia not in {540, 1080}:
+                raise ValueError("Para painel digital ou relógio multimensagem digital, selecione 540 ou 1080 exibições por dia.")
+
+        itens.append({
+            "IDFatoPrecoFacePainel": id_preco,
+            "Periodo": periodo,
+            "ExibicoesDia": exibicoes_dia,
+            "Valor": valor,
+            "PoliticaTrocas": politica,
+            "ValorTroca": valor_troca,
+            "DataValidade": _cadpainel_datetime(validade_raw),
+        })
+
+    return itens
+
+
+def _cadpainel_gravar_historico_custo(registro):
+    db.session.execute(
+        text("""
+            INSERT INTO [Integracao].[Silver].[FatoCustoFacesPainelHistorico]
+            (
+                IDFatoCustoFacesPainel,
+                IDDimFacesPaineis,
+                IDDimPaineisEuromidia,
+                ValorCusto,
+                OrigemCusto,
+                DataAlteracao
+            )
+            VALUES
+            (
+                :IDFatoCustoFacesPainel,
+                :IDDimFacesPaineis,
+                :IDDimPaineisEuromidia,
+                :ValorCusto,
+                :OrigemCusto,
+                SYSDATETIME()
+            )
+        """),
+        {
+            "IDFatoCustoFacesPainel": registro.get("IDFatoCustoFacesPainel"),
+            "IDDimFacesPaineis": registro.get("IDDimFacesPaineis"),
+            "IDDimPaineisEuromidia": registro.get("IDDimPaineisEuromidia"),
+            "ValorCusto": registro.get("ValorCusto"),
+            "OrigemCusto": registro.get("OrigemCusto"),
+        },
+    )
+
+
+def _cadpainel_gravar_historico_preco(registro):
+    db.session.execute(
+        text("""
+            INSERT INTO [Integracao].[Silver].[FatoPrecoFacePainelHistorico]
+            (
+                IDFatoPrecoFacePainel,
+                IDDimFacesPaineis,
+                IDDimPaineisEuromidia,
+                Periodo,
+                ExibicoesDia,
+                Valor,
+                PoliticaTrocas,
+                ValorTroca,
+                DataValidade,
+                DataAlteracao
+            )
+            VALUES
+            (
+                :IDFatoPrecoFacePainel,
+                :IDDimFacesPaineis,
+                :IDDimPaineisEuromidia,
+                :Periodo,
+                :ExibicoesDia,
+                :Valor,
+                :PoliticaTrocas,
+                :ValorTroca,
+                :DataValidade,
+                SYSDATETIME()
+            )
+        """),
+        {
+            "IDFatoPrecoFacePainel": registro.get("IDFatoPrecoFacePainel"),
+            "IDDimFacesPaineis": registro.get("IDDimFacesPaineis"),
+            "IDDimPaineisEuromidia": registro.get("IDDimPaineisEuromidia"),
+            "Periodo": registro.get("Periodo"),
+            "ExibicoesDia": registro.get("ExibicoesDia"),
+            "Valor": registro.get("Valor"),
+            "PoliticaTrocas": registro.get("PoliticaTrocas"),
+            "ValorTroca": registro.get("ValorTroca"),
+            "DataValidade": registro.get("DataValidade") or datetime.now(),
+        },
+    )
+
+
+def _cadpainel_salvar_dados_principais(id_face: int, id_painel: int):
+    tipo_painel = _cadpainel_texto(request.form.get("Tipo"), 100)
+    if not tipo_painel:
+        raise ValueError("Informe o tipo do painel.")
+
+    params_painel = {
+        "id_painel": id_painel,
+        "QuantidadeFaces": _cadpainel_int(request.form.get("QuantidadeFaces"), padrao=0, minimo=0),
+        "Tipo": tipo_painel,
+        "Cidade": _cadpainel_texto(request.form.get("Cidade")),
+        "UF": _cadpainel_texto(request.form.get("UF"), 2),
+        "Logradouro": _cadpainel_texto(request.form.get("Logradouro")),
+        "Sentido": _cadpainel_texto(request.form.get("Sentido")),
+        "Bairro": _cadpainel_texto(request.form.get("Bairro")),
+        "Referencia": _cadpainel_texto(request.form.get("Referencia")),
+        "Numero": _cadpainel_texto(request.form.get("Numero")),
+        "CEP": _cadpainel_texto(request.form.get("CEP")),
+        "Latitude": _cadpainel_decimal(request.form.get("Latitude"), casas=8),
+        "Longitude": _cadpainel_decimal(request.form.get("Longitude"), casas=8),
+        "FormatoLxA": _cadpainel_texto(request.form.get("FormatoLxA")),
+        "FormatoLonaAcabadaLxAm": _cadpainel_texto(request.form.get("FormatoLonaAcabadaLxAm")),
+        "AreaTotalm": _cadpainel_decimal(request.form.get("AreaTotalm"), minimo=0, casas=4),
+        "BitIluminado": _cadpainel_bit("BitIluminado"),
+        "Restricoes": _cadpainel_texto(request.form.get("Restricoes")),
+        "TipoSolo": _cadpainel_texto(request.form.get("TipoSolo")),
+        "DataInstalacao": _cadpainel_data(request.form.get("DataInstalacao")),
+        "DataRetirada": _cadpainel_data(request.form.get("DataRetirada")),
+        "Exibidora": _cadpainel_texto(request.form.get("Exibidora")),
+        "BitProprio": _cadpainel_bit("BitProprio"),
+        "BitAtivo": _cadpainel_bit("BitAtivo"),
+        "BitAluguel": _cadpainel_bit("BitAluguel"),
+        "BitEnergia": _cadpainel_bit("BitEnergia"),
+        "BitInternet": _cadpainel_bit("BitInternet"),
+        "IDProduto": _cadpainel_int(request.form.get("IDProduto"), minimo=1),
+        "IDDimPublicoAlvo": _cadpainel_int(request.form.get("IDDimPublicoAlvo"), minimo=1),
+        "QuantidadeEmpresasRegiao": _cadpainel_int(request.form.get("QuantidadeEmpresasRegiao"), padrao=0, minimo=0),
+        "QuantidadeSegmentosRegiao": _cadpainel_int(request.form.get("QuantidadeSegmentosRegiao"), padrao=0, minimo=0),
+        "ClasseSegmentoPredominante": _cadpainel_texto(request.form.get("ClasseSegmentoPredominante")),
+    }
+
+    db.session.execute(
+        text("""
+            UPDATE [Integracao].[Silver].[DimPaineisEuromidia]
+               SET DataAtualizacao = SYSDATETIME(),
+                   QuantidadeFaces = :QuantidadeFaces,
+                   Tipo = :Tipo,
+                   Cidade = :Cidade,
+                   UF = :UF,
+                   Logradouro = :Logradouro,
+                   Sentido = :Sentido,
+                   Bairro = :Bairro,
+                   Referencia = :Referencia,
+                   Numero = :Numero,
+                   CEP = :CEP,
+                   Latitude = :Latitude,
+                   Longitude = :Longitude,
+                   FormatoLxA = :FormatoLxA,
+                   FormatoLonaAcabadaLxAm = :FormatoLonaAcabadaLxAm,
+                   AreaTotalm = :AreaTotalm,
+                   BitIluminado = :BitIluminado,
+                   Restricoes = :Restricoes,
+                   TipoSolo = :TipoSolo,
+                   DataInstalacao = :DataInstalacao,
+                   DataRetirada = :DataRetirada,
+                   Exibidora = :Exibidora,
+                   BitProprio = :BitProprio,
+                   BitAtivo = :BitAtivo,
+                   BitAluguel = :BitAluguel,
+                   BitEnergia = :BitEnergia,
+                   BitInternet = :BitInternet,
+                   IDProduto = :IDProduto,
+                   IDDimPublicoAlvo = :IDDimPublicoAlvo,
+                   QuantidadeEmpresasRegiao = :QuantidadeEmpresasRegiao,
+                   QuantidadeSegmentosRegiao = :QuantidadeSegmentosRegiao,
+                   ClasseSegmentoPredominante = :ClasseSegmentoPredominante
+             WHERE IDDimPaineisEuromidia = :id_painel
+        """),
+        params_painel,
+    )
+
+    db.session.execute(
+        text("""
+            UPDATE [Integracao].[Silver].[DimFacesPaineis]
+               SET Face = :Face,
+                   Tipo = :TipoFace
+             WHERE IDDimFacesPaineis = :id_face
+               AND IDDimPaineisEuromidia = :id_painel
+        """),
+        {
+            "id_face": id_face,
+            "id_painel": id_painel,
+            "Face": _cadpainel_texto(request.form.get("Face"), 50),
+            "TipoFace": _cadpainel_texto(request.form.get("TipoFace"), 100) or tipo_painel,
+        },
+    )
+
+    return tipo_painel
+
+
+def _cadpainel_salvar_classificacao(id_face: int):
+    id_classificacao = _cadpainel_int(request.form.get("IDFatoClassificacaoFacesPaineis"), minimo=1)
+    params = {
+        "id_face": id_face,
+        "FluxoPassantesSemanal": _cadpainel_decimal(request.form.get("FluxoPassantesSemanal"), minimo=0),
+        "IndiceImpactoPopulacao": _cadpainel_decimal(request.form.get("IndiceImpactoPopulacao"), minimo=0),
+        "RendaMedia": _cadpainel_decimal(request.form.get("RendaMediaClassificacao"), minimo=0),
+        "PeaDiaFaixa": _cadpainel_texto(request.form.get("PeaDiaFaixa")),
+        "CPM": _cadpainel_decimal(request.form.get("CPM"), minimo=0),
+        "BitPresenca5PrincipaisAvenidas": _cadpainel_bit("BitPresenca5PrincipaisAvenidas"),
+        "BitCruzamento": _cadpainel_bit("BitCruzamento"),
+        "BitSemaforo": _cadpainel_bit("BitSemaforo"),
+        "BitProximidadeShopping": _cadpainel_bit("BitProximidadeShopping"),
+        "BitPresencaConcorrente200Metros": _cadpainel_bit("BitPresencaConcorrente200Metros"),
+        "LatitudeClassificacao": _cadpainel_decimal(request.form.get("LatitudeClassificacao"), casas=8),
+        "LongitudeClassificacao": _cadpainel_decimal(request.form.get("LongitudeClassificacao"), casas=8),
+    }
+
+    if id_classificacao:
+        resultado = db.session.execute(
+            text("""
+                UPDATE [Integracao].[Silver].[FatoClassificacaoFacesPaineis]
+                   SET FluxoPassantesSemanal = :FluxoPassantesSemanal,
+                       IndiceImpactoPopulacao = :IndiceImpactoPopulacao,
+                       RendaMedia = :RendaMedia,
+                       PeaDiaFaixa = :PeaDiaFaixa,
+                       CPM = :CPM,
+                       BitPresenca5PrincipaisAvenidas = :BitPresenca5PrincipaisAvenidas,
+                       BitCruzamento = :BitCruzamento,
+                       BitSemaforo = :BitSemaforo,
+                       BitProximidadeShopping = :BitProximidadeShopping,
+                       BitPresencaConcorrente200Metros = :BitPresencaConcorrente200Metros,
+                       Latitude = :LatitudeClassificacao,
+                       Longitude = :LongitudeClassificacao,
+                       DataAtualizacao = SYSDATETIME()
+                 WHERE IDFatoClassificacaoFacesPaineis = :id_classificacao
+                   AND IDDimFacesPaineis = :id_face
+            """),
+            {**params, "id_classificacao": id_classificacao},
+        )
+        if int(resultado.rowcount or 0) > 0:
+            return
+
+    db.session.execute(
+        text("""
+            INSERT INTO [Integracao].[Silver].[FatoClassificacaoFacesPaineis]
+            (
+                IDDimFacesPaineis,
+                FluxoPassantesSemanal,
+                IndiceImpactoPopulacao,
+                RendaMedia,
+                PeaDiaFaixa,
+                CPM,
+                BitPresenca5PrincipaisAvenidas,
+                BitCruzamento,
+                BitSemaforo,
+                BitProximidadeShopping,
+                BitPresencaConcorrente200Metros,
+                Latitude,
+                Longitude,
+                DataAtualizacao
+            )
+            VALUES
+            (
+                :id_face,
+                :FluxoPassantesSemanal,
+                :IndiceImpactoPopulacao,
+                :RendaMedia,
+                :PeaDiaFaixa,
+                :CPM,
+                :BitPresenca5PrincipaisAvenidas,
+                :BitCruzamento,
+                :BitSemaforo,
+                :BitProximidadeShopping,
+                :BitPresencaConcorrente200Metros,
+                :LatitudeClassificacao,
+                :LongitudeClassificacao,
+                SYSDATETIME()
+            )
+        """),
+        params,
+    )
+
+
+def _cadpainel_salvar_classificacao_detalhes(id_face: int):
+    id_detalhes = _cadpainel_int(request.form.get("IDFatoClassificacaoPaineisDetalhes"), minimo=1)
+    params = {
+        "id_face": id_face,
+        "Cota": _cadpainel_decimal(request.form.get("Cota"), minimo=0),
+        "MinimoLiquidoMensal": _cadpainel_decimal(request.form.get("MinimoLiquidoMensal"), minimo=0),
+        "MinimoLiquidoDiario": _cadpainel_decimal(request.form.get("MinimoLiquidoDiario"), minimo=0),
+        "RendaMedia": _cadpainel_decimal(request.form.get("RendaMediaDetalhes"), minimo=0),
+        "Regiao": _cadpainel_texto(request.form.get("Regiao")),
+        "DistanciaCentroKM": _cadpainel_decimal(request.form.get("DistanciaCentroKM"), minimo=0, casas=4),
+        "Azimute": _cadpainel_decimal(request.form.get("Azimute"), casas=4),
+    }
+
+    if id_detalhes:
+        resultado = db.session.execute(
+            text("""
+                UPDATE [Integracao].[Silver].[FatoClassificacaoPaineisDetalhes]
+                   SET Cota = :Cota,
+                       MinimoLiquidoMensal = :MinimoLiquidoMensal,
+                       MinimoLiquidoDiario = :MinimoLiquidoDiario,
+                       RendaMedia = :RendaMedia,
+                       Regiao = :Regiao,
+                       DistanciaCentroKM = :DistanciaCentroKM,
+                       Azimute = :Azimute,
+                       DataAtualizacao = SYSDATETIME()
+                 WHERE IDFatoClassificacaoPaineisDetalhes = :id_detalhes
+                   AND IDDimFacesPaineis = :id_face
+            """),
+            {**params, "id_detalhes": id_detalhes},
+        )
+        if int(resultado.rowcount or 0) > 0:
+            return
+
+    db.session.execute(
+        text("""
+            INSERT INTO [Integracao].[Silver].[FatoClassificacaoPaineisDetalhes]
+            (
+                IDDimFacesPaineis,
+                Cota,
+                MinimoLiquidoMensal,
+                MinimoLiquidoDiario,
+                RendaMedia,
+                Regiao,
+                DistanciaCentroKM,
+                Azimute,
+                DataAtualizacao
+            )
+            VALUES
+            (
+                :id_face,
+                :Cota,
+                :MinimoLiquidoMensal,
+                :MinimoLiquidoDiario,
+                :RendaMedia,
+                :Regiao,
+                :DistanciaCentroKM,
+                :Azimute,
+                SYSDATETIME()
+            )
+        """),
+        params,
+    )
+
+
+def _cadpainel_salvar_custo(id_face: int, id_painel: int, id_usuario: int | None):
+    custo_removido = _cadpainel_bit("custo_removido") == 1
+    custo_ativo = _cadpainel_bit("custo_ativo") == 1
+    id_custo_form = _cadpainel_int(request.form.get("IDFatoCustoFacesPainel"), minimo=1)
+
+    custo_atual = db.session.execute(
+        text("""
+            SELECT TOP (1) *
+            FROM [Integracao].[Silver].[FatoCustoFacesPainel] WITH (UPDLOCK, HOLDLOCK)
+            WHERE IDDimFacesPaineis = :id_face
+              AND IDDimPaineisEuromidia = :id_painel
+            ORDER BY IDFatoCustoFacesPainel DESC
+        """),
+        {"id_face": id_face, "id_painel": id_painel},
+    ).mappings().first()
+    custo_atual = dict(custo_atual) if custo_atual else None
+
+    if custo_atual and id_custo_form and int(custo_atual["IDFatoCustoFacesPainel"]) != id_custo_form:
+        raise ValueError("O custo informado não pertence à face selecionada.")
+
+    if custo_removido or not custo_ativo:
+        if custo_atual:
+            _cadpainel_gravar_historico_custo(custo_atual)
+            db.session.execute(
+                text("""
+                    DELETE FROM [Integracao].[Silver].[FatoComposicaoCustosPainel]
+                    WHERE IDFatoCustoFacesPainel = :id_custo
+                """),
+                {"id_custo": int(custo_atual["IDFatoCustoFacesPainel"])},
+            )
+            db.session.execute(
+                text("""
+                    DELETE FROM [Integracao].[Silver].[FatoCustoFacesPainel]
+                    WHERE IDFatoCustoFacesPainel = :id_custo
+                      AND IDDimFacesPaineis = :id_face
+                      AND IDDimPaineisEuromidia = :id_painel
+                """),
+                {
+                    "id_custo": int(custo_atual["IDFatoCustoFacesPainel"]),
+                    "id_face": id_face,
+                    "id_painel": id_painel,
+                },
+            )
+        return
+
+    composicoes = _cadpainel_composicoes_formulario()
+    if not composicoes:
+        raise ValueError("Adicione pelo menos uma categoria para formar o custo da face.")
+
+    origem = _cadpainel_texto(request.form.get("OrigemCusto"), 100) or "COMPOSIÇÃO DE CUSTOS"
+    valor_total = sum((item["Valor"] for item in composicoes), Decimal("0.00")).quantize(Decimal("0.01"))
+
+    composicoes_atuais = []
+    if custo_atual:
+        composicoes_atuais = db.session.execute(
+            text("""
+                SELECT Categoria, Valor
+                FROM [Integracao].[Silver].[FatoComposicaoCustosPainel]
+                WHERE IDFatoCustoFacesPainel = :id_custo
+                ORDER BY IDFatoComposicaoCustosPainel
+            """),
+            {"id_custo": int(custo_atual["IDFatoCustoFacesPainel"])},
+        ).mappings().all()
+
+    assinatura_atual = [
+        (str(x.get("Categoria") or "").strip(), _cadpainel_decimal(x.get("Valor"), padrao=Decimal("0.00")))
+        for x in composicoes_atuais
+    ]
+    assinatura_nova = [(x["Categoria"], x["Valor"]) for x in composicoes]
+
+    if custo_atual:
+        houve_alteracao = (
+            str(custo_atual.get("OrigemCusto") or "").strip() != origem
+            or _cadpainel_decimal(custo_atual.get("ValorCusto"), padrao=Decimal("0.00")) != valor_total
+            or assinatura_atual != assinatura_nova
+        )
+
+        id_custo = int(custo_atual["IDFatoCustoFacesPainel"])
+        if houve_alteracao:
+            _cadpainel_gravar_historico_custo(custo_atual)
+            db.session.execute(
+                text("""
+                    UPDATE [Integracao].[Silver].[FatoCustoFacesPainel]
+                       SET IDUsuarioAlteracao = :id_usuario,
+                           OrigemCusto = :origem,
+                           ValorCusto = :valor_total,
+                           DataAlteracao = SYSDATETIME()
+                     WHERE IDFatoCustoFacesPainel = :id_custo
+                       AND IDDimFacesPaineis = :id_face
+                       AND IDDimPaineisEuromidia = :id_painel
+                """),
+                {
+                    "id_usuario": id_usuario,
+                    "origem": origem,
+                    "valor_total": valor_total,
+                    "id_custo": id_custo,
+                    "id_face": id_face,
+                    "id_painel": id_painel,
+                },
+            )
+            db.session.execute(
+                text("""
+                    DELETE FROM [Integracao].[Silver].[FatoComposicaoCustosPainel]
+                    WHERE IDFatoCustoFacesPainel = :id_custo
+                """),
+                {"id_custo": id_custo},
+            )
+        else:
+            return
+    else:
+        id_custo = db.session.execute(
+            text("""
+                INSERT INTO [Integracao].[Silver].[FatoCustoFacesPainel]
+                (
+                    IDDimFacesPaineis,
+                    IDDimPaineisEuromidia,
+                    IDUsuarioAlteracao,
+                    OrigemCusto,
+                    ValorCusto,
+                    DataAlteracao
+                )
+                OUTPUT INSERTED.IDFatoCustoFacesPainel
+                VALUES
+                (
+                    :id_face,
+                    :id_painel,
+                    :id_usuario,
+                    :origem,
+                    :valor_total,
+                    SYSDATETIME()
+                )
+            """),
+            {
+                "id_face": id_face,
+                "id_painel": id_painel,
+                "id_usuario": id_usuario,
+                "origem": origem,
+                "valor_total": valor_total,
+            },
+        ).scalar_one()
+
+    for item in composicoes:
+        db.session.execute(
+            text("""
+                INSERT INTO [Integracao].[Silver].[FatoComposicaoCustosPainel]
+                (
+                    IDDimFacesPaineis,
+                    IDDimPaineisEuromidia,
+                    IDFatoCustoFacesPainel,
+                    Categoria,
+                    Valor,
+                    DataCategoria
+                )
+                VALUES
+                (
+                    :id_face,
+                    :id_painel,
+                    :id_custo,
+                    :categoria,
+                    :valor,
+                    SYSDATETIME()
+                )
+            """),
+            {
+                "id_face": id_face,
+                "id_painel": id_painel,
+                "id_custo": int(id_custo),
+                "categoria": item["Categoria"],
+                "valor": item["Valor"],
+            },
+        )
+
+    if not custo_atual:
+        _cadpainel_gravar_historico_custo({
+            "IDFatoCustoFacesPainel": int(id_custo),
+            "IDDimFacesPaineis": id_face,
+            "IDDimPaineisEuromidia": id_painel,
+            "ValorCusto": valor_total,
+            "OrigemCusto": origem,
+        })
+
+
+def _cadpainel_salvar_precos(id_face: int, id_painel: int, id_usuario: int | None, tipo_painel):
+    precos_form = _cadpainel_precos_formulario(tipo_painel)
+    rows_atuais = db.session.execute(
+        text("""
+            SELECT *
+            FROM [Integracao].[Silver].[FatoPrecoFacePainel]
+            WHERE IDDimFacesPaineis = :id_face
+              AND IDDimPaineisEuromidia = :id_painel
+        """),
+        {"id_face": id_face, "id_painel": id_painel},
+    ).mappings().all()
+    atuais = {int(x["IDFatoPrecoFacePainel"]): dict(x) for x in rows_atuais}
+
+    ids_submetidos = {
+        int(item["IDFatoPrecoFacePainel"])
+        for item in precos_form
+        if item.get("IDFatoPrecoFacePainel")
+    }
+
+    ids_invalidos = ids_submetidos.difference(atuais.keys())
+    if ids_invalidos:
+        raise ValueError("Foi informado um preço que não pertence à face selecionada.")
+
+    # Linhas removidas pelo botão menos: ficam fora do formulário e são excluídas aqui.
+    for id_preco, registro in atuais.items():
+        if id_preco in ids_submetidos:
+            continue
+        _cadpainel_gravar_historico_preco(registro)
+        db.session.execute(
+            text("""
+                DELETE FROM [Integracao].[Silver].[FatoPrecoFacePainel]
+                WHERE IDFatoPrecoFacePainel = :id_preco
+                  AND IDDimFacesPaineis = :id_face
+                  AND IDDimPaineisEuromidia = :id_painel
+            """),
+            {"id_preco": id_preco, "id_face": id_face, "id_painel": id_painel},
+        )
+
+    for item in precos_form:
+        id_preco = item.get("IDFatoPrecoFacePainel")
+        if id_preco:
+            atual = atuais[int(id_preco)]
+            campos = (
+                "Periodo", "ExibicoesDia", "Valor", "PoliticaTrocas", "ValorTroca", "DataValidade"
+            )
+            mudou = any(
+                _cadpainel_valor_comparavel(atual.get(campo))
+                != _cadpainel_valor_comparavel(item.get(campo))
+                for campo in campos
+            )
+            if not mudou:
+                continue
+
+            _cadpainel_gravar_historico_preco(atual)
+            db.session.execute(
+                text("""
+                    UPDATE [Integracao].[Silver].[FatoPrecoFacePainel]
+                       SET IDUsuarioAlteracao = :id_usuario,
+                           Periodo = :Periodo,
+                           ExibicoesDia = :ExibicoesDia,
+                           Valor = :Valor,
+                           PoliticaTrocas = :PoliticaTrocas,
+                           ValorTroca = :ValorTroca,
+                           DataValidade = :DataValidade
+                     WHERE IDFatoPrecoFacePainel = :id_preco
+                       AND IDDimFacesPaineis = :id_face
+                       AND IDDimPaineisEuromidia = :id_painel
+                """),
+                {
+                    **item,
+                    "id_usuario": id_usuario,
+                    "id_preco": int(id_preco),
+                    "id_face": id_face,
+                    "id_painel": id_painel,
+                },
+            )
+            continue
+
+        novo_id = db.session.execute(
+            text("""
+                INSERT INTO [Integracao].[Silver].[FatoPrecoFacePainel]
+                (
+                    IDDimFacesPaineis,
+                    IDDimPaineisEuromidia,
+                    IDUsuarioAlteracao,
+                    Periodo,
+                    ExibicoesDia,
+                    Valor,
+                    PoliticaTrocas,
+                    ValorTroca,
+                    DataValidade
+                )
+                OUTPUT INSERTED.IDFatoPrecoFacePainel
+                VALUES
+                (
+                    :id_face,
+                    :id_painel,
+                    :id_usuario,
+                    :Periodo,
+                    :ExibicoesDia,
+                    :Valor,
+                    :PoliticaTrocas,
+                    :ValorTroca,
+                    :DataValidade
+                )
+            """),
+            {
+                **item,
+                "id_face": id_face,
+                "id_painel": id_painel,
+                "id_usuario": id_usuario,
+            },
+        ).scalar_one()
+
+        _cadpainel_gravar_historico_preco({
+            **item,
+            "IDFatoPrecoFacePainel": int(novo_id),
+            "IDDimFacesPaineis": id_face,
+            "IDDimPaineisEuromidia": id_painel,
+        })
+
+
+def _cadpainel_salvar_imagens(id_face: int, id_painel: int, cod_ponto: str, cod_face: str):
+    uploads = []
+    upload_principal = _cadpainel_preparar_upload(request.files.get("imagem_principal"), cod_face, 0)
+    upload_orcamento = _cadpainel_preparar_upload(request.files.get("imagem_orcamento"), cod_face, 1)
+    if upload_principal:
+        uploads.append(upload_principal)
+    if upload_orcamento:
+        uploads.append(upload_orcamento)
+
+    remover_principal = _cadpainel_bit("remover_imagem_principal") == 1
+    remover_orcamento = _cadpainel_bit("remover_imagem_orcamento") == 1
+
+    diretorio = _cadpainel_diretorio_imagens()
+    backups: list[tuple[Path, Path]] = []
+    finais_criados: list[Path] = []
+    temporarios = [item["temporario"] for item in uploads]
+
+    try:
+        tipos_remover = []
+        if remover_principal:
+            tipos_remover.append(0)
+        if remover_orcamento:
+            tipos_remover.append(1)
+
+        for bit_orcamento in tipos_remover:
+            for caminho in _cadpainel_arquivos_do_tipo(diretorio, _cadpainel_codface_arquivo(cod_face), bit_orcamento):
+                _cadpainel_mover_para_backup(caminho, backups)
+            db.session.execute(
+                text("""
+                    UPDATE [Integracao].[Silver].[DimImagemPainel]
+                       SET BitAtivo = 0,
+                           DataAtualizacao = SYSDATETIME()
+                     WHERE IDDimFacesPaineis = :id_face
+                       AND ISNULL(BitImagemOrcamento, 0) = :bit_orcamento
+                       AND ISNULL(BitAtivo, 1) = 1
+                """),
+                {"id_face": id_face, "bit_orcamento": bit_orcamento},
+            )
+
+        for item in uploads:
+            bit_orcamento = int(item["bit_orcamento"])
+            for caminho in _cadpainel_arquivos_do_tipo(diretorio, _cadpainel_codface_arquivo(cod_face), bit_orcamento):
+                _cadpainel_mover_para_backup(caminho, backups)
+
+            os.replace(item["temporario"], item["final"])
+            finais_criados.append(item["final"])
+
+            imagem_existente = db.session.execute(
+                text("""
+                    SELECT TOP (1) IDDimImagemPainel
+                    FROM [Integracao].[Silver].[DimImagemPainel]
+                    WHERE IDDimFacesPaineis = :id_face
+                      AND ISNULL(BitImagemOrcamento, 0) = :bit_orcamento
+                    ORDER BY ISNULL(BitAtivo, 0) DESC, IDDimImagemPainel DESC
+                """),
+                {"id_face": id_face, "bit_orcamento": bit_orcamento},
+            ).scalar()
+
+            db.session.execute(
+                text("""
+                    UPDATE [Integracao].[Silver].[DimImagemPainel]
+                       SET BitAtivo = 0,
+                           DataAtualizacao = SYSDATETIME()
+                     WHERE IDDimFacesPaineis = :id_face
+                       AND ISNULL(BitImagemOrcamento, 0) = :bit_orcamento
+                       AND IDDimImagemPainel <> ISNULL(:id_imagem, -1)
+                """),
+                {
+                    "id_face": id_face,
+                    "bit_orcamento": bit_orcamento,
+                    "id_imagem": imagem_existente,
+                },
+            )
+
+            if imagem_existente:
+                db.session.execute(
+                    text("""
+                        UPDATE [Integracao].[Silver].[DimImagemPainel]
+                           SET UrlImagem = :url,
+                               NumeroImagem = :numero_imagem,
+                               DataAtualizacao = SYSDATETIME(),
+                               BitAtivo = 1,
+                               CodFace = :cod_face,
+                               CodPonto = :cod_ponto,
+                               BitImagemOrcamento = :bit_orcamento
+                         WHERE IDDimImagemPainel = :id_imagem
+                           AND IDDimFacesPaineis = :id_face
+                    """),
+                    {
+                        "url": item["url"],
+                        "numero_imagem": 2 if bit_orcamento else 1,
+                        "cod_face": cod_face,
+                        "cod_ponto": cod_ponto,
+                        "bit_orcamento": bit_orcamento,
+                        "id_imagem": int(imagem_existente),
+                        "id_face": id_face,
+                    },
+                )
+            else:
+                db.session.execute(
+                    text("""
+                        INSERT INTO [Integracao].[Silver].[DimImagemPainel]
+                        (
+                            IDDimFacesPaineis,
+                            UrlImagem,
+                            NumeroImagem,
+                            DataAtualizacao,
+                            BitAtivo,
+                            CodFace,
+                            CodPonto,
+                            BitImagemOrcamento
+                        )
+                        VALUES
+                        (
+                            :id_face,
+                            :url,
+                            :numero_imagem,
+                            SYSDATETIME(),
+                            1,
+                            :cod_face,
+                            :cod_ponto,
+                            :bit_orcamento
+                        )
+                    """),
+                    {
+                        "id_face": id_face,
+                        "url": item["url"],
+                        "numero_imagem": 2 if bit_orcamento else 1,
+                        "cod_face": cod_face,
+                        "cod_ponto": cod_ponto,
+                        "bit_orcamento": bit_orcamento,
+                    },
+                )
+
+        return backups, finais_criados, temporarios
+    except Exception:
+        _cadpainel_restaurar_arquivos(backups, finais_criados, temporarios)
+        raise
+
+
+@admin.route("/cadastro-paineis", methods=["GET"])
+@login_required
+@requer_item_menu_paineis("editar_paineis")
+@limiter.limit("80 per minute", methods=["GET"])
+def cadastro_paineis_lista():
+    busca = (request.args.get("q") or "").strip()
+    status = (request.args.get("status") or "todos").strip().lower()
+
+    try:
+        pagina = max(1, int(request.args.get("page") or 1))
+    except Exception:
+        pagina = 1
+    por_pagina = 30
+
+    filtros = ["1 = 1"]
+    parametros = {}
+
+    if busca:
+        filtros.append("""
+            (
+                COALESCE(p.CodPonto, '') LIKE '%' + :busca + '%'
+                OR COALESCE(f.CodFace, '') LIKE '%' + :busca + '%'
+                OR COALESCE(p.Cidade, '') LIKE '%' + :busca + '%'
+                OR COALESCE(p.UF, '') LIKE '%' + :busca + '%'
+                OR COALESCE(p.Logradouro, '') LIKE '%' + :busca + '%'
+                OR COALESCE(p.Bairro, '') LIKE '%' + :busca + '%'
+                OR COALESCE(p.Referencia, '') LIKE '%' + :busca + '%'
+            )
+        """)
+        parametros["busca"] = busca
+
+    if status in {"ativo", "1"}:
+        filtros.append("ISNULL(p.BitAtivo, 0) = 1")
+        status = "ativo"
+    elif status in {"inativo", "0"}:
+        filtros.append("ISNULL(p.BitAtivo, 0) = 0")
+        status = "inativo"
+    else:
+        status = "todos"
+
+    where_sql = " AND ".join(filtros)
+    total = int(db.session.execute(
+        text(f"""
+            SELECT COUNT(1)
+            FROM [Integracao].[Silver].[DimFacesPaineis] AS f WITH (NOLOCK)
+            INNER JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS p WITH (NOLOCK)
+                ON p.IDDimPaineisEuromidia = f.IDDimPaineisEuromidia
+            WHERE {where_sql}
+        """),
+        parametros,
+    ).scalar() or 0)
+
+    total_paginas = max(1, (total + por_pagina - 1) // por_pagina)
+    pagina = min(pagina, total_paginas)
+    offset = (pagina - 1) * por_pagina
+    params_lista = {**parametros, "offset": offset, "por_pagina": por_pagina}
+
+    rows = db.session.execute(
+        text(f"""
+            SELECT
+                f.IDDimFacesPaineis,
+                f.IDDimPaineisEuromidia,
+                p.CodPonto,
+                f.CodFace,
+                f.Face,
+                COALESCE(NULLIF(f.Tipo, ''), p.Tipo) AS Tipo,
+                p.Logradouro,
+                p.Numero,
+                p.Bairro,
+                p.Cidade,
+                p.UF,
+                p.Referencia,
+                p.BitAtivo,
+                p.DataAtualizacao
+            FROM [Integracao].[Silver].[DimFacesPaineis] AS f WITH (NOLOCK)
+            INNER JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS p WITH (NOLOCK)
+                ON p.IDDimPaineisEuromidia = f.IDDimPaineisEuromidia
+            WHERE {where_sql}
+            ORDER BY p.CodPonto, f.CodFace
+            OFFSET :offset ROWS FETCH NEXT :por_pagina ROWS ONLY
+        """),
+        params_lista,
+    ).mappings().all()
+
+    return render_template(
+        "admin/cadastro_paineis_lista.html",
+        itens=[dict(x) for x in rows],
+        filtros={"q": busca, "status": status},
+        paginacao={
+            "pagina": pagina,
+            "por_pagina": por_pagina,
+            "total": total,
+            "total_paginas": total_paginas,
+            "inicio": offset + 1 if total else 0,
+            "fim": min(offset + por_pagina, total),
+        },
+    )
+
+
+@admin.route("/cadastro-paineis/<int:id_face>/editar", methods=["GET", "POST"])
+@login_required
+@requer_item_menu_paineis("editar_paineis")
+@limiter.limit("80 per minute", methods=["GET", "POST"])
+def cadastro_painel_editar(id_face: int):
+    dados = _cadpainel_carregar_edicao(id_face)
+    if not dados:
+        abort(404)
+
+    painel = dados["painel"]
+    id_painel = int(painel["IDDimPaineisEuromidia"])
+
+    if request.method == "GET":
+        return render_template("admin/cadastro_painel_editar.html", **dados)
+
+    backups = []
+    finais_criados = []
+    temporarios = []
+
+    try:
+        id_usuario = _cadpainel_id_usuario()
+        tipo_painel = _cadpainel_salvar_dados_principais(id_face, id_painel)
+        _cadpainel_salvar_classificacao(id_face)
+        _cadpainel_salvar_classificacao_detalhes(id_face)
+        _cadpainel_salvar_custo(id_face, id_painel, id_usuario)
+        _cadpainel_salvar_precos(id_face, id_painel, id_usuario, tipo_painel)
+
+        backups, finais_criados, temporarios = _cadpainel_salvar_imagens(
+            id_face=id_face,
+            id_painel=id_painel,
+            cod_ponto=str(painel.get("CodPonto") or "").strip(),
+            cod_face=str(painel.get("CodFace") or "").strip(),
+        )
+
+        db.session.commit()
+        _cadpainel_finalizar_backups(backups)
+        flash("Cadastro do painel, face, classificações, custos, preços e imagens salvo com sucesso.", "success")
+        return redirect(url_for("admin.cadastro_painel_editar", id_face=id_face))
+
+    except ValueError as exc:
+        db.session.rollback()
+        _cadpainel_restaurar_arquivos(backups, finais_criados, temporarios)
+        flash(str(exc), "warning")
+    except Exception as exc:
+        db.session.rollback()
+        _cadpainel_restaurar_arquivos(backups, finais_criados, temporarios)
+        current_app.logger.exception("Erro ao salvar o cadastro completo do painel/face %s.", id_face)
+        flash(f"Não foi possível salvar o cadastro do painel: {exc}", "danger")
+
+    dados = _cadpainel_carregar_edicao(id_face)
+    if not dados:
+        abort(404)
+    return render_template("admin/cadastro_painel_editar.html", **dados), 400

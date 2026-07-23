@@ -1,0 +1,369 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}Editar Painéis | Euromídia{% endblock %}
+
+{% block content %}
+<style>
+  .cad-lista-shell{
+    width:100%;
+    max-width:none;
+    padding:22px;
+  }
+  .cad-lista-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:18px;
+    margin-bottom:18px;
+  }
+  .cad-lista-head h1{
+    margin:0;
+    font-size:clamp(1.45rem, 2.5vw, 2rem);
+    color:#0f172a;
+  }
+  .cad-lista-head p{
+    margin:7px 0 0;
+    color:#64748b;
+  }
+  .cad-lista-filtros{
+    display:grid;
+    grid-template-columns:minmax(260px, 1fr) minmax(170px, 220px) auto;
+    gap:12px;
+    align-items:end;
+    background:#fff;
+    border:1px solid #e2e8f0;
+    border-radius:14px;
+    padding:16px;
+    box-shadow:0 8px 24px rgba(15, 23, 42, .05);
+    margin-bottom:16px;
+  }
+  .cad-campo label{
+    display:block;
+    font-size:.82rem;
+    font-weight:700;
+    color:#334155;
+    margin-bottom:6px;
+  }
+  .cad-campo input,
+  .cad-campo select{
+    width:100%;
+    min-height:42px;
+    border:1px solid #cbd5e1;
+    border-radius:9px;
+    padding:9px 11px;
+    background:#fff;
+    color:#0f172a;
+    outline:none;
+  }
+  .cad-campo input:focus,
+  .cad-campo select:focus{
+    border-color:#2563eb;
+    box-shadow:0 0 0 3px rgba(37, 99, 235, .12);
+  }
+  .cad-btn{
+    min-height:42px;
+    border:0;
+    border-radius:9px;
+    padding:10px 18px;
+    background:#0b3b91;
+    color:#fff;
+    font-weight:800;
+    cursor:pointer;
+  }
+  .cad-btn:hover{ background:#082f73; }
+  .cad-tabela-card{
+    background:#fff;
+    border:1px solid #e2e8f0;
+    border-radius:14px;
+    overflow:visible;
+    box-shadow:0 8px 24px rgba(15, 23, 42, .05);
+  }
+  .cad-tabela-wrap{
+    width:100%;
+    max-height:none;
+    overflow:visible;
+  }
+  .cad-tabela{
+    width:100%;
+    min-width:0;
+    table-layout:fixed;
+    border-collapse:separate;
+    border-spacing:0;
+  }
+  .cad-tabela th{
+    background:#f8fafc;
+    color:#334155;
+    text-align:left;
+    font-size:.78rem;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+    padding:12px 14px;
+    border-bottom:1px solid #e2e8f0;
+  }
+  .cad-tabela td{
+    padding:12px 14px;
+    border-bottom:1px solid #eef2f7;
+    color:#1e293b;
+    vertical-align:middle;
+    overflow-wrap:anywhere;
+  }
+  .cad-tabela th:nth-child(1),
+  .cad-tabela td:nth-child(1){ width:8%; }
+  .cad-tabela th:nth-child(2),
+  .cad-tabela td:nth-child(2){ width:8%; }
+  .cad-tabela th:nth-child(3),
+  .cad-tabela td:nth-child(3){ width:6%; }
+  .cad-tabela th:nth-child(4),
+  .cad-tabela td:nth-child(4){ width:17%; }
+  .cad-tabela th:nth-child(5),
+  .cad-tabela td:nth-child(5){ width:auto; }
+  .cad-tabela th:nth-child(6),
+  .cad-tabela td:nth-child(6){ width:9%; }
+  .cad-tabela th:nth-child(7),
+  .cad-tabela td:nth-child(7){ width:8%; }
+  .cad-linha{
+    cursor:pointer;
+    transition:background .15s ease;
+  }
+  .cad-linha:hover,
+  .cad-linha:focus{
+    background:#eff6ff;
+    outline:none;
+  }
+  .cad-codigo{
+    font-weight:800;
+    color:#0b3b91;
+    white-space:nowrap;
+  }
+  .cad-endereco{
+    max-width:520px;
+    line-height:1.35;
+  }
+  .cad-badge{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding:5px 9px;
+    border-radius:999px;
+    font-size:.78rem;
+    font-weight:800;
+    white-space:nowrap;
+  }
+  .cad-badge.ativo{ background:#dcfce7; color:#166534; }
+  .cad-badge.inativo{ background:#fee2e2; color:#991b1b; }
+  .cad-acao{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:34px;
+    padding:7px 12px;
+    border-radius:8px;
+    background:#e8efff;
+    color:#0b3b91;
+    text-decoration:none;
+    font-weight:800;
+    white-space:nowrap;
+  }
+  .cad-acao:hover{ background:#d8e5ff; }
+  .cad-vazio{
+    padding:38px 18px;
+    text-align:center;
+    color:#64748b;
+  }
+  .cad-lista-rodape{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:14px;
+    padding:14px 16px;
+    border-top:1px solid #e2e8f0;
+    background:#fff;
+  }
+  .cad-paginacao{
+    display:flex;
+    gap:6px;
+    flex-wrap:wrap;
+  }
+  .cad-paginacao a,
+  .cad-paginacao span{
+    min-width:34px;
+    height:34px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border:1px solid #cbd5e1;
+    border-radius:8px;
+    text-decoration:none;
+    color:#334155;
+    background:#fff;
+    font-weight:700;
+  }
+  .cad-paginacao .atual{
+    background:#0b3b91;
+    border-color:#0b3b91;
+    color:#fff;
+  }
+  @media (max-width:900px){
+    .cad-lista-shell{ padding:14px; }
+    .cad-lista-filtros{ grid-template-columns:1fr; }
+    .cad-lista-head{ flex-direction:column; }
+    .cad-lista-rodape{ align-items:flex-start; flex-direction:column; }
+    .cad-tabela{ table-layout:auto; }
+    .cad-tabela th:nth-child(n),
+    .cad-tabela td:nth-child(n){ width:auto; }
+  }
+  @media (max-width:700px){
+    .cad-tabela-card{
+      border:0;
+      background:transparent;
+      box-shadow:none;
+    }
+    .cad-tabela thead{ display:none; }
+    .cad-tabela,
+    .cad-tabela tbody,
+    .cad-tabela tr,
+    .cad-tabela td{
+      display:block;
+      width:100%;
+    }
+    .cad-tabela tr{
+      margin-bottom:12px;
+      padding:12px 14px;
+      border:1px solid #e2e8f0;
+      border-radius:12px;
+      background:#fff;
+      box-shadow:0 5px 16px rgba(15, 23, 42, .04);
+    }
+    .cad-tabela td{
+      display:grid;
+      grid-template-columns:115px minmax(0, 1fr);
+      gap:10px;
+      padding:7px 0;
+      border-bottom:1px solid #eef2f7;
+    }
+    .cad-tabela td:last-child{ border-bottom:0; }
+    .cad-tabela td::before{
+      content:attr(data-label);
+      font-size:.75rem;
+      font-weight:800;
+      text-transform:uppercase;
+      color:#64748b;
+    }
+    .cad-endereco{ max-width:none; }
+    .cad-lista-rodape{
+      margin-top:12px;
+      border:1px solid #e2e8f0;
+      border-radius:12px;
+    }
+  }
+</style>
+
+<div class="cad-lista-shell">
+  <div class="cad-lista-head">
+    <div>
+      <h1>Editar painéis</h1>
+      <p>Localize uma face e dê dois cliques na linha para abrir o cadastro completo.</p>
+    </div>
+  </div>
+
+  <form method="get" class="cad-lista-filtros" autocomplete="off">
+    <div class="cad-campo">
+      <label for="q">Buscar painel, face ou endereço</label>
+      <input id="q" name="q" type="search" value="{{ filtros.q }}" placeholder="Ex.: 656, 656A, Campinas, avenida...">
+    </div>
+    <div class="cad-campo">
+      <label for="status">Situação</label>
+      <select id="status" name="status">
+        <option value="todos" {% if filtros.status == 'todos' %}selected{% endif %}>Todos</option>
+        <option value="ativo" {% if filtros.status == 'ativo' %}selected{% endif %}>Ativos</option>
+        <option value="inativo" {% if filtros.status == 'inativo' %}selected{% endif %}>Inativos</option>
+      </select>
+    </div>
+    <button class="cad-btn" type="submit">Filtrar</button>
+  </form>
+
+  <div class="cad-tabela-card">
+    <div class="cad-tabela-wrap">
+      <table class="cad-tabela">
+        <thead>
+          <tr>
+            <th>CodPonto</th>
+            <th>CodFace</th>
+            <th>Face</th>
+            <th>Tipo</th>
+            <th>Endereço</th>
+            <th>Situação</th>
+            <th>Ação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in itens %}
+            {% set url_edicao = url_for('admin.cadastro_painel_editar', id_face=item.IDDimFacesPaineis) %}
+            <tr class="cad-linha" tabindex="0" data-url="{{ url_edicao }}" title="Dê dois cliques para editar">
+              <td class="cad-codigo" data-label="CodPonto">{{ item.CodPonto or '—' }}</td>
+              <td class="cad-codigo" data-label="CodFace">{{ item.CodFace or '—' }}</td>
+              <td data-label="Face">{{ item.Face or '—' }}</td>
+              <td data-label="Tipo">{{ item.Tipo or '—' }}</td>
+              <td class="cad-endereco" data-label="Endereço">
+                {{ item.Logradouro or '' }}{% if item.Numero %}, {{ item.Numero }}{% endif %}
+                {% if item.Bairro %} — {{ item.Bairro }}{% endif %}
+                {% if item.Cidade or item.UF %}<br>{{ item.Cidade or '' }}{% if item.UF %}/{{ item.UF }}{% endif %}{% endif %}
+                {% if item.Referencia %}<br><small>{{ item.Referencia }}</small>{% endif %}
+              </td>
+              <td data-label="Situação">
+                {% if item.BitAtivo|int == 1 %}
+                  <span class="cad-badge ativo">● Ativo</span>
+                {% else %}
+                  <span class="cad-badge inativo">● Inativo</span>
+                {% endif %}
+              </td>
+              <td data-label="Ação"><a class="cad-acao" href="{{ url_edicao }}">Editar</a></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="7" class="cad-vazio">Nenhuma face de painel encontrada com os filtros informados.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cad-lista-rodape">
+      <div>
+        Exibindo {{ paginacao.inicio }}–{{ paginacao.fim }} de {{ paginacao.total }} registro(s).
+      </div>
+      {% if paginacao.total_paginas > 1 %}
+        <div class="cad-paginacao">
+          {% if paginacao.pagina > 1 %}
+            <a href="{{ url_for('admin.cadastro_paineis_lista', page=paginacao.pagina-1, q=filtros.q, status=filtros.status) }}" aria-label="Página anterior">‹</a>
+          {% endif %}
+
+          {% set inicio_pag = [1, paginacao.pagina - 3]|max %}
+          {% set fim_pag = [paginacao.total_paginas, paginacao.pagina + 3]|min %}
+          {% for numero in range(inicio_pag, fim_pag + 1) %}
+            {% if numero == paginacao.pagina %}
+              <span class="atual">{{ numero }}</span>
+            {% else %}
+              <a href="{{ url_for('admin.cadastro_paineis_lista', page=numero, q=filtros.q, status=filtros.status) }}">{{ numero }}</a>
+            {% endif %}
+          {% endfor %}
+
+          {% if paginacao.pagina < paginacao.total_paginas %}
+            <a href="{{ url_for('admin.cadastro_paineis_lista', page=paginacao.pagina+1, q=filtros.q, status=filtros.status) }}" aria-label="Próxima página">›</a>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.cad-linha[data-url]').forEach(function(linha){
+    linha.addEventListener('dblclick', function(event){
+      if (event.target.closest('a, button, input, select')) return;
+      window.location.href = linha.dataset.url;
+    });
+    linha.addEventListener('keydown', function(event){
+      if (event.key === 'Enter') window.location.href = linha.dataset.url;
+    });
+  });
+</script>
+{% endblock %}

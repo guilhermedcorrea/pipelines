@@ -62,6 +62,9 @@ MAPA_ITEM_MENU_PERMISSOES = {
     "listas_precos": {"ADMIN_TUDO"},
     "lista_precos_euromidia": {"ADMIN_TUDO"},
     "precos_euromidia": {"ADMIN_TUDO"},
+    "editar_paineis": {"ADMIN_TUDO"},
+    "cadastro_paineis_lista": {"ADMIN_TUDO"},
+    "cadastro_painel_editar": {"ADMIN_TUDO"},
     "vencimentos_campanhas": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
     "vencimentos_campanhas_euromidia": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
     "aprovacao_preco": {"KANBAN_CUSTO_MARGEM_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
@@ -570,6 +573,108 @@ def _usuario_tem_alguma_permissao(codigos_permissao) -> bool:
     return False
 
 
+def usuario_pode_acessar_cadastro_paineis() -> bool:
+    """
+    Autoriza o cadastro de painéis somente quando as duas camadas de acesso
+    forem atendidas:
+
+    - IDEmpresaProprietaria = 3 ou BitFullEmpresas = 1; e
+    - permissão ADMIN_TUDO, já exigida originalmente pelo endpoint.
+
+    A mesma regra é reutilizada pelo menu e pela rota para evitar exibir um
+    link que terminaria em erro 403 e para impedir acesso direto pela URL.
+    """
+    return (
+        _usuario_ativo_com_acesso_empresa_3_ou_full()
+        and _usuario_tem_permissao("ADMIN_TUDO")
+    )
+
+
+def _usuario_edicao_paineis_tem_perfil_admin() -> bool:
+    """Confere o perfil ADMIN no banco e usa a sessão apenas como fallback seguro."""
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+
+    chave_cache = "_acl_usuario_edicao_paineis_admin"
+    if hasattr(g, chave_cache):
+        return bool(getattr(g, chave_cache))
+
+    resultado = False
+    consulta_banco_concluida = False
+    id_usuario = _id_usuario_logado_acl()
+    if id_usuario > 0:
+        try:
+            from sqlalchemy import text
+            from ..extensions import db
+
+            registro = db.session.execute(
+                text(
+                    """
+                    SELECT TOP (1)
+                           p.IDDimPerfilUsuario,
+                           p.NomePerfil,
+                           p.BitAtivo AS BitAtivoPerfil,
+                           u.BitAtivo AS BitAtivoUsuario
+                      FROM [Integracao].[Silver].[DimUsuarios] AS u WITH (NOLOCK)
+                      INNER JOIN [Integracao].[Silver].[DimPerfilUsuario] AS p WITH (NOLOCK)
+                              ON p.IDDimPerfilUsuario = u.IDDimPerfilUsuario
+                     WHERE u.IDDimUsuarios = :id_usuario
+                    """
+                ),
+                {"id_usuario": id_usuario},
+            ).mappings().first()
+
+            if registro is not None:
+                consulta_banco_concluida = True
+                nome_perfil = _normalizar_texto_acl(registro.get("NomePerfil"))
+                resultado = (
+                    _flag_ativa_acl(registro.get("BitAtivoUsuario"))
+                    and _flag_ativa_acl(registro.get("BitAtivoPerfil"))
+                    and (
+                        _converter_int_acl(registro.get("IDDimPerfilUsuario")) == ID_PERFIL_ADMIN_PADRAO
+                        or nome_perfil in {
+                            "admin",
+                            "administrador",
+                            "administrador do sistema",
+                            "administrador geral",
+                            "super admin",
+                            "superadmin",
+                        }
+                    )
+                )
+        except Exception as exc:
+            try:
+                current_app.logger.warning(
+                    "Não foi possível consultar o perfil para a edição de painéis: %s",
+                    exc,
+                )
+            except Exception:
+                pass
+
+    if not consulta_banco_concluida:
+        resultado = usuario_eh_perfil_admin()
+
+    setattr(g, chave_cache, bool(resultado))
+    return bool(resultado)
+
+
+def usuario_pode_acessar_edicao_paineis() -> bool:
+    """
+    Autoriza a nova lista e a edição completa de painéis somente quando:
+
+    - o usuário está autenticado e ativo;
+    - o perfil é ADMIN; e
+    - IDEmpresaProprietaria = 3 ou BitFullEmpresas = 1.
+
+    A regra é usada tanto pelo menu quanto pelas rotas para impedir acesso
+    direto pela URL por usuários fora do escopo definido.
+    """
+    return (
+        _usuario_ativo_com_acesso_empresa_3_ou_full()
+        and _usuario_edicao_paineis_tem_perfil_admin()
+    )
+
+
 def _id_perfil_usuario_logado() -> int:
     """_id_perfil_usuario_logado
     - Eu descubro o ID do perfil do usuário logado testando nomes de atributos comuns.
@@ -744,6 +849,22 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
 
     if chave in {"catalogo_produtos", "catalogo_de_produtos", "lista_produtos"}:
         return usuario_pode_acessar_catalogo_produtos()
+
+    if chave in {
+        "cadastrar_paineis",
+        "cadastro_paineis",
+        "cadastrar_painel",
+        "cadastro_painel",
+    }:
+        return usuario_pode_acessar_cadastro_paineis()
+
+    if chave in {
+        "editar_paineis",
+        "edicao_paineis",
+        "cadastro_paineis_lista",
+        "cadastro_painel_editar",
+    }:
+        return usuario_pode_acessar_edicao_paineis()
 
     if chave in {"reserva", "reserva_ocupacao", "ocupacao_reserva"}:
         return usuario_pode_acessar_reserva_ocupacao()

@@ -1,0 +1,766 @@
+{% extends "euromidia/base_euromidia.html" %}
+
+{% block title %}{{ painel.CodFace }} | Editar Painel{% endblock %}
+
+{% block content %}
+<style>
+  .painel-edit-shell{
+    width:100%;
+    max-width:none;
+    padding:20px;
+    padding-bottom:110px;
+  }
+  .painel-edit-topo{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:18px;
+    margin-bottom:16px;
+  }
+  .painel-edit-topo h1{
+    margin:0;
+    color:#0f172a;
+    font-size:clamp(1.45rem, 2.5vw, 2rem);
+  }
+  .painel-edit-topo p{
+    margin:6px 0 0;
+    color:#64748b;
+  }
+  .painel-voltar{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:40px;
+    padding:9px 14px;
+    border-radius:9px;
+    border:1px solid #cbd5e1;
+    background:#fff;
+    color:#334155;
+    text-decoration:none;
+    font-weight:800;
+  }
+  .painel-identificacao{
+    display:grid;
+    grid-template-columns:repeat(4, minmax(150px, 1fr));
+    gap:12px;
+    background:#0b3b91;
+    color:#fff;
+    border-radius:14px;
+    padding:15px;
+    margin-bottom:14px;
+  }
+  .painel-identificacao small{
+    display:block;
+    opacity:.78;
+    font-weight:700;
+    margin-bottom:3px;
+  }
+  .painel-identificacao strong{
+    font-size:1.03rem;
+  }
+  .painel-atalhos{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    position:sticky;
+    top:72px;
+    z-index:20;
+    padding:9px;
+    margin-bottom:14px;
+    background:rgba(245,247,250,.96);
+    backdrop-filter:blur(8px);
+    border:1px solid #e2e8f0;
+    border-radius:12px;
+  }
+  .painel-atalhos a{
+    padding:7px 10px;
+    border-radius:8px;
+    background:#fff;
+    border:1px solid #dbe4ef;
+    color:#334155;
+    text-decoration:none;
+    font-size:.84rem;
+    font-weight:800;
+  }
+  .painel-card{
+    scroll-margin-top:140px;
+    background:#fff;
+    border:1px solid #e2e8f0;
+    border-radius:14px;
+    box-shadow:0 8px 24px rgba(15,23,42,.05);
+    margin-bottom:15px;
+    overflow:hidden;
+  }
+  .painel-card-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:15px 17px;
+    border-bottom:1px solid #e2e8f0;
+    background:#f8fafc;
+  }
+  .painel-card-head h2{
+    margin:0;
+    font-size:1.05rem;
+    color:#0f172a;
+  }
+  .painel-card-head p{
+    margin:4px 0 0;
+    color:#64748b;
+    font-size:.84rem;
+  }
+  .painel-card-body{ padding:17px; }
+  .painel-grid{
+    display:grid;
+    grid-template-columns:repeat(4, minmax(170px, 1fr));
+    gap:13px;
+  }
+  .painel-grid.cols-3{ grid-template-columns:repeat(3, minmax(190px, 1fr)); }
+  .painel-grid.cols-2{ grid-template-columns:repeat(2, minmax(230px, 1fr)); }
+  .painel-span-2{ grid-column:span 2; }
+  .painel-span-4{ grid-column:1 / -1; }
+  .painel-campo label{
+    display:block;
+    margin-bottom:6px;
+    color:#334155;
+    font-size:.79rem;
+    font-weight:800;
+  }
+  .painel-campo input,
+  .painel-campo select,
+  .painel-campo textarea{
+    width:100%;
+    min-height:40px;
+    border:1px solid #cbd5e1;
+    border-radius:8px;
+    padding:8px 10px;
+    background:#fff;
+    color:#0f172a;
+    outline:none;
+  }
+  .painel-campo textarea{ min-height:88px; resize:vertical; }
+  .painel-campo input:focus,
+  .painel-campo select:focus,
+  .painel-campo textarea:focus{
+    border-color:#2563eb;
+    box-shadow:0 0 0 3px rgba(37,99,235,.12);
+  }
+  .painel-campo input[readonly]{
+    background:#f1f5f9;
+    color:#475569;
+    cursor:not-allowed;
+  }
+  .painel-checks{
+    display:grid;
+    grid-template-columns:repeat(6, minmax(130px, 1fr));
+    gap:10px;
+    margin-top:14px;
+  }
+  .painel-check{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    min-height:42px;
+    padding:9px 11px;
+    border:1px solid #dbe4ef;
+    border-radius:9px;
+    background:#f8fafc;
+    font-weight:700;
+    color:#334155;
+  }
+  .painel-check input{ width:18px; height:18px; accent-color:#0b3b91; }
+  .painel-imagens{
+    display:grid;
+    grid-template-columns:repeat(2, minmax(260px, 1fr));
+    gap:15px;
+  }
+  .painel-imagem-card{
+    border:1px solid #dbe4ef;
+    border-radius:12px;
+    padding:14px;
+    background:#f8fafc;
+  }
+  .painel-imagem-card h3{ margin:0 0 10px; font-size:.98rem; }
+  .painel-imagem-preview{
+    width:100%;
+    height:220px;
+    border:1px dashed #b7c5d8;
+    border-radius:10px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+    background:#fff;
+    color:#64748b;
+    margin-bottom:10px;
+  }
+  .painel-imagem-preview img{ width:100%; height:100%; object-fit:contain; }
+  .painel-ajuda{
+    margin-top:7px;
+    color:#64748b;
+    font-size:.78rem;
+    line-height:1.35;
+  }
+  .painel-tabela-wrap{ overflow:auto; }
+  .painel-tabela{
+    width:100%;
+    min-width:780px;
+    border-collapse:separate;
+    border-spacing:0;
+  }
+  .painel-tabela th{
+    padding:10px;
+    background:#f8fafc;
+    border-bottom:1px solid #dbe4ef;
+    text-align:left;
+    color:#475569;
+    font-size:.76rem;
+    text-transform:uppercase;
+  }
+  .painel-tabela td{
+    padding:8px;
+    border-bottom:1px solid #eef2f7;
+    vertical-align:middle;
+  }
+  .painel-tabela input,
+  .painel-tabela select{
+    width:100%;
+    min-height:38px;
+    border:1px solid #cbd5e1;
+    border-radius:7px;
+    padding:7px 8px;
+    background:#fff;
+  }
+  .painel-btn-icon{
+    width:36px;
+    height:36px;
+    border:0;
+    border-radius:8px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    font-size:1.15rem;
+    font-weight:900;
+  }
+  .painel-btn-add{ background:#dcfce7; color:#166534; }
+  .painel-btn-remove{ background:#fee2e2; color:#991b1b; }
+  .painel-custo-vazio{
+    border:1px dashed #b7c5d8;
+    border-radius:11px;
+    padding:24px;
+    text-align:center;
+    color:#64748b;
+  }
+  .painel-custo-topo{
+    display:grid;
+    grid-template-columns:minmax(250px, 1fr) minmax(180px, 260px) auto;
+    gap:12px;
+    align-items:end;
+    margin-bottom:14px;
+  }
+  .painel-total-custo{
+    font-weight:900;
+    background:#ecfdf5 !important;
+    color:#166534 !important;
+  }
+  .painel-campo-exibicoes.oculto{
+    opacity:.45;
+  }
+  .painel-salvar-barra{
+    position:fixed;
+    left:0;
+    right:0;
+    bottom:0;
+    z-index:2000;
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:12px;
+    padding:13px 22px;
+    background:rgba(255,255,255,.96);
+    border-top:1px solid #dbe4ef;
+    box-shadow:0 -8px 22px rgba(15,23,42,.08);
+    backdrop-filter:blur(8px);
+  }
+  .painel-btn-salvar{
+    min-height:44px;
+    padding:10px 24px;
+    border:0;
+    border-radius:9px;
+    background:#0b3b91;
+    color:#fff;
+    font-size:.95rem;
+    font-weight:900;
+    cursor:pointer;
+  }
+  .painel-btn-salvar:hover{ background:#082f73; }
+  .painel-btn-cancelar{
+    min-height:44px;
+    padding:10px 18px;
+    border:1px solid #cbd5e1;
+    border-radius:9px;
+    background:#fff;
+    color:#334155;
+    font-weight:800;
+    text-decoration:none;
+  }
+  .oculto{ display:none !important; }
+  @media (max-width:1180px){
+    .painel-grid{ grid-template-columns:repeat(3, minmax(160px, 1fr)); }
+    .painel-checks{ grid-template-columns:repeat(3, minmax(150px, 1fr)); }
+  }
+  @media (max-width:850px){
+    .painel-edit-shell{ padding:12px; padding-bottom:120px; }
+    .painel-edit-topo{ flex-direction:column; }
+    .painel-identificacao{ grid-template-columns:repeat(2, 1fr); }
+    .painel-grid,
+    .painel-grid.cols-3,
+    .painel-grid.cols-2{ grid-template-columns:1fr; }
+    .painel-span-2,
+    .painel-span-4{ grid-column:auto; }
+    .painel-checks{ grid-template-columns:repeat(2, 1fr); }
+    .painel-imagens{ grid-template-columns:1fr; }
+    .painel-custo-topo{ grid-template-columns:1fr; }
+    .painel-atalhos{ position:static; }
+  }
+  @media (max-width:520px){
+    .painel-identificacao,
+    .painel-checks{ grid-template-columns:1fr; }
+    .painel-salvar-barra{ flex-direction:column-reverse; align-items:stretch; }
+    .painel-btn-salvar,
+    .painel-btn-cancelar{ width:100%; text-align:center; }
+  }
+</style>
+
+{% macro data_input(valor) -%}
+  {%- if valor -%}
+    {%- if valor.strftime is defined -%}{{ valor.strftime('%Y-%m-%d') }}{%- else -%}{{ valor|string|truncate(10, True, '') }}{%- endif -%}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro datetime_input(valor) -%}
+  {%- if valor -%}
+    {%- if valor.strftime is defined -%}{{ valor.strftime('%Y-%m-%dT%H:%M:%S') }}{%- else -%}{{ valor }}{%- endif -%}
+  {%- endif -%}
+{%- endmacro %}
+
+<div class="painel-edit-shell">
+  <div class="painel-edit-topo">
+    <div>
+      <h1>Editar painel {{ painel.CodFace }}</h1>
+      <p>Altere os dados da face e clique em Salvar no final da página.</p>
+    </div>
+    <a class="painel-voltar" href="{{ url_for('admin.cadastro_paineis_lista') }}">← Voltar à lista</a>
+  </div>
+
+  <div class="painel-identificacao">
+    <div><small>ID do painel</small><strong>{{ painel.IDDimPaineisEuromidia }}</strong></div>
+    <div><small>ID da face</small><strong>{{ painel.IDDimFacesPaineis }}</strong></div>
+    <div><small>CodPonto</small><strong>{{ painel.CodPonto }}</strong></div>
+    <div><small>CodFace</small><strong>{{ painel.CodFace }}</strong></div>
+  </div>
+
+  <nav class="painel-atalhos" aria-label="Seções do cadastro">
+    <a href="#dados-painel">Painel</a>
+    <a href="#dados-face">Face</a>
+    <a href="#classificacao">Classificação</a>
+    <a href="#imagens">Imagens</a>
+    <a href="#custos">Custos</a>
+    <a href="#precos">Preços</a>
+  </nav>
+
+  <form method="post" enctype="multipart/form-data" id="formCadastroPainel" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <section class="painel-card" id="dados-painel">
+      <div class="painel-card-head">
+        <div><h2>Dados gerais do painel</h2><p>Cadastro principal armazenado em DimPaineisEuromidia.</p></div>
+      </div>
+      <div class="painel-card-body">
+        <div class="painel-grid">
+          <div class="painel-campo"><label>CodPonto</label><input value="{{ painel.CodPonto or '' }}" readonly></div>
+          <div class="painel-campo"><label for="QuantidadeFaces">Quantidade de faces</label><input id="QuantidadeFaces" name="QuantidadeFaces" type="number" min="0" value="{{ painel.QuantidadeFaces if painel.QuantidadeFaces is not none else '' }}"></div>
+          <div class="painel-campo painel-span-2"><label for="Tipo">Tipo do painel</label><input id="Tipo" name="Tipo" maxlength="100" required value="{{ painel.Tipo or '' }}"></div>
+
+          <div class="painel-campo"><label for="Cidade">Cidade</label><input id="Cidade" name="Cidade" value="{{ painel.Cidade or '' }}"></div>
+          <div class="painel-campo"><label for="UF">UF</label><input id="UF" name="UF" maxlength="2" value="{{ painel.UF or '' }}"></div>
+          <div class="painel-campo painel-span-2"><label for="Logradouro">Logradouro</label><input id="Logradouro" name="Logradouro" value="{{ painel.Logradouro or '' }}"></div>
+          <div class="painel-campo"><label for="Numero">Número</label><input id="Numero" name="Numero" value="{{ painel.Numero or '' }}"></div>
+          <div class="painel-campo"><label for="Bairro">Bairro</label><input id="Bairro" name="Bairro" value="{{ painel.Bairro or '' }}"></div>
+          <div class="painel-campo"><label for="CEP">CEP</label><input id="CEP" name="CEP" value="{{ painel.CEP or '' }}"></div>
+          <div class="painel-campo"><label for="Sentido">Sentido</label><input id="Sentido" name="Sentido" value="{{ painel.Sentido or '' }}"></div>
+          <div class="painel-campo painel-span-2"><label for="Referencia">Referência</label><input id="Referencia" name="Referencia" value="{{ painel.Referencia or '' }}"></div>
+          <div class="painel-campo"><label for="Latitude">Latitude</label><input id="Latitude" name="Latitude" inputmode="decimal" value="{{ painel.Latitude if painel.Latitude is not none else '' }}"></div>
+          <div class="painel-campo"><label for="Longitude">Longitude</label><input id="Longitude" name="Longitude" inputmode="decimal" value="{{ painel.Longitude if painel.Longitude is not none else '' }}"></div>
+
+          <div class="painel-campo"><label for="FormatoLxA">Formato L x A</label><input id="FormatoLxA" name="FormatoLxA" value="{{ painel.FormatoLxA or '' }}"></div>
+          <div class="painel-campo"><label for="FormatoLonaAcabadaLxAm">Lona acabada L x A</label><input id="FormatoLonaAcabadaLxAm" name="FormatoLonaAcabadaLxAm" value="{{ painel.FormatoLonaAcabadaLxAm or '' }}"></div>
+          <div class="painel-campo"><label for="AreaTotalm">Área total m²</label><input id="AreaTotalm" name="AreaTotalm" inputmode="decimal" value="{{ painel.AreaTotalm if painel.AreaTotalm is not none else '' }}"></div>
+          <div class="painel-campo"><label for="TipoSolo">Tipo de solo</label><input id="TipoSolo" name="TipoSolo" value="{{ painel.TipoSolo or '' }}"></div>
+          <div class="painel-campo"><label for="DataInstalacao">Data de instalação</label><input id="DataInstalacao" name="DataInstalacao" type="date" value="{{ data_input(painel.DataInstalacao) }}"></div>
+          <div class="painel-campo"><label for="DataRetirada">Data de retirada</label><input id="DataRetirada" name="DataRetirada" type="date" value="{{ data_input(painel.DataRetirada) }}"></div>
+          <div class="painel-campo"><label for="Exibidora">Exibidora</label><input id="Exibidora" name="Exibidora" value="{{ painel.Exibidora or '' }}"></div>
+          <div class="painel-campo"><label for="IDProduto">ID do produto</label><input id="IDProduto" name="IDProduto" type="number" min="1" value="{{ painel.IDProduto if painel.IDProduto is not none else '' }}"></div>
+          <div class="painel-campo"><label for="IDDimPublicoAlvo">ID do público-alvo</label><input id="IDDimPublicoAlvo" name="IDDimPublicoAlvo" type="number" min="1" value="{{ painel.IDDimPublicoAlvo if painel.IDDimPublicoAlvo is not none else '' }}"></div>
+          <div class="painel-campo"><label for="QuantidadeEmpresasRegiao">Empresas na região</label><input id="QuantidadeEmpresasRegiao" name="QuantidadeEmpresasRegiao" type="number" min="0" value="{{ painel.QuantidadeEmpresasRegiao if painel.QuantidadeEmpresasRegiao is not none else '' }}"></div>
+          <div class="painel-campo"><label for="QuantidadeSegmentosRegiao">Segmentos na região</label><input id="QuantidadeSegmentosRegiao" name="QuantidadeSegmentosRegiao" type="number" min="0" value="{{ painel.QuantidadeSegmentosRegiao if painel.QuantidadeSegmentosRegiao is not none else '' }}"></div>
+          <div class="painel-campo painel-span-2"><label for="ClasseSegmentoPredominante">Classe/segmento predominante</label><input id="ClasseSegmentoPredominante" name="ClasseSegmentoPredominante" value="{{ painel.ClasseSegmentoPredominante or '' }}"></div>
+          <div class="painel-campo painel-span-4"><label for="Restricoes">Restrições</label><textarea id="Restricoes" name="Restricoes">{{ painel.Restricoes or '' }}</textarea></div>
+        </div>
+
+        <div class="painel-checks">
+          <label class="painel-check"><input type="checkbox" name="BitAtivo" value="1" {% if painel.BitAtivo|int == 1 %}checked{% endif %}> Ativo</label>
+          <label class="painel-check"><input type="checkbox" name="BitIluminado" value="1" {% if painel.BitIluminado|int == 1 %}checked{% endif %}> Iluminado</label>
+          <label class="painel-check"><input type="checkbox" name="BitProprio" value="1" {% if painel.BitProprio|int == 1 %}checked{% endif %}> Próprio</label>
+          <label class="painel-check"><input type="checkbox" name="BitAluguel" value="1" {% if painel.BitAluguel|int == 1 %}checked{% endif %}> Possui aluguel</label>
+          <label class="painel-check"><input type="checkbox" name="BitEnergia" value="1" {% if painel.BitEnergia|int == 1 %}checked{% endif %}> Possui energia</label>
+          <label class="painel-check"><input type="checkbox" name="BitInternet" value="1" {% if painel.BitInternet|int == 1 %}checked{% endif %}> Possui internet</label>
+        </div>
+      </div>
+    </section>
+
+    <section class="painel-card" id="dados-face">
+      <div class="painel-card-head"><div><h2>Dados da face</h2><p>CodPonto e CodFace são carregados automaticamente e não são alterados nesta tela.</p></div></div>
+      <div class="painel-card-body">
+        <div class="painel-grid cols-3">
+          <div class="painel-campo"><label>CodPonto</label><input value="{{ painel.CodPonto }}" readonly></div>
+          <div class="painel-campo"><label>CodFace</label><input value="{{ painel.CodFace }}" readonly></div>
+          <div class="painel-campo"><label for="Face">Face</label><input id="Face" name="Face" maxlength="50" value="{{ painel.Face or '' }}"></div>
+          <div class="painel-campo painel-span-2"><label for="TipoFace">Tipo da face</label><input id="TipoFace" name="TipoFace" maxlength="100" value="{{ painel.TipoFace or painel.Tipo or '' }}"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="painel-card" id="classificacao">
+      <div class="painel-card-head"><div><h2>Classificação da face</h2><p>Campos editáveis das duas tabelas de classificação.</p></div></div>
+      <div class="painel-card-body">
+        <input type="hidden" name="IDFatoClassificacaoFacesPaineis" value="{{ classificacao.IDFatoClassificacaoFacesPaineis or '' }}">
+        <input type="hidden" name="IDFatoClassificacaoPaineisDetalhes" value="{{ classificacao_detalhes.IDFatoClassificacaoPaineisDetalhes or '' }}">
+
+        <div class="painel-grid">
+          <div class="painel-campo"><label for="FluxoPassantesSemanal">Fluxo passantes semanal</label><input id="FluxoPassantesSemanal" name="FluxoPassantesSemanal" inputmode="decimal" value="{{ classificacao.FluxoPassantesSemanal if classificacao.FluxoPassantesSemanal is not none else '' }}"></div>
+          <div class="painel-campo"><label for="IndiceImpactoPopulacao">Índice impacto população</label><input id="IndiceImpactoPopulacao" name="IndiceImpactoPopulacao" inputmode="decimal" value="{{ classificacao.IndiceImpactoPopulacao if classificacao.IndiceImpactoPopulacao is not none else '' }}"></div>
+          <div class="painel-campo"><label for="RendaMediaClassificacao">Renda média (classificação)</label><input id="RendaMediaClassificacao" name="RendaMediaClassificacao" inputmode="decimal" value="{{ classificacao.RendaMedia if classificacao.RendaMedia is not none else '' }}"></div>
+          <div class="painel-campo"><label for="PeaDiaFaixa">PEA dia/faixa</label><input id="PeaDiaFaixa" name="PeaDiaFaixa" value="{{ classificacao.PeaDiaFaixa or '' }}"></div>
+          <div class="painel-campo"><label for="CPM">CPM</label><input id="CPM" name="CPM" inputmode="decimal" value="{{ classificacao.CPM if classificacao.CPM is not none else '' }}"></div>
+          <div class="painel-campo"><label for="LatitudeClassificacao">Latitude da classificação</label><input id="LatitudeClassificacao" name="LatitudeClassificacao" inputmode="decimal" value="{{ classificacao.Latitude if classificacao.Latitude is not none else '' }}"></div>
+          <div class="painel-campo"><label for="LongitudeClassificacao">Longitude da classificação</label><input id="LongitudeClassificacao" name="LongitudeClassificacao" inputmode="decimal" value="{{ classificacao.Longitude if classificacao.Longitude is not none else '' }}"></div>
+        </div>
+
+        <div class="painel-checks">
+          <label class="painel-check"><input type="checkbox" name="BitPresenca5PrincipaisAvenidas" value="1" {% if classificacao.BitPresenca5PrincipaisAvenidas|int == 1 %}checked{% endif %}> 5 principais avenidas</label>
+          <label class="painel-check"><input type="checkbox" name="BitCruzamento" value="1" {% if classificacao.BitCruzamento|int == 1 %}checked{% endif %}> Cruzamento</label>
+          <label class="painel-check"><input type="checkbox" name="BitSemaforo" value="1" {% if classificacao.BitSemaforo|int == 1 %}checked{% endif %}> Semáforo</label>
+          <label class="painel-check"><input type="checkbox" name="BitProximidadeShopping" value="1" {% if classificacao.BitProximidadeShopping|int == 1 %}checked{% endif %}> Próximo a shopping</label>
+          <label class="painel-check"><input type="checkbox" name="BitPresencaConcorrente200Metros" value="1" {% if classificacao.BitPresencaConcorrente200Metros|int == 1 %}checked{% endif %}> Concorrente em 200 m</label>
+        </div>
+
+        <hr style="border:0;border-top:1px solid #e2e8f0;margin:18px 0;">
+
+        <div class="painel-grid">
+          <div class="painel-campo"><label for="Cota">Cota</label><input id="Cota" name="Cota" inputmode="decimal" value="{{ classificacao_detalhes.Cota if classificacao_detalhes.Cota is not none else '' }}"></div>
+          <div class="painel-campo"><label for="MinimoLiquidoMensal">Mínimo líquido mensal</label><input id="MinimoLiquidoMensal" name="MinimoLiquidoMensal" inputmode="decimal" value="{{ classificacao_detalhes.MinimoLiquidoMensal if classificacao_detalhes.MinimoLiquidoMensal is not none else '' }}"></div>
+          <div class="painel-campo"><label for="MinimoLiquidoDiario">Mínimo líquido diário</label><input id="MinimoLiquidoDiario" name="MinimoLiquidoDiario" inputmode="decimal" value="{{ classificacao_detalhes.MinimoLiquidoDiario if classificacao_detalhes.MinimoLiquidoDiario is not none else '' }}"></div>
+          <div class="painel-campo"><label for="RendaMediaDetalhes">Renda média (detalhes)</label><input id="RendaMediaDetalhes" name="RendaMediaDetalhes" inputmode="decimal" value="{{ classificacao_detalhes.RendaMedia if classificacao_detalhes.RendaMedia is not none else '' }}"></div>
+          <div class="painel-campo"><label for="Regiao">Região</label><input id="Regiao" name="Regiao" value="{{ classificacao_detalhes.Regiao or '' }}"></div>
+          <div class="painel-campo"><label for="DistanciaCentroKM">Distância do centro (km)</label><input id="DistanciaCentroKM" name="DistanciaCentroKM" inputmode="decimal" value="{{ classificacao_detalhes.DistanciaCentroKM if classificacao_detalhes.DistanciaCentroKM is not none else '' }}"></div>
+          <div class="painel-campo"><label for="Azimute">Azimute</label><input id="Azimute" name="Azimute" inputmode="decimal" value="{{ classificacao_detalhes.Azimute if classificacao_detalhes.Azimute is not none else '' }}"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="painel-card" id="imagens">
+      <div class="painel-card-head"><div><h2>Imagens da face</h2><p>Os arquivos são renomeados automaticamente utilizando o CodFace.</p></div></div>
+      <div class="painel-card-body">
+        <div class="painel-imagens">
+          <div class="painel-imagem-card">
+            <h3>Imagem principal — {{ painel.CodFace }}.extensão</h3>
+            <div class="painel-imagem-preview" id="previewPrincipal">
+              {% if imagem_principal and imagem_principal.UrlImagem %}
+                <img src="{{ imagem_principal.UrlImagem }}" alt="Imagem principal da face {{ painel.CodFace }}">
+              {% else %}
+                <span>Nenhuma imagem principal cadastrada</span>
+              {% endif %}
+            </div>
+            <div class="painel-campo"><label for="imagem_principal">Selecionar imagem principal</label><input id="imagem_principal" name="imagem_principal" type="file" accept="image/jpeg,image/png,image/webp"></div>
+            {% if imagem_principal %}
+              <label class="painel-check" style="margin-top:10px;"><input type="checkbox" name="remover_imagem_principal" value="1"> Remover imagem principal atual</label>
+            {% endif %}
+            <div class="painel-ajuda">Diretório: /home/euromidia/projetos/pipelines/FlaskApp/app/static/imagens/painéis</div>
+          </div>
+
+          <div class="painel-imagem-card">
+            <h3>Imagem do orçamento — {{ painel.CodFace }}_2.extensão</h3>
+            <div class="painel-imagem-preview" id="previewOrcamento">
+              {% if imagem_orcamento and imagem_orcamento.UrlImagem %}
+                <img src="{{ imagem_orcamento.UrlImagem }}" alt="Imagem de orçamento da face {{ painel.CodFace }}">
+              {% else %}
+                <span>Nenhuma imagem de orçamento cadastrada</span>
+              {% endif %}
+            </div>
+            <div class="painel-campo"><label for="imagem_orcamento">Selecionar imagem do orçamento</label><input id="imagem_orcamento" name="imagem_orcamento" type="file" accept="image/jpeg,image/png,image/webp"></div>
+            {% if imagem_orcamento %}
+              <label class="painel-check" style="margin-top:10px;"><input type="checkbox" name="remover_imagem_orcamento" value="1"> Remover imagem de orçamento atual</label>
+            {% endif %}
+            <div class="painel-ajuda">O sufixo <strong>_2</strong> é incluído automaticamente no arquivo de orçamento.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="painel-card" id="custos">
+      <div class="painel-card-head">
+        <div><h2>Custos da face</h2><p>Somente um registro atual de custo é permitido para a face. As categorias formam o ValorCusto.</p></div>
+        <button type="button" class="painel-btn-icon painel-btn-add" id="btnAdicionarCusto" title="Adicionar custo">+</button>
+      </div>
+      <div class="painel-card-body">
+        <input type="hidden" name="IDFatoCustoFacesPainel" value="{{ custo.IDFatoCustoFacesPainel if custo else '' }}">
+        <input type="hidden" name="custo_ativo" id="custoAtivo" value="{{ 1 if custo else 0 }}">
+        <input type="hidden" name="custo_removido" id="custoRemovido" value="0">
+
+        <div id="custoVazio" class="painel-custo-vazio {% if custo %}oculto{% endif %}">
+          Nenhum custo atual cadastrado. Clique no sinal <strong>+</strong> para adicionar.
+        </div>
+
+        <div id="custoConteudo" class="{% if not custo %}oculto{% endif %}">
+          <div class="painel-custo-topo">
+            <div class="painel-campo">
+              <label for="OrigemCusto">Origem do custo</label>
+              <input id="OrigemCusto" name="OrigemCusto" maxlength="100" value="{{ custo.OrigemCusto if custo else 'COMPOSIÇÃO DE CUSTOS' }}">
+            </div>
+            <div class="painel-campo">
+              <label for="ValorCusto">ValorCusto total</label>
+              <input id="ValorCusto" class="painel-total-custo" value="{{ custo.ValorCusto if custo and custo.ValorCusto is not none else '0.00' }}" readonly>
+            </div>
+            <button type="button" class="painel-btn-icon painel-btn-remove" id="btnRemoverCusto" title="Remover o custo atual">×</button>
+          </div>
+
+          <h3 style="margin:0 0 10px;font-size:.95rem;color:#334155;">CategoriasCusto</h3>
+          <div class="painel-tabela-wrap">
+            <table class="painel-tabela" id="tabelaComposicao">
+              <thead><tr><th style="width:58%">Categoria</th><th>Valor</th><th style="width:55px">-</th></tr></thead>
+              <tbody id="corpoComposicao">
+                {% for item in composicoes %}
+                  <tr class="linha-composicao">
+                    <td><input name="composicao_categoria[]" maxlength="100" value="{{ item.Categoria or '' }}" placeholder="Ex.: energia, aluguel, manutenção"></td>
+                    <td><input class="valor-composicao" name="composicao_valor[]" inputmode="decimal" value="{{ item.Valor if item.Valor is not none else '' }}" placeholder="0,00"></td>
+                    <td><button type="button" class="painel-btn-icon painel-btn-remove btn-remover-composicao">−</button></td>
+                  </tr>
+                {% else %}
+                  <tr class="linha-composicao">
+                    <td><input name="composicao_categoria[]" maxlength="100" placeholder="Ex.: energia, aluguel, manutenção"></td>
+                    <td><input class="valor-composicao" name="composicao_valor[]" inputmode="decimal" placeholder="0,00"></td>
+                    <td><button type="button" class="painel-btn-icon painel-btn-remove btn-remover-composicao">−</button></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <button type="button" class="painel-btn-icon painel-btn-add" id="btnAdicionarComposicao" title="Adicionar categoria" style="margin-top:10px;">+</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="painel-card" id="precos">
+      <div class="painel-card-head">
+        <div><h2>Preços da face</h2><p>Adicione ou remova quantas regras de preço forem necessárias.</p></div>
+        <button type="button" class="painel-btn-icon painel-btn-add" id="btnAdicionarPreco" title="Adicionar preço">+</button>
+      </div>
+      <div class="painel-card-body">
+        <div class="painel-ajuda" style="margin:0 0 12px;">Para PAINEL DIGITAL e RELÓGIO MULTIMENSAGEM DIGITAL, Exibições/dia aceita somente 540 ou 1080. Para os demais tipos, o banco recebe NULL.</div>
+        <div class="painel-tabela-wrap">
+          <table class="painel-tabela" id="tabelaPrecos" style="min-width:1080px;">
+            <thead>
+              <tr>
+                <th>Período</th>
+                <th class="cabecalho-exibicoes">Exibições/dia</th>
+                <th>Valor</th>
+                <th>Política de trocas</th>
+                <th>Valor troca</th>
+                <th>Data validade</th>
+                <th style="width:55px">-</th>
+              </tr>
+            </thead>
+            <tbody id="corpoPrecos">
+              {% for preco in precos %}
+                <tr class="linha-preco">
+                  <td>
+                    <input type="hidden" name="preco_id[]" value="{{ preco.IDFatoPrecoFacePainel }}">
+                    <input name="preco_periodo[]" maxlength="10" required value="{{ preco.Periodo or '' }}" placeholder="1 Mês">
+                  </td>
+                  <td class="painel-campo-exibicoes"><select name="preco_exibicoes[]"><option value="">Não se aplica</option><option value="540" {% if preco.ExibicoesDia|int == 540 %}selected{% endif %}>540</option><option value="1080" {% if preco.ExibicoesDia|int == 1080 %}selected{% endif %}>1080</option></select></td>
+                  <td><input name="preco_valor[]" inputmode="decimal" required value="{{ preco.Valor if preco.Valor is not none else '' }}" placeholder="0,00"></td>
+                  <td><input name="preco_politica[]" maxlength="100" value="{{ preco.PoliticaTrocas or '' }}" placeholder="PADRÃO"></td>
+                  <td><input name="preco_valor_troca[]" inputmode="decimal" value="{{ preco.ValorTroca if preco.ValorTroca is not none else '0.00' }}" placeholder="0,00"></td>
+                  <td><input name="preco_data_validade[]" type="datetime-local" step="1" value="{{ datetime_input(preco.DataValidade) }}"></td>
+                  <td><button type="button" class="painel-btn-icon painel-btn-remove btn-remover-preco">−</button></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <div class="painel-salvar-barra">
+      <a class="painel-btn-cancelar" href="{{ url_for('admin.cadastro_paineis_lista') }}">Cancelar</a>
+      <button class="painel-btn-salvar" type="submit">Salvar alterações</button>
+    </div>
+  </form>
+</div>
+
+<template id="templateComposicao">
+  <tr class="linha-composicao">
+    <td><input name="composicao_categoria[]" maxlength="100" placeholder="Ex.: energia, aluguel, manutenção"></td>
+    <td><input class="valor-composicao" name="composicao_valor[]" inputmode="decimal" placeholder="0,00"></td>
+    <td><button type="button" class="painel-btn-icon painel-btn-remove btn-remover-composicao">−</button></td>
+  </tr>
+</template>
+
+<template id="templatePreco">
+  <tr class="linha-preco">
+    <td><input type="hidden" name="preco_id[]" value=""><input name="preco_periodo[]" maxlength="10" required placeholder="1 Mês"></td>
+    <td class="painel-campo-exibicoes"><select name="preco_exibicoes[]"><option value="">Não se aplica</option><option value="540">540</option><option value="1080">1080</option></select></td>
+    <td><input name="preco_valor[]" inputmode="decimal" required placeholder="0,00"></td>
+    <td><input name="preco_politica[]" maxlength="100" placeholder="PADRÃO"></td>
+    <td><input name="preco_valor_troca[]" inputmode="decimal" value="0.00" placeholder="0,00"></td>
+    <td><input name="preco_data_validade[]" type="datetime-local" step="1"></td>
+    <td><button type="button" class="painel-btn-icon painel-btn-remove btn-remover-preco">−</button></td>
+  </tr>
+</template>
+
+<script>
+(function(){
+  const tipoPainel = document.getElementById('Tipo');
+  const corpoComposicao = document.getElementById('corpoComposicao');
+  const corpoPrecos = document.getElementById('corpoPrecos');
+  const custoConteudo = document.getElementById('custoConteudo');
+  const custoVazio = document.getElementById('custoVazio');
+  const custoAtivo = document.getElementById('custoAtivo');
+  const custoRemovido = document.getElementById('custoRemovido');
+  const valorCusto = document.getElementById('ValorCusto');
+
+  function normalizarTipo(valor){
+    return String(valor || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  }
+
+  function tipoExigeExibicoes(){
+    const tipo = normalizarTipo(tipoPainel.value);
+    return tipo === 'PAINEL DIGITAL' || tipo === 'RELÓGIO MULTIMENSAGEM DIGITAL';
+  }
+
+  function atualizarExibicoes(){
+    const exige = tipoExigeExibicoes();
+    document.querySelectorAll('.painel-campo-exibicoes').forEach(function(celula){
+      const select = celula.querySelector('select');
+      celula.classList.toggle('oculto', !exige);
+      if (!exige && select) select.value = '';
+    });
+    document.querySelectorAll('.cabecalho-exibicoes').forEach(function(cabecalho){
+      cabecalho.classList.toggle('oculto', !exige);
+    });
+  }
+
+  function numero(valor){
+    let texto = String(valor || '').trim();
+    if (!texto) return 0;
+    if (texto.includes(',')) texto = texto.replace(/\./g, '').replace(',', '.');
+    const resultado = Number(texto);
+    return Number.isFinite(resultado) ? resultado : 0;
+  }
+
+  function recalcularCusto(){
+    let total = 0;
+    document.querySelectorAll('.valor-composicao').forEach(function(input){
+      total += numero(input.value);
+    });
+    if (valorCusto) valorCusto.value = total.toFixed(2);
+  }
+
+  function adicionarComposicao(){
+    const fragmento = document.getElementById('templateComposicao').content.cloneNode(true);
+    corpoComposicao.appendChild(fragmento);
+    recalcularCusto();
+  }
+
+  function adicionarPreco(){
+    const fragmento = document.getElementById('templatePreco').content.cloneNode(true);
+    const agora = new Date();
+    agora.setMinutes(agora.getMinutes() - agora.getTimezoneOffset());
+    const inputData = fragmento.querySelector('input[name="preco_data_validade[]"]');
+    if (inputData) inputData.value = agora.toISOString().slice(0, 19);
+    corpoPrecos.appendChild(fragmento);
+    atualizarExibicoes();
+  }
+
+  document.getElementById('btnAdicionarComposicao').addEventListener('click', adicionarComposicao);
+  document.getElementById('btnAdicionarPreco').addEventListener('click', adicionarPreco);
+
+  document.getElementById('btnAdicionarCusto').addEventListener('click', function(){
+    custoAtivo.value = '1';
+    custoRemovido.value = '0';
+    custoConteudo.classList.remove('oculto');
+    custoVazio.classList.add('oculto');
+    if (!corpoComposicao.querySelector('.linha-composicao')) adicionarComposicao();
+    recalcularCusto();
+  });
+
+  document.getElementById('btnRemoverCusto').addEventListener('click', function(){
+    custoAtivo.value = '0';
+    custoRemovido.value = '1';
+    custoConteudo.classList.add('oculto');
+    custoVazio.classList.remove('oculto');
+  });
+
+  document.addEventListener('click', function(event){
+    const removerComposicao = event.target.closest('.btn-remover-composicao');
+    if (removerComposicao){
+      removerComposicao.closest('tr').remove();
+      if (!corpoComposicao.querySelector('.linha-composicao')) adicionarComposicao();
+      recalcularCusto();
+      return;
+    }
+
+    const removerPreco = event.target.closest('.btn-remover-preco');
+    if (removerPreco){
+      removerPreco.closest('tr').remove();
+    }
+  });
+
+  document.addEventListener('input', function(event){
+    if (event.target.classList.contains('valor-composicao')) recalcularCusto();
+  });
+
+  tipoPainel.addEventListener('input', atualizarExibicoes);
+  tipoPainel.addEventListener('change', atualizarExibicoes);
+
+  function configurarPreview(inputId, previewId){
+    const input = document.getElementById(inputId);
+    const preview = document.getElementById(previewId);
+    input.addEventListener('change', function(){
+      const arquivo = input.files && input.files[0];
+      if (!arquivo) return;
+      const url = URL.createObjectURL(arquivo);
+      preview.innerHTML = '';
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = 'Pré-visualização da imagem selecionada';
+      img.onload = function(){ URL.revokeObjectURL(url); };
+      preview.appendChild(img);
+    });
+  }
+
+  configurarPreview('imagem_principal', 'previewPrincipal');
+  configurarPreview('imagem_orcamento', 'previewOrcamento');
+
+  document.getElementById('formCadastroPainel').addEventListener('submit', function(){
+    recalcularCusto();
+  });
+
+  atualizarExibicoes();
+  recalcularCusto();
+})();
+</script>
+{% endblock %}

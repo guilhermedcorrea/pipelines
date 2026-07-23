@@ -1049,6 +1049,41 @@ input:disabled, select:disabled, textarea:disabled{
           )
         ) %}
         {#
+          Cadastrar Painéis: IDEmpresaProprietaria = 3 ou BitFullEmpresas = 1.
+          A permissão ADMIN_TUDO original do endpoint também é preservada.
+          A mesma regra é validada no Python para bloquear acesso direto pela URL.
+        #}
+        {% set menu_paineis_cadastrar_paineis = (
+          pode_acessar_menu_paineis('cadastrar_paineis')
+          if pode_acessar_menu_paineis is defined
+          else (
+            current_user.is_authenticated
+            and (
+              (current_user.IDEmpresaProprietaria|default(0, true)|int) == 3
+              or (current_user.BitFullEmpresas|default(0, true)|int) == 1
+            )
+            and current_user.has_permission is defined
+            and current_user.has_permission('ADMIN_TUDO')
+          )
+        ) %}
+        {#
+          Editar Painéis: perfil ADMIN e, além disso,
+          IDEmpresaProprietaria = 3 ou BitFullEmpresas = 1.
+          A mesma regra é validada no endpoint para impedir acesso direto.
+        #}
+        {% set menu_paineis_editar_paineis = (
+          pode_acessar_menu_paineis('editar_paineis')
+          if pode_acessar_menu_paineis is defined
+          else (
+            current_user.is_authenticated
+            and (current_user.IDDimPerfilUsuario|default(0, true)|int) == 1
+            and (
+              (current_user.IDEmpresaProprietaria|default(0, true)|int) == 3
+              or (current_user.BitFullEmpresas|default(0, true)|int) == 1
+            )
+          )
+        ) %}
+        {#
           Conta e sessão: Meu perfil, Mensagens e Relatórios.
           A mesma regra é validada novamente nos endpoints Python para impedir
           acesso direto por URL. O item Sair permanece disponível para que todo
@@ -1243,6 +1278,7 @@ input:disabled, select:disabled, textarea:disabled{
           or menu_paineis_performance
           or (menu_paineis_carteiras and not (usuario_logado_eh_vendedor_paineis | default(False)))
           or menu_paineis_empresas
+          or menu_paineis_editar_paineis
           or menu_paineis_catalogo_produtos
           or menu_paineis_checkin_novo
           or menu_paineis_lista_checkins
@@ -1346,7 +1382,7 @@ input:disabled, select:disabled, textarea:disabled{
               </div>
             {% endif %}
 
-            {% if menu_paineis_empresas or menu_paineis_catalogo_produtos or menu_paineis_checkin_novo or menu_paineis_lista_checkins %}
+            {% if menu_paineis_empresas or menu_paineis_cadastrar_paineis or menu_paineis_editar_paineis or menu_paineis_catalogo_produtos or menu_paineis_checkin_novo or menu_paineis_lista_checkins %}
               <div class="submenu-item">
                 <a href="#" class="submenu-link">
                   <span>Cadastros</span>
@@ -1360,6 +1396,20 @@ input:disabled, select:disabled, textarea:disabled{
                     <a href="{{ url_for('Paineis.clientes_lista') }}"
                        class="{% if request.path == url_for('Paineis.clientes_lista') %}menu-link-current{% endif %}">
                       Empresas
+                    </a>
+                  {% endif %}
+
+                  {% if menu_paineis_cadastrar_paineis %}
+                    <a href="{{ url_for('Paineis.cadastrar_paineis') }}"
+                       class="{% if request.endpoint == 'Paineis.cadastrar_paineis' %}menu-link-current{% endif %}">
+                      Cadastrar Painéis
+                    </a>
+                  {% endif %}
+
+                  {% if menu_paineis_editar_paineis %}
+                    <a href="{{ url_for('admin.cadastro_paineis_lista') }}"
+                       class="{% if request.endpoint in ['admin.cadastro_paineis_lista', 'admin.cadastro_painel_editar'] %}menu-link-current{% endif %}">
+                      Editar Painéis
                     </a>
                   {% endif %}
 
