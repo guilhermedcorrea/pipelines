@@ -11,6 +11,7 @@ from ..autenticacao.autenticacao_views import requer_permissao
 from ..autenticacao.acl_menu_paineis import requer_item_menu_paineis
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 from decimal import Decimal, InvalidOperation
 import base64
 import hashlib
@@ -24738,9 +24739,10 @@ def vencimentos_campanhas_sugestoes():
 # ==========================================================
 
 CADASTRO_PAINEL_DIRETORIO_IMAGENS_PADRAO = Path(
-    "/home/euromidia/projetos/pipelines/FlaskApp/app/static/imagens/painéis"
+    "/home/euromidia/projetos/pipelines/FlaskApp/app/static/imagens/paineis"
 )
-CADASTRO_PAINEL_URL_IMAGENS = "/static/imagens/painéis"
+CADASTRO_PAINEL_STATIC_IMAGENS = "imagens/paineis"
+CADASTRO_PAINEL_URL_IMAGENS = f"/static/{CADASTRO_PAINEL_STATIC_IMAGENS}"
 CADASTRO_PAINEL_EXTENSOES_IMAGEM = {".jpg", ".jpeg", ".png", ".webp"}
 CADASTRO_PAINEL_TIPOS_COM_EXIBICOES = {
     "PAINEL DIGITAL",
@@ -24866,13 +24868,107 @@ def _cadpainel_codface_arquivo(cod_face: str) -> str:
 
 def _cadpainel_arquivos_do_tipo(diretorio: Path, cod_face: str, bit_orcamento: int) -> list[Path]:
     stem_esperado = f"{cod_face}_2" if int(bit_orcamento) == 1 else cod_face
+    stem_esperado_normalizado = stem_esperado.casefold()
     encontrados: list[Path] = []
     for caminho in diretorio.iterdir():
         if not caminho.is_file():
             continue
-        if caminho.stem == stem_esperado and caminho.suffix.lower() in CADASTRO_PAINEL_EXTENSOES_IMAGEM:
+        if (
+            caminho.stem.casefold() == stem_esperado_normalizado
+            and caminho.suffix.lower() in CADASTRO_PAINEL_EXTENSOES_IMAGEM
+        ):
             encontrados.append(caminho)
     return encontrados
+
+
+def _cadpainel_nome_arquivo_da_url(valor_url) -> str | None:
+    """Extrai somente o nome do arquivo de UrlImagem, aceitando URL, caminho absoluto ou relativo."""
+    texto_url = str(valor_url or "").strip().replace("\\", "/")
+    if not texto_url:
+        return None
+
+    try:
+        caminho_url = unquote(urlsplit(texto_url).path or "")
+    except Exception:
+        caminho_url = unquote(texto_url.split("?", 1)[0].split("#", 1)[0])
+
+    nome_arquivo = Path(caminho_url).name.strip()
+    if not nome_arquivo or nome_arquivo in {".", ".."}:
+        return None
+    return nome_arquivo
+
+
+def _cadpainel_registro_eh_orcamento(registro: dict) -> bool:
+    try:
+        if int(registro.get("BitImagemOrcamento") or 0) == 1:
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        if int(registro.get("NumeroImagem") or 0) == 2:
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    nome_arquivo = _cadpainel_nome_arquivo_da_url(registro.get("UrlImagem")) or ""
+    return Path(nome_arquivo).stem.casefold().endswith("_2")
+
+
+def _cadpainel_localizar_arquivo_imagem(registro: dict, cod_face: str, bit_orcamento: int) -> Path | None:
+    """Localiza o arquivo físico pelo nome, inclusive para URLs antigas com pasta divergente."""
+    diretorio = _cadpainel_diretorio_imagens()
+    nome_cadastrado = _cadpainel_nome_arquivo_da_url(registro.get("UrlImagem"))
+
+    if nome_cadastrado:
+        caminho_exato = diretorio / nome_cadastrado
+        if caminho_exato.is_file():
+            return caminho_exato
+
+        nome_normalizado = nome_cadastrado.casefold()
+        for caminho in diretorio.iterdir():
+            if caminho.is_file() and caminho.name.casefold() == nome_normalizado:
+                return caminho
+
+    cod_face_arquivo = _cadpainel_codface_arquivo(cod_face)
+    candidatos = _cadpainel_arquivos_do_tipo(diretorio, cod_face_arquivo, bit_orcamento)
+    if candidatos:
+        # Se houver mais de uma extensão para o mesmo CodFace, uso o arquivo mais recentemente alterado.
+        return max(candidatos, key=lambda item: item.stat().st_mtime)
+    return None
+
+
+def _cadpainel_preparar_imagem_para_tela(registro, cod_face: str) -> dict:
+    """Normaliza registros antigos e gera uma URL estática válida para a pasta real do projeto."""
+    imagem = dict(registro)
+    bit_orcamento = 1 if _cadpainel_registro_eh_orcamento(imagem) else 0
+    arquivo_fisico = _cadpainel_localizar_arquivo_imagem(imagem, cod_face, bit_orcamento)
+    nome_arquivo = arquivo_fisico.name if arquivo_fisico else _cadpainel_nome_arquivo_da_url(imagem.get("UrlImagem"))
+
+    if nome_arquivo:
+        # A pasta física e a URL pública usam "paineis" sem acento.
+        url_exibicao = url_for(
+            "static",
+            filename=f"{CADASTRO_PAINEL_STATIC_IMAGENS}/{nome_arquivo}",
+        )
+    else:
+        url_exibicao = str(imagem.get("UrlImagem") or "").strip()
+
+    versao = imagem.get("DataAtualizacao") or imagem.get("IDDimImagemPainel")
+    if url_exibicao and versao:
+        if isinstance(versao, (datetime, date)):
+            versao = versao.strftime("%Y%m%d%H%M%S")
+        versao_limpa = re.sub(r"[^0-9A-Za-z_-]", "", str(versao))[:40]
+        if versao_limpa:
+            separador = "&" if "?" in url_exibicao else "?"
+            url_exibicao = f"{url_exibicao}{separador}v={versao_limpa}"
+
+    imagem["BitImagemOrcamentoNormalizado"] = bit_orcamento
+    imagem["TipoImagemDescricao"] = "Imagem do orçamento" if bit_orcamento else "Imagem principal"
+    imagem["NomeArquivoExibicao"] = nome_arquivo
+    imagem["UrlExibicao"] = url_exibicao
+    imagem["ArquivoEncontrado"] = bool(arquivo_fisico)
+    return imagem
 
 
 def _cadpainel_preparar_upload(arquivo, cod_face: str, bit_orcamento: int):
@@ -25053,29 +25149,51 @@ def _cadpainel_carregar_edicao(id_face: int):
         {"id_face": int(id_face), "id_painel": id_painel},
     ).mappings().all()
 
-    imagens = db.session.execute(
+    cod_face = str(face_painel.get("CodFace") or "").strip()
+    imagens_banco = db.session.execute(
         text("""
             SELECT *
             FROM [Integracao].[Silver].[DimImagemPainel] WITH (NOLOCK)
-            WHERE IDDimFacesPaineis = :id_face
+            WHERE
+                (
+                    IDDimFacesPaineis = :id_face
+                    OR (
+                        LTRIM(RTRIM(ISNULL(CodFace, ''))) = :cod_face
+                        AND (IDDimFacesPaineis IS NULL OR IDDimFacesPaineis = :id_face)
+                    )
+                )
               AND ISNULL(BitAtivo, 1) = 1
-            ORDER BY ISNULL(BitImagemOrcamento, 0), NumeroImagem, IDDimImagemPainel DESC
+            ORDER BY
+                ISNULL(BitImagemOrcamento, 0),
+                ISNULL(NumeroImagem, 0),
+                ISNULL(DataAtualizacao, '19000101') DESC,
+                IDDimImagemPainel DESC
         """),
-        {"id_face": int(id_face)},
+        {"id_face": int(id_face), "cod_face": cod_face},
     ).mappings().all()
 
-    imagem_principal = next((dict(x) for x in imagens if int(x.get("BitImagemOrcamento") or 0) == 0), None)
-    imagem_orcamento = next((dict(x) for x in imagens if int(x.get("BitImagemOrcamento") or 0) == 1), None)
+    imagens = [_cadpainel_preparar_imagem_para_tela(registro, cod_face) for registro in imagens_banco]
+    imagem_principal = next(
+        (imagem for imagem in imagens if int(imagem.get("BitImagemOrcamentoNormalizado") or 0) == 0),
+        None,
+    )
+    imagem_orcamento = next(
+        (imagem for imagem in imagens if int(imagem.get("BitImagemOrcamentoNormalizado") or 0) == 1),
+        None,
+    )
 
+    # Não cria nem simula classificação quando não existe registro no banco.
+    # O template trata None e apresenta os campos vazios para eventual cadastro.
     return {
         "painel": dict(face_painel),
-        "classificacao": dict(classificacao) if classificacao else {},
-        "classificacao_detalhes": dict(classificacao_detalhes) if classificacao_detalhes else {},
+        "classificacao": dict(classificacao) if classificacao else None,
+        "classificacao_detalhes": dict(classificacao_detalhes) if classificacao_detalhes else None,
         "custo": dict(custo) if custo else None,
         "composicoes": [dict(x) for x in composicoes],
         "precos": [dict(x) for x in precos],
         "imagem_principal": imagem_principal,
         "imagem_orcamento": imagem_orcamento,
+        "imagens_cadastradas": imagens,
     }
 
 
@@ -25372,6 +25490,32 @@ def _cadpainel_salvar_classificacao(id_face: int):
         "LongitudeClassificacao": _cadpainel_decimal(request.form.get("LongitudeClassificacao"), casas=8),
     }
 
+    possui_dados_informados = any(
+        valor is not None
+        for valor in (
+            params["FluxoPassantesSemanal"],
+            params["IndiceImpactoPopulacao"],
+            params["RendaMedia"],
+            params["PeaDiaFaixa"],
+            params["CPM"],
+            params["LatitudeClassificacao"],
+            params["LongitudeClassificacao"],
+        )
+    ) or any(
+        params[campo] == 1
+        for campo in (
+            "BitPresenca5PrincipaisAvenidas",
+            "BitCruzamento",
+            "BitSemaforo",
+            "BitProximidadeShopping",
+            "BitPresencaConcorrente200Metros",
+        )
+    )
+
+    # Se não existe classificação e o usuário não informou nada, não cria linha vazia.
+    if not id_classificacao and not possui_dados_informados:
+        return
+
     if id_classificacao:
         resultado = db.session.execute(
             text("""
@@ -25450,6 +25594,23 @@ def _cadpainel_salvar_classificacao_detalhes(id_face: int):
         "DistanciaCentroKM": _cadpainel_decimal(request.form.get("DistanciaCentroKM"), minimo=0, casas=4),
         "Azimute": _cadpainel_decimal(request.form.get("Azimute"), casas=4),
     }
+
+    possui_dados_informados = any(
+        valor is not None
+        for valor in (
+            params["Cota"],
+            params["MinimoLiquidoMensal"],
+            params["MinimoLiquidoDiario"],
+            params["RendaMedia"],
+            params["Regiao"],
+            params["DistanciaCentroKM"],
+            params["Azimute"],
+        )
+    )
+
+    # Se não existe detalhamento e o usuário não informou nada, não cria linha vazia.
+    if not id_detalhes and not possui_dados_informados:
+        return
 
     if id_detalhes:
         resultado = db.session.execute(

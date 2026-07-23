@@ -196,6 +196,103 @@
     margin-bottom:10px;
   }
   .painel-imagem-preview img{ width:100%; height:100%; object-fit:contain; }
+  .painel-imagem-acoes{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+    margin:9px 0 4px;
+  }
+  .painel-imagem-link{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:36px;
+    padding:7px 11px;
+    border:1px solid #bfdbfe;
+    border-radius:8px;
+    background:#eff6ff;
+    color:#1d4ed8;
+    text-decoration:none;
+    font-size:.79rem;
+    font-weight:800;
+  }
+  .painel-imagem-meta{
+    color:#64748b;
+    font-size:.75rem;
+    overflow-wrap:anywhere;
+  }
+  .painel-imagem-erro{
+    width:100%;
+    min-height:100%;
+    padding:18px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    text-align:center;
+    color:#991b1b;
+    background:#fff1f2;
+  }
+  .painel-imagem-erro small{
+    color:#7f1d1d;
+    overflow-wrap:anywhere;
+  }
+  .painel-galeria-existente{
+    margin-top:18px;
+    padding-top:17px;
+    border-top:1px solid #dbe4ef;
+  }
+  .painel-galeria-existente h3{
+    margin:0 0 5px;
+    color:#0f172a;
+    font-size:.98rem;
+  }
+  .painel-galeria-existente > p{
+    margin:0 0 12px;
+    color:#64748b;
+    font-size:.8rem;
+  }
+  .painel-galeria-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));
+    gap:12px;
+  }
+  .painel-galeria-item{
+    min-width:0;
+    padding:10px;
+    border:1px solid #dbe4ef;
+    border-radius:10px;
+    background:#fff;
+  }
+  .painel-galeria-item a{
+    display:block;
+    height:145px;
+    border:1px solid #e2e8f0;
+    border-radius:8px;
+    overflow:hidden;
+    background:#f8fafc;
+  }
+  .painel-galeria-item img{
+    width:100%;
+    height:100%;
+    object-fit:contain;
+  }
+  .painel-galeria-item strong{
+    display:block;
+    margin-top:8px;
+    color:#0f172a;
+    font-size:.82rem;
+  }
+  .painel-galeria-item small{
+    display:block;
+    margin-top:3px;
+    color:#64748b;
+    font-size:.72rem;
+    overflow-wrap:anywhere;
+  }
   .painel-ajuda{
     margin-top:7px;
     color:#64748b;
@@ -411,12 +508,12 @@
         </div>
 
         <div class="painel-checks">
-          <label class="painel-check"><input type="checkbox" name="BitAtivo" value="1" {% if painel.BitAtivo|int == 1 %}checked{% endif %}> Ativo</label>
-          <label class="painel-check"><input type="checkbox" name="BitIluminado" value="1" {% if painel.BitIluminado|int == 1 %}checked{% endif %}> Iluminado</label>
-          <label class="painel-check"><input type="checkbox" name="BitProprio" value="1" {% if painel.BitProprio|int == 1 %}checked{% endif %}> Próprio</label>
-          <label class="painel-check"><input type="checkbox" name="BitAluguel" value="1" {% if painel.BitAluguel|int == 1 %}checked{% endif %}> Possui aluguel</label>
-          <label class="painel-check"><input type="checkbox" name="BitEnergia" value="1" {% if painel.BitEnergia|int == 1 %}checked{% endif %}> Possui energia</label>
-          <label class="painel-check"><input type="checkbox" name="BitInternet" value="1" {% if painel.BitInternet|int == 1 %}checked{% endif %}> Possui internet</label>
+          <label class="painel-check"><input type="checkbox" name="BitAtivo" value="1" {% if painel.BitAtivo|default(0, true)|int == 1 %}checked{% endif %}> Ativo</label>
+          <label class="painel-check"><input type="checkbox" name="BitIluminado" value="1" {% if painel.BitIluminado|default(0, true)|int == 1 %}checked{% endif %}> Iluminado</label>
+          <label class="painel-check"><input type="checkbox" name="BitProprio" value="1" {% if painel.BitProprio|default(0, true)|int == 1 %}checked{% endif %}> Próprio</label>
+          <label class="painel-check"><input type="checkbox" name="BitAluguel" value="1" {% if painel.BitAluguel|default(0, true)|int == 1 %}checked{% endif %}> Possui aluguel</label>
+          <label class="painel-check"><input type="checkbox" name="BitEnergia" value="1" {% if painel.BitEnergia|default(0, true)|int == 1 %}checked{% endif %}> Possui energia</label>
+          <label class="painel-check"><input type="checkbox" name="BitInternet" value="1" {% if painel.BitInternet|default(0, true)|int == 1 %}checked{% endif %}> Possui internet</label>
         </div>
       </div>
     </section>
@@ -436,55 +533,73 @@
     <section class="painel-card" id="classificacao">
       <div class="painel-card-head"><div><h2>Classificação da face</h2><p>Campos editáveis das duas tabelas de classificação.</p></div></div>
       <div class="painel-card-body">
-        <input type="hidden" name="IDFatoClassificacaoFacesPaineis" value="{{ classificacao.IDFatoClassificacaoFacesPaineis or '' }}">
-        <input type="hidden" name="IDFatoClassificacaoPaineisDetalhes" value="{{ classificacao_detalhes.IDFatoClassificacaoPaineisDetalhes or '' }}">
+        <input type="hidden" name="IDFatoClassificacaoFacesPaineis" value="{{ classificacao.IDFatoClassificacaoFacesPaineis if classificacao else '' }}">
+        <input type="hidden" name="IDFatoClassificacaoPaineisDetalhes" value="{{ classificacao_detalhes.IDFatoClassificacaoPaineisDetalhes if classificacao_detalhes else '' }}">
+
+        {% if not classificacao and not classificacao_detalhes %}
+          <p class="painel-muted" style="margin:0 0 16px;">Esta face não possui classificação cadastrada. Os campos permanecem vazios até que o usuário informe algum valor e salve.</p>
+        {% endif %}
 
         <div class="painel-grid">
-          <div class="painel-campo"><label for="FluxoPassantesSemanal">Fluxo passantes semanal</label><input id="FluxoPassantesSemanal" name="FluxoPassantesSemanal" inputmode="decimal" value="{{ classificacao.FluxoPassantesSemanal if classificacao.FluxoPassantesSemanal is not none else '' }}"></div>
-          <div class="painel-campo"><label for="IndiceImpactoPopulacao">Índice impacto população</label><input id="IndiceImpactoPopulacao" name="IndiceImpactoPopulacao" inputmode="decimal" value="{{ classificacao.IndiceImpactoPopulacao if classificacao.IndiceImpactoPopulacao is not none else '' }}"></div>
-          <div class="painel-campo"><label for="RendaMediaClassificacao">Renda média (classificação)</label><input id="RendaMediaClassificacao" name="RendaMediaClassificacao" inputmode="decimal" value="{{ classificacao.RendaMedia if classificacao.RendaMedia is not none else '' }}"></div>
-          <div class="painel-campo"><label for="PeaDiaFaixa">PEA dia/faixa</label><input id="PeaDiaFaixa" name="PeaDiaFaixa" value="{{ classificacao.PeaDiaFaixa or '' }}"></div>
-          <div class="painel-campo"><label for="CPM">CPM</label><input id="CPM" name="CPM" inputmode="decimal" value="{{ classificacao.CPM if classificacao.CPM is not none else '' }}"></div>
-          <div class="painel-campo"><label for="LatitudeClassificacao">Latitude da classificação</label><input id="LatitudeClassificacao" name="LatitudeClassificacao" inputmode="decimal" value="{{ classificacao.Latitude if classificacao.Latitude is not none else '' }}"></div>
-          <div class="painel-campo"><label for="LongitudeClassificacao">Longitude da classificação</label><input id="LongitudeClassificacao" name="LongitudeClassificacao" inputmode="decimal" value="{{ classificacao.Longitude if classificacao.Longitude is not none else '' }}"></div>
+          <div class="painel-campo"><label for="FluxoPassantesSemanal">Fluxo passantes semanal</label><input id="FluxoPassantesSemanal" name="FluxoPassantesSemanal" inputmode="decimal" value="{{ classificacao.FluxoPassantesSemanal if classificacao and classificacao.FluxoPassantesSemanal is not none else '' }}"></div>
+          <div class="painel-campo"><label for="IndiceImpactoPopulacao">Índice impacto população</label><input id="IndiceImpactoPopulacao" name="IndiceImpactoPopulacao" inputmode="decimal" value="{{ classificacao.IndiceImpactoPopulacao if classificacao and classificacao.IndiceImpactoPopulacao is not none else '' }}"></div>
+          <div class="painel-campo"><label for="RendaMediaClassificacao">Renda média (classificação)</label><input id="RendaMediaClassificacao" name="RendaMediaClassificacao" inputmode="decimal" value="{{ classificacao.RendaMedia if classificacao and classificacao.RendaMedia is not none else '' }}"></div>
+          <div class="painel-campo"><label for="PeaDiaFaixa">PEA dia/faixa</label><input id="PeaDiaFaixa" name="PeaDiaFaixa" value="{{ classificacao.PeaDiaFaixa if classificacao and classificacao.PeaDiaFaixa is not none else '' }}"></div>
+          <div class="painel-campo"><label for="CPM">CPM</label><input id="CPM" name="CPM" inputmode="decimal" value="{{ classificacao.CPM if classificacao and classificacao.CPM is not none else '' }}"></div>
+          <div class="painel-campo"><label for="LatitudeClassificacao">Latitude da classificação</label><input id="LatitudeClassificacao" name="LatitudeClassificacao" inputmode="decimal" value="{{ classificacao.Latitude if classificacao and classificacao.Latitude is not none else '' }}"></div>
+          <div class="painel-campo"><label for="LongitudeClassificacao">Longitude da classificação</label><input id="LongitudeClassificacao" name="LongitudeClassificacao" inputmode="decimal" value="{{ classificacao.Longitude if classificacao and classificacao.Longitude is not none else '' }}"></div>
         </div>
 
         <div class="painel-checks">
-          <label class="painel-check"><input type="checkbox" name="BitPresenca5PrincipaisAvenidas" value="1" {% if classificacao.BitPresenca5PrincipaisAvenidas|int == 1 %}checked{% endif %}> 5 principais avenidas</label>
-          <label class="painel-check"><input type="checkbox" name="BitCruzamento" value="1" {% if classificacao.BitCruzamento|int == 1 %}checked{% endif %}> Cruzamento</label>
-          <label class="painel-check"><input type="checkbox" name="BitSemaforo" value="1" {% if classificacao.BitSemaforo|int == 1 %}checked{% endif %}> Semáforo</label>
-          <label class="painel-check"><input type="checkbox" name="BitProximidadeShopping" value="1" {% if classificacao.BitProximidadeShopping|int == 1 %}checked{% endif %}> Próximo a shopping</label>
-          <label class="painel-check"><input type="checkbox" name="BitPresencaConcorrente200Metros" value="1" {% if classificacao.BitPresencaConcorrente200Metros|int == 1 %}checked{% endif %}> Concorrente em 200 m</label>
+          <label class="painel-check"><input type="checkbox" name="BitPresenca5PrincipaisAvenidas" value="1" {% if classificacao and classificacao.BitPresenca5PrincipaisAvenidas|default(0, true)|int == 1 %}checked{% endif %}> 5 principais avenidas</label>
+          <label class="painel-check"><input type="checkbox" name="BitCruzamento" value="1" {% if classificacao and classificacao.BitCruzamento|default(0, true)|int == 1 %}checked{% endif %}> Cruzamento</label>
+          <label class="painel-check"><input type="checkbox" name="BitSemaforo" value="1" {% if classificacao and classificacao.BitSemaforo|default(0, true)|int == 1 %}checked{% endif %}> Semáforo</label>
+          <label class="painel-check"><input type="checkbox" name="BitProximidadeShopping" value="1" {% if classificacao and classificacao.BitProximidadeShopping|default(0, true)|int == 1 %}checked{% endif %}> Próximo a shopping</label>
+          <label class="painel-check"><input type="checkbox" name="BitPresencaConcorrente200Metros" value="1" {% if classificacao and classificacao.BitPresencaConcorrente200Metros|default(0, true)|int == 1 %}checked{% endif %}> Concorrente em 200 m</label>
         </div>
 
         <hr style="border:0;border-top:1px solid #e2e8f0;margin:18px 0;">
 
         <div class="painel-grid">
-          <div class="painel-campo"><label for="Cota">Cota</label><input id="Cota" name="Cota" inputmode="decimal" value="{{ classificacao_detalhes.Cota if classificacao_detalhes.Cota is not none else '' }}"></div>
-          <div class="painel-campo"><label for="MinimoLiquidoMensal">Mínimo líquido mensal</label><input id="MinimoLiquidoMensal" name="MinimoLiquidoMensal" inputmode="decimal" value="{{ classificacao_detalhes.MinimoLiquidoMensal if classificacao_detalhes.MinimoLiquidoMensal is not none else '' }}"></div>
-          <div class="painel-campo"><label for="MinimoLiquidoDiario">Mínimo líquido diário</label><input id="MinimoLiquidoDiario" name="MinimoLiquidoDiario" inputmode="decimal" value="{{ classificacao_detalhes.MinimoLiquidoDiario if classificacao_detalhes.MinimoLiquidoDiario is not none else '' }}"></div>
-          <div class="painel-campo"><label for="RendaMediaDetalhes">Renda média (detalhes)</label><input id="RendaMediaDetalhes" name="RendaMediaDetalhes" inputmode="decimal" value="{{ classificacao_detalhes.RendaMedia if classificacao_detalhes.RendaMedia is not none else '' }}"></div>
-          <div class="painel-campo"><label for="Regiao">Região</label><input id="Regiao" name="Regiao" value="{{ classificacao_detalhes.Regiao or '' }}"></div>
-          <div class="painel-campo"><label for="DistanciaCentroKM">Distância do centro (km)</label><input id="DistanciaCentroKM" name="DistanciaCentroKM" inputmode="decimal" value="{{ classificacao_detalhes.DistanciaCentroKM if classificacao_detalhes.DistanciaCentroKM is not none else '' }}"></div>
-          <div class="painel-campo"><label for="Azimute">Azimute</label><input id="Azimute" name="Azimute" inputmode="decimal" value="{{ classificacao_detalhes.Azimute if classificacao_detalhes.Azimute is not none else '' }}"></div>
+          <div class="painel-campo"><label for="Cota">Cota</label><input id="Cota" name="Cota" inputmode="decimal" value="{{ classificacao_detalhes.Cota if classificacao_detalhes and classificacao_detalhes.Cota is not none else '' }}"></div>
+          <div class="painel-campo"><label for="MinimoLiquidoMensal">Mínimo líquido mensal</label><input id="MinimoLiquidoMensal" name="MinimoLiquidoMensal" inputmode="decimal" value="{{ classificacao_detalhes.MinimoLiquidoMensal if classificacao_detalhes and classificacao_detalhes.MinimoLiquidoMensal is not none else '' }}"></div>
+          <div class="painel-campo"><label for="MinimoLiquidoDiario">Mínimo líquido diário</label><input id="MinimoLiquidoDiario" name="MinimoLiquidoDiario" inputmode="decimal" value="{{ classificacao_detalhes.MinimoLiquidoDiario if classificacao_detalhes and classificacao_detalhes.MinimoLiquidoDiario is not none else '' }}"></div>
+          <div class="painel-campo"><label for="RendaMediaDetalhes">Renda média (detalhes)</label><input id="RendaMediaDetalhes" name="RendaMediaDetalhes" inputmode="decimal" value="{{ classificacao_detalhes.RendaMedia if classificacao_detalhes and classificacao_detalhes.RendaMedia is not none else '' }}"></div>
+          <div class="painel-campo"><label for="Regiao">Região</label><input id="Regiao" name="Regiao" value="{{ classificacao_detalhes.Regiao if classificacao_detalhes and classificacao_detalhes.Regiao is not none else '' }}"></div>
+          <div class="painel-campo"><label for="DistanciaCentroKM">Distância do centro (km)</label><input id="DistanciaCentroKM" name="DistanciaCentroKM" inputmode="decimal" value="{{ classificacao_detalhes.DistanciaCentroKM if classificacao_detalhes and classificacao_detalhes.DistanciaCentroKM is not none else '' }}"></div>
+          <div class="painel-campo"><label for="Azimute">Azimute</label><input id="Azimute" name="Azimute" inputmode="decimal" value="{{ classificacao_detalhes.Azimute if classificacao_detalhes and classificacao_detalhes.Azimute is not none else '' }}"></div>
         </div>
       </div>
     </section>
 
     <section class="painel-card" id="imagens">
-      <div class="painel-card-head"><div><h2>Imagens da face</h2><p>Os arquivos são renomeados automaticamente utilizando o CodFace.</p></div></div>
+      <div class="painel-card-head"><div><h2>Imagens da face</h2><p>As imagens já cadastradas em DimImagemPainel são carregadas automaticamente. Novos arquivos continuam sendo renomeados pelo CodFace.</p></div></div>
       <div class="painel-card-body">
         <div class="painel-imagens">
           <div class="painel-imagem-card">
             <h3>Imagem principal — {{ painel.CodFace }}.extensão</h3>
             <div class="painel-imagem-preview" id="previewPrincipal">
-              {% if imagem_principal and imagem_principal.UrlImagem %}
-                <img src="{{ imagem_principal.UrlImagem }}" alt="Imagem principal da face {{ painel.CodFace }}">
+              {% if imagem_principal and imagem_principal.UrlExibicao %}
+                <img
+                  src="{{ imagem_principal.UrlExibicao }}"
+                  alt="Imagem principal cadastrada da face {{ painel.CodFace }}"
+                  data-imagem-cadastrada="1"
+                  data-url-banco="{{ imagem_principal.UrlImagem or '' }}"
+                >
               {% else %}
                 <span>Nenhuma imagem principal cadastrada</span>
               {% endif %}
             </div>
-            <div class="painel-campo"><label for="imagem_principal">Selecionar imagem principal</label><input id="imagem_principal" name="imagem_principal" type="file" accept="image/jpeg,image/png,image/webp"></div>
+            {% if imagem_principal and imagem_principal.UrlExibicao %}
+              <div class="painel-imagem-acoes">
+                <a class="painel-imagem-link" href="{{ imagem_principal.UrlExibicao }}" target="_blank" rel="noopener">Abrir imagem cadastrada</a>
+                <span class="painel-imagem-meta">Registro #{{ imagem_principal.IDDimImagemPainel }}{% if imagem_principal.NomeArquivoExibicao %} · {{ imagem_principal.NomeArquivoExibicao }}{% endif %}</span>
+              </div>
+              {% if imagem_principal.UrlImagem %}
+                <div class="painel-imagem-meta" title="URL armazenada no banco">URL no banco: {{ imagem_principal.UrlImagem }}</div>
+              {% endif %}
+            {% endif %}
+            <div class="painel-campo" style="margin-top:10px;"><label for="imagem_principal">Selecionar nova imagem principal</label><input id="imagem_principal" name="imagem_principal" type="file" accept="image/jpeg,image/png,image/webp"></div>
             {% if imagem_principal %}
               <label class="painel-check" style="margin-top:10px;"><input type="checkbox" name="remover_imagem_principal" value="1"> Remover imagem principal atual</label>
             {% endif %}
@@ -494,19 +609,62 @@
           <div class="painel-imagem-card">
             <h3>Imagem do orçamento — {{ painel.CodFace }}_2.extensão</h3>
             <div class="painel-imagem-preview" id="previewOrcamento">
-              {% if imagem_orcamento and imagem_orcamento.UrlImagem %}
-                <img src="{{ imagem_orcamento.UrlImagem }}" alt="Imagem de orçamento da face {{ painel.CodFace }}">
+              {% if imagem_orcamento and imagem_orcamento.UrlExibicao %}
+                <img
+                  src="{{ imagem_orcamento.UrlExibicao }}"
+                  alt="Imagem de orçamento cadastrada da face {{ painel.CodFace }}"
+                  data-imagem-cadastrada="1"
+                  data-url-banco="{{ imagem_orcamento.UrlImagem or '' }}"
+                >
               {% else %}
                 <span>Nenhuma imagem de orçamento cadastrada</span>
               {% endif %}
             </div>
-            <div class="painel-campo"><label for="imagem_orcamento">Selecionar imagem do orçamento</label><input id="imagem_orcamento" name="imagem_orcamento" type="file" accept="image/jpeg,image/png,image/webp"></div>
+            {% if imagem_orcamento and imagem_orcamento.UrlExibicao %}
+              <div class="painel-imagem-acoes">
+                <a class="painel-imagem-link" href="{{ imagem_orcamento.UrlExibicao }}" target="_blank" rel="noopener">Abrir imagem cadastrada</a>
+                <span class="painel-imagem-meta">Registro #{{ imagem_orcamento.IDDimImagemPainel }}{% if imagem_orcamento.NomeArquivoExibicao %} · {{ imagem_orcamento.NomeArquivoExibicao }}{% endif %}</span>
+              </div>
+              {% if imagem_orcamento.UrlImagem %}
+                <div class="painel-imagem-meta" title="URL armazenada no banco">URL no banco: {{ imagem_orcamento.UrlImagem }}</div>
+              {% endif %}
+            {% endif %}
+            <div class="painel-campo" style="margin-top:10px;"><label for="imagem_orcamento">Selecionar nova imagem do orçamento</label><input id="imagem_orcamento" name="imagem_orcamento" type="file" accept="image/jpeg,image/png,image/webp"></div>
             {% if imagem_orcamento %}
               <label class="painel-check" style="margin-top:10px;"><input type="checkbox" name="remover_imagem_orcamento" value="1"> Remover imagem de orçamento atual</label>
             {% endif %}
             <div class="painel-ajuda">O sufixo <strong>_2</strong> é incluído automaticamente no arquivo de orçamento.</div>
           </div>
         </div>
+
+        {% if imagens_cadastradas %}
+          <div class="painel-galeria-existente">
+            <h3>Registros de imagem ativos desta face</h3>
+            <p>Esta relação vem diretamente de <strong>Silver.DimImagemPainel</strong>. Ela também permite conferir registros antigos ou duplicados que ainda estejam ativos.</p>
+            <div class="painel-galeria-grid">
+              {% for imagem in imagens_cadastradas %}
+                <article class="painel-galeria-item">
+                  {% if imagem.UrlExibicao %}
+                    <a href="{{ imagem.UrlExibicao }}" target="_blank" rel="noopener" title="Abrir imagem cadastrada">
+                      <img
+                        src="{{ imagem.UrlExibicao }}"
+                        alt="{{ imagem.TipoImagemDescricao }} da face {{ painel.CodFace }}"
+                        loading="lazy"
+                        data-imagem-cadastrada="1"
+                        data-url-banco="{{ imagem.UrlImagem or '' }}"
+                      >
+                    </a>
+                  {% else %}
+                    <div class="painel-imagem-erro"><strong>Registro sem URL</strong></div>
+                  {% endif %}
+                  <strong>{{ imagem.TipoImagemDescricao }}</strong>
+                  <small>ID {{ imagem.IDDimImagemPainel }} · Número {{ imagem.NumeroImagem if imagem.NumeroImagem is not none else '—' }}</small>
+                  <small>{{ imagem.NomeArquivoExibicao or imagem.UrlImagem or 'Arquivo não informado' }}</small>
+                </article>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
       </div>
     </section>
 
@@ -590,7 +748,7 @@
                     <input type="hidden" name="preco_id[]" value="{{ preco.IDFatoPrecoFacePainel }}">
                     <input name="preco_periodo[]" maxlength="10" required value="{{ preco.Periodo or '' }}" placeholder="1 Mês">
                   </td>
-                  <td class="painel-campo-exibicoes"><select name="preco_exibicoes[]"><option value="">Não se aplica</option><option value="540" {% if preco.ExibicoesDia|int == 540 %}selected{% endif %}>540</option><option value="1080" {% if preco.ExibicoesDia|int == 1080 %}selected{% endif %}>1080</option></select></td>
+                  <td class="painel-campo-exibicoes"><select name="preco_exibicoes[]"><option value="">Não se aplica</option><option value="540" {% if preco.ExibicoesDia|default(0, true)|int == 540 %}selected{% endif %}>540</option><option value="1080" {% if preco.ExibicoesDia|default(0, true)|int == 1080 %}selected{% endif %}>1080</option></select></td>
                   <td><input name="preco_valor[]" inputmode="decimal" required value="{{ preco.Valor if preco.Valor is not none else '' }}" placeholder="0,00"></td>
                   <td><input name="preco_politica[]" maxlength="100" value="{{ preco.PoliticaTrocas or '' }}" placeholder="PADRÃO"></td>
                   <td><input name="preco_valor_troca[]" inputmode="decimal" value="{{ preco.ValorTroca if preco.ValorTroca is not none else '0.00' }}" placeholder="0,00"></td>
@@ -754,6 +912,19 @@
 
   configurarPreview('imagem_principal', 'previewPrincipal');
   configurarPreview('imagem_orcamento', 'previewOrcamento');
+
+  document.querySelectorAll('img[data-imagem-cadastrada="1"]').forEach(function(img){
+    img.addEventListener('error', function(){
+      const urlBanco = img.dataset.urlBanco || 'URL não informada';
+      const container = img.closest('.painel-imagem-preview, .painel-galeria-item a');
+      if (!container) return;
+      const mensagem = document.createElement('div');
+      mensagem.className = 'painel-imagem-erro';
+      mensagem.innerHTML = '<strong>Não foi possível carregar o arquivo físico.</strong><small></small>';
+      mensagem.querySelector('small').textContent = 'URL cadastrada: ' + urlBanco;
+      container.replaceChildren(mensagem);
+    }, { once:true });
+  });
 
   document.getElementById('formCadastroPainel').addEventListener('submit', function(){
     recalcularCusto();
