@@ -18732,6 +18732,22 @@ def _montar_orcamento_card_payload(id_card: int) -> dict[str, Any]:
         valor_negociado = _valor_decimal(item.get("NovoValor"))
         percentual_desconto = _valor_decimal(item.get("PercentualDesconto"))
         exibicoes_dia = _decimal_para_float(item.get("ExibicoesDia"))
+        data_inicio_campanha = (
+            _normalizar_data_reserva_kanban(item.get("DataInicio"))
+            or _normalizar_data_reserva_kanban(item.get("DataInicioReserva"))
+        )
+        data_fim_campanha = (
+            _normalizar_data_reserva_kanban(item.get("DataFim"))
+            or _normalizar_data_reserva_kanban(item.get("DataFimReserva"))
+        )
+
+        quantidade_dias_campanha: int | None = None
+        if (
+            data_inicio_campanha is not None
+            and data_fim_campanha is not None
+            and data_fim_campanha >= data_inicio_campanha
+        ):
+            quantidade_dias_campanha = (data_fim_campanha - data_inicio_campanha).days + 1
 
         valor_exibido = valor_final if valor_final is not None else preco_venda_atual
         origem_preco = "Valor final" if valor_final is not None else "Preço de venda atual"
@@ -18741,6 +18757,36 @@ def _montar_orcamento_card_payload(id_card: int) -> dict[str, Any]:
 
         valor_total_item = preco_venda_atual if preco_venda_atual is not None else valor_exibido
         valor_negociado_exibicao = valor_negociado if valor_negociado is not None else valor_final
+        percentual_desconto_exibicao = percentual_desconto
+        valor_periodo_negociado = valor_negociado_exibicao
+
+        if (
+            valor_periodo_negociado is None
+            and valor_total_item is not None
+            and percentual_desconto_exibicao is not None
+            and Decimal("0") <= percentual_desconto_exibicao <= Decimal("100")
+        ):
+            valor_periodo_negociado = valor_total_item * (
+                Decimal("1")
+                - (percentual_desconto_exibicao / Decimal("100"))
+            )
+
+        if valor_periodo_negociado is None:
+            valor_periodo_negociado = valor_total_item
+
+        if (
+            percentual_desconto_exibicao is None
+            and valor_total_item is not None
+            and valor_total_item > 0
+            and valor_periodo_negociado is not None
+        ):
+            desconto_calculado = (
+                (valor_total_item - valor_periodo_negociado)
+                / valor_total_item
+            ) * Decimal("100")
+
+            if Decimal("0") <= desconto_calculado <= Decimal("100"):
+                percentual_desconto_exibicao = desconto_calculado
 
         imagens = _obter_imagens_painel_orcamento(
             id_face_painel=item.get("IDDimFacesPaineis"),
@@ -18778,15 +18824,31 @@ def _montar_orcamento_card_payload(id_card: int) -> dict[str, Any]:
                 "municipio": _normalizar_texto(item.get("Cidade")),
                 "uf": _normalizar_texto(item.get("UF")),
                 "periodo_exibicao": _normalizar_texto(item.get("PeriodoExibicao")),
+                "data_inicio": (
+                    data_inicio_campanha.isoformat()
+                    if data_inicio_campanha is not None
+                    else None
+                ),
+                "data_fim": (
+                    data_fim_campanha.isoformat()
+                    if data_fim_campanha is not None
+                    else None
+                ),
+                "quantidade_dias_campanha": quantidade_dias_campanha,
                 "exibicoes_dia": exibicoes_dia,
                 "tabela": _normalizar_texto(item.get("Tabela")),
                 "politica_trocas": _normalizar_texto(item.get("PoliticaTrocas")),
                 "valor_troca": _decimal_para_float(item.get("ValorTroca")),
                 "preco_venda_atual": _decimal_para_float(preco_venda_atual),
                 "valor_total": _decimal_para_float(valor_total_item),
+                "valor_periodo_cheio": _decimal_para_float(valor_total_item),
                 "novo_valor": _decimal_para_float(valor_negociado),
                 "valor_negociado": _decimal_para_float(valor_negociado_exibicao),
+                "valor_periodo_negociado": _decimal_para_float(valor_periodo_negociado),
                 "percentual_desconto": _decimal_para_float(percentual_desconto),
+                "percentual_desconto_exibicao": _decimal_para_float(
+                    percentual_desconto_exibicao
+                ),
                 "valor_final": _decimal_para_float(valor_final),
                 "valor_exibido": _decimal_para_float(valor_exibido),
                 "origem_preco": origem_preco,
@@ -21158,7 +21220,7 @@ def api_card_orcamento(id_card: int):
         usar_cache = not _request_pede_dado_fresco()
 
         chave = _chave_cache_json(
-            "kanban:api:card:orcamento",
+            "kanban:api:card:orcamento:v2",
             id_emp,
             id_kanban,
             id_card,

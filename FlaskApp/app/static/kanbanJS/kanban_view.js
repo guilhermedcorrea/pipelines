@@ -5359,6 +5359,53 @@ function normalizarCardServidor(card){
     return `background:${corBase}; color:${corTexto}; border-color:${corBorda};`;
   }
 
+  const ICONES_IMAGEM_TAG_KANBAN = Object.freeze({
+    8: "/static/imagens/IconesKanban/aditivo%20contrato.png",
+    9: "/static/imagens/IconesKanban/novocontrato.png",
+    15: "/static/imagens/IconesKanban/cotacao.jpg",
+    17: "/static/imagens/IconesKanban/renovacao.png"
+  });
+
+  function obterIdTagKanban(tag){
+    return idNum(
+      tag?.IDDimKanbanTag ??
+      tag?.idDimKanbanTag ??
+      tag?.id_dim_kanban_tag ??
+      tag?.id_tag ??
+      tag?.id ??
+      0
+    );
+  }
+
+  function criarIconeImagemTagKanban(tag){
+    const idTag = obterIdTagKanban(tag);
+    const urlIcone = ICONES_IMAGEM_TAG_KANBAN[idTag] || "";
+
+    if (!urlIcone) return null;
+
+    return el("img", {
+      class: "kb-tag-imagem",
+      src: urlIcone,
+      alt: "",
+      "aria-hidden": "true",
+      loading: "lazy",
+      decoding: "async",
+      draggable: "false"
+    }, []);
+  }
+
+  function criarConteudoTagKanban(tag, nomeTag){
+    const conteudo = [];
+    const iconeImagem = criarIconeImagemTagKanban(tag);
+
+    if (iconeImagem) {
+      conteudo.push(iconeImagem);
+    }
+
+    conteudo.push(el("span", { class:"kb-tag-text" }, [safeStr(nomeTag || "")]));
+    return conteudo;
+  }
+
   function obterTextoFaceCard(card){
     const nomeFace =
       safeStr(card?.NomeFace || card?.Face || card?.DescricaoFace || card?.LabelFace || "");
@@ -15459,9 +15506,7 @@ async function preencherCardsInicial(idFase, quantidadeDesejada = TAM_LOTE_POR_F
         class:"kb-tag",
         title: t.NomeTag || "",
         style: estiloTag(t.CorHex)
-      }, [
-        el("span", {class:"kb-tag-text"}, [t.NomeTag || ""])
-      ]))
+      }, criarConteudoTagKanban(t, t.NomeTag || "")))
     );
 
     const meta = el("div", {class:"kb-card-meta"}, []);
@@ -18282,9 +18327,7 @@ async function moverCard(idCard, idFasePara, posicao) {
         title: nomeTag,
         style: estiloTag(corHex)
       },
-      [
-        el("span", { class: "kb-tag-text" }, [nomeTag])
-      ]
+      criarConteudoTagKanban(tagAtual, nomeTag)
     );
 
     const btnRemover = el(

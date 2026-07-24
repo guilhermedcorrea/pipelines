@@ -1422,8 +1422,8 @@
   }
 
   .kb-card-del{
-    width: 26px;
-    height: 26px;
+    width: 28px;
+    height: 28px;
     border-radius: 999px;
     display:inline-flex;
     align-items:center;
@@ -1437,6 +1437,22 @@
     box-shadow: 0 2px 8px rgba(15,23,42,.06);
     transition: transform .06s ease, box-shadow .12s ease, border-color .12s ease;
     user-select:none;
+    font-size:0;
+    line-height:0;
+    color:transparent;
+  }
+
+  .kb-card-del::before{
+    content:"";
+    display:block;
+    width:17px;
+    height:17px;
+    flex:0 0 17px;
+    background-image:url("{{ url_for('static', filename='imagens/IconesKanban/RemoverCard.png') }}");
+    background-repeat:no-repeat;
+    background-position:center;
+    background-size:contain;
+    pointer-events:none;
   }
 
   .kb-card-del:hover{
@@ -1471,11 +1487,77 @@
     flex: 0 0 auto;
   }
 
+  /*
+     O mesmo ícone usado no cabeçalho da coluna acompanha o nome da fase
+     dentro do card. O ponto colorido permanece como fallback para fases
+     que ainda não possuam um ícone configurado.
+  */
+  .kb-phase-pill[data-kb-fase-icone]::before{
+    content:"";
+    display:block;
+    width:17px;
+    height:17px;
+    flex:0 0 17px;
+    border-radius:5px;
+    background-repeat:no-repeat;
+    background-position:center;
+    background-size:contain;
+    filter:drop-shadow(0 1px 2px rgba(15,23,42,.14));
+    pointer-events:none;
+  }
+
+  .kb-phase-pill[data-kb-fase-icone] .kb-phase-dot{
+    display:none;
+  }
+
+  .kb-phase-pill[data-kb-fase-icone="a-fazer"]::before{
+    background-image:url("{{ url_for('static', filename='imagens/IconesFasesKanban/AFazer.png') }}");
+  }
+
+  .kb-phase-pill[data-kb-fase-icone="proposta-enviada"]::before{
+    background-image:url("{{ url_for('static', filename='imagens/IconesFasesKanban/PropostaEnviada.png') }}");
+  }
+
+  .kb-phase-pill[data-kb-fase-icone="refazer"]::before{
+    background-image:url("{{ url_for('static', filename='imagens/IconesFasesKanban/Refazer.png') }}");
+  }
+
+  .kb-phase-pill[data-kb-fase-icone="aprovado-cliente"]::before{
+    background-image:url("{{ url_for('static', filename='imagens/IconesFasesKanban/AprovadoCliente.png') }}");
+  }
+
+  .kb-phase-pill[data-kb-fase-icone="aguardando-liberacao"]::before{
+    background-image:url("{{ url_for('static', filename='imagens/IconesFasesKanban/AguardandoLiberacao.png') }}");
+  }
+
+  .kb-phase-pill[data-kb-fase-icone="documentos-enviados"]::before{
+    background-image:url("{{ url_for('static', filename='imagens/IconesFasesKanban/DocumentosEnviados.png') }}");
+  }
+
   .kb-card-title{
+    position:relative;
+    min-height:21px;
+    padding-left:27px;
     font-weight: 950;
-    font-size: 13px;
+    font-size: 15px;
     color: var(--kb-text);
-    line-height: 1.25;
+    line-height: 1.3;
+    overflow-wrap:anywhere;
+  }
+
+  .kb-card-title::before{
+    content:"";
+    position:absolute;
+    top:0;
+    left:0;
+    width:20px;
+    height:20px;
+    background-image:url("{{ url_for('static', filename='imagens/IconesKanban/NomeCard.png') }}");
+    background-repeat:no-repeat;
+    background-position:center;
+    background-size:contain;
+    filter:drop-shadow(0 1px 2px rgba(15,23,42,.12));
+    pointer-events:none;
   }
 
   .kb-card-meta{
@@ -1570,6 +1652,43 @@
     -webkit-box-orient: vertical;
   }
 
+  /*
+     Identificação visual da empresa. A razão social fica em uma linha
+     própria para ganhar largura útil e continuar legível em cards estreitos.
+  */
+  .kb-empresa-k[data-kb-icone-empresa="1"]{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+  }
+
+  .kb-empresa-k[data-kb-icone-empresa="1"]::before{
+    content:"";
+    display:block;
+    width:15px;
+    height:15px;
+    flex:0 0 15px;
+    background-image:url("{{ url_for('static', filename='imagens/IconesKanban/EmpresaIcone.png') }}");
+    background-repeat:no-repeat;
+    background-position:center;
+    background-size:contain;
+    pointer-events:none;
+  }
+
+  .kb-empresa-item[data-kb-empresa-principal="1"]{
+    flex-direction:column;
+    align-items:flex-start;
+    gap:4px !important;
+    width:100%;
+  }
+
+  .kb-empresa-item[data-kb-empresa-principal="1"] .kb-empresa-v{
+    width:100%;
+    padding-left:20px;
+    font-size:12.5px;
+    line-height:1.3;
+  }
+
   .kb-tags{
     display:flex;
     flex-direction:column;
@@ -1598,6 +1717,21 @@
     box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 1px 2px rgba(15,23,42,.08);
     line-height: 1;
     max-width: 100%;
+  }
+
+  .kb-tag-imagem{
+    display:block;
+    width:16px;
+    height:16px;
+    flex:0 0 16px;
+    box-sizing:border-box;
+    object-fit:contain;
+    border-radius:3px;
+    padding:1px;
+    background:rgba(255,255,255,.94);
+    box-shadow:0 1px 2px rgba(15,23,42,.18);
+    user-select:none;
+    pointer-events:none;
   }
 
   .kb-tag-text{
@@ -3175,8 +3309,9 @@
 
   /*
    * Quando a face possui uma arte pronta de orçamento
-   * (DimImagemPainel.BitImagemOrcamento = 1), o item deve exibir somente
-   * essa arte, sem repetir abaixo as informações que já estão na imagem.
+   * (DimImagemPainel.BitImagemOrcamento = 1), a arte permanece como elemento
+   * principal e recebe abaixo uma faixa institucional com os dados comerciais
+   * específicos da face cotada.
    */
   .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva{
     padding:0;
@@ -3212,6 +3347,129 @@
   .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria-indicador,
   .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria-nav{
     display:none !important;
+  }
+
+  .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva.kb-orcamento-item--com-faixa .kb-orcamento-imagem-wrap{
+    border-radius:18px 18px 0 0;
+  }
+
+  .kb-orcamento-faixa-institucional{
+    --kb-orcamento-faixa-bg:#6B6BF2;
+    --kb-orcamento-faixa-label:#FFD000;
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) minmax(220px, 320px);
+    align-items:center;
+    gap:20px;
+    width:100%;
+    min-height:112px;
+    padding:18px 28px;
+    border-top:1px solid rgba(255,255,255,.28);
+    border-radius:0 0 18px 18px;
+    background:var(--kb-orcamento-faixa-bg);
+    color:#fff;
+    font-family:Arial, Helvetica, sans-serif;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.12);
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+
+  .kb-orcamento-faixa-institucional.sem-logo{
+    grid-template-columns:minmax(0, 1fr);
+  }
+
+  .kb-orcamento-faixa-texto{
+    min-width:0;
+    display:grid;
+    gap:5px;
+    font-size:clamp(13px, 1.2vw, 17px);
+    line-height:1.3;
+  }
+
+  .kb-orcamento-faixa-linha{
+    min-width:0;
+    display:flex;
+    align-items:baseline;
+    flex-wrap:wrap;
+    column-gap:6px;
+    row-gap:3px;
+  }
+
+  .kb-orcamento-faixa-campo{
+    min-width:0;
+    display:inline-flex;
+    align-items:baseline;
+    gap:4px;
+    white-space:nowrap;
+  }
+
+  .kb-orcamento-faixa-campo + .kb-orcamento-faixa-campo::before{
+    content:"|";
+    margin-right:2px;
+    color:var(--kb-orcamento-faixa-label);
+    font-weight:900;
+  }
+
+  .kb-orcamento-faixa-label{
+    color:var(--kb-orcamento-faixa-label);
+    font-weight:800;
+  }
+
+  .kb-orcamento-faixa-valor{
+    color:#fff;
+    font-weight:500;
+  }
+
+  .kb-orcamento-faixa-campo.destaque .kb-orcamento-faixa-label,
+  .kb-orcamento-faixa-campo.destaque .kb-orcamento-faixa-valor{
+    font-weight:950;
+  }
+
+  .kb-orcamento-faixa-marca{
+    min-width:0;
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+  }
+
+  .kb-orcamento-faixa-logo{
+    display:block;
+    width:100%;
+    max-width:320px;
+    height:auto;
+    max-height:78px;
+    object-fit:contain;
+    object-position:right center;
+  }
+
+  @media (max-width:760px){
+    .kb-orcamento-faixa-institucional{
+      grid-template-columns:minmax(0, 1fr);
+      gap:14px;
+      padding:18px 20px;
+    }
+
+    .kb-orcamento-faixa-marca{
+      justify-content:flex-end;
+    }
+
+    .kb-orcamento-faixa-logo{
+      max-width:240px;
+      max-height:64px;
+    }
+  }
+
+  @media (max-width:520px){
+    .kb-orcamento-faixa-institucional{
+      padding:16px;
+    }
+
+    .kb-orcamento-faixa-texto{
+      font-size:12px;
+    }
+
+    .kb-orcamento-faixa-campo{
+      white-space:normal;
+    }
   }
 
 
@@ -3269,6 +3527,64 @@
     font-size:14px;
     font-weight:800;
     color:rgba(15,23,42,.72);
+  }
+
+  /*
+   * Complemento institucional exibido no encerramento do orçamento.
+   * As imagens preservam a proporção original e ocupam exatamente a mesma
+   * largura útil dos demais blocos, sem cortes ou deformações.
+   */
+  .kb-orcamento-complemento-final{
+    display:grid;
+    grid-template-columns:minmax(0, 1fr);
+    gap:16px;
+    width:100%;
+    min-width:0;
+    margin:0;
+  }
+
+  .kb-orcamento-complemento-bloco{
+    width:100%;
+    min-width:0;
+    margin:0;
+    padding:0;
+    overflow:hidden;
+    border:1px solid var(--kb-line);
+    border-radius:18px;
+    background:#fff;
+    box-shadow:0 6px 18px rgba(15,23,42,.05);
+    break-inside:avoid;
+    page-break-inside:avoid;
+  }
+
+  .kb-orcamento-complemento-imagem{
+    display:block;
+    width:100%;
+    max-width:100%;
+    height:auto;
+    margin:0 auto;
+    object-fit:contain;
+    object-position:center center;
+    background:#fff;
+  }
+
+  @media print{
+    .kb-orcamento-complemento-final{
+      gap:0 !important;
+      margin:0 !important;
+    }
+
+    .kb-orcamento-complemento-bloco{
+      border:0 !important;
+      border-radius:0 !important;
+      box-shadow:none !important;
+    }
+
+    .kb-orcamento-complemento-imagem{
+      width:100% !important;
+      max-width:100% !important;
+      height:auto !important;
+    }
   }
 
   @media (max-width: 1100px){
@@ -4431,6 +4747,9 @@
     "idVendedorLogado": id_vendedor_logado_kanban,
     "urlPainelPublicidade": url_for('static', filename='imagens/painel-publicitario.png'),
     "urlCabecalhoOrcamentoPadrao": url_for('static', filename='OrcamentoPaineisEuromidia/cabecalho_orcamento.JPG'),
+    "urlLogoEuromidia": url_for('static', filename='imagens/logoeuro.png'),
+    "urlObservacoesOrcamento": url_for('static', filename='imagens/OrcamentoEuromidia/Observacoes.png'),
+    "urlRodapeOrcamento": url_for('static', filename='imagens/OrcamentoEuromidia/RodapeOrcamentoEuromidia.jpeg'),
     "urlApiCardDetalheTemplate": url_for('kanban.api_card_detalhe', id_card=0).replace('/0', '/__ID_CARD__'),
     "urlApiCardOrcamentoTemplate": url_for('kanban.api_card_orcamento', id_card=0).replace('/0/', '/__ID_CARD__/')
   } | tojson }}
@@ -4443,6 +4762,29 @@
   const fetchOriginal = window.fetch.bind(window);
   let ultimoPayloadOrcamento = null;
   let aplicacaoAgendada = false;
+  const configuracaoKanban = (() => {
+    const elemento = document.getElementById("kanban-view-config");
+    if (!elemento) return {};
+
+    try {
+      return JSON.parse(elemento.textContent || "{}");
+    } catch (_) {
+      return {};
+    }
+  })();
+  const urlLogoEuromidia = String(configuracaoKanban.urlLogoEuromidia || "").trim();
+  const urlObservacoesOrcamento = String(configuracaoKanban.urlObservacoesOrcamento || "").trim();
+  const urlRodapeOrcamento = String(configuracaoKanban.urlRodapeOrcamento || "").trim();
+  const formatadorMoeda = new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  const formatadorPercentual = new Intl.NumberFormat("pt-BR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  });
 
   function obterUrlFetch(recurso) {
     if (typeof recurso === "string") return recurso;
@@ -4464,6 +4806,206 @@
       && Number(imagem.bit_imagem_orcamento || 0) === 1
       && imagem.url
     )) || null;
+  }
+
+  function numeroFinito(valor) {
+    if (typeof valor === "number") {
+      return Number.isFinite(valor) ? valor : null;
+    }
+
+    if (typeof valor !== "string") return null;
+
+    let texto = valor.trim().replace(/\s+/g, "");
+    if (!texto) return null;
+
+    if (texto.includes(",")) {
+      texto = texto.replace(/\./g, "").replace(",", ".");
+    }
+
+    const numero = Number(texto);
+    return Number.isFinite(numero) ? numero : null;
+  }
+
+  function primeiroNumero(...valores) {
+    for (const valor of valores) {
+      const numero = numeroFinito(valor);
+      if (numero !== null) return numero;
+    }
+    return null;
+  }
+
+  function formatarMoeda(valor) {
+    const numero = numeroFinito(valor);
+    if (numero === null) return "—";
+    return formatadorMoeda.format(numero).replace(/\u00a0/g, " ");
+  }
+
+  function formatarPercentual(valor) {
+    const numero = numeroFinito(valor);
+    if (numero === null) return "—";
+    return `${formatadorPercentual.format(numero)}%`;
+  }
+
+  function criarCampoFaixa(rotulo, valor, destaque = false) {
+    const campo = document.createElement("span");
+    campo.className = `kb-orcamento-faixa-campo${destaque ? " destaque" : ""}`;
+
+    const label = document.createElement("span");
+    label.className = "kb-orcamento-faixa-label";
+    label.textContent = `${rotulo}:`;
+
+    const conteudo = document.createElement("span");
+    conteudo.className = "kb-orcamento-faixa-valor";
+    conteudo.textContent = String(valor ?? "—");
+
+    campo.append(label, conteudo);
+    return campo;
+  }
+
+  function criarLinhaFaixa(campos) {
+    const linha = document.createElement("div");
+    linha.className = "kb-orcamento-faixa-linha";
+    campos.forEach((campo) => linha.appendChild(campo));
+    return linha;
+  }
+
+  function obterPeriodoCampanha(item) {
+    const quantidadeDias = primeiroNumero(item?.quantidade_dias_campanha);
+    if (quantidadeDias !== null && quantidadeDias > 0) {
+      const diasInteiros = Math.max(1, Math.trunc(quantidadeDias));
+      return `${diasInteiros} ${diasInteiros === 1 ? "dia" : "dias"}`;
+    }
+
+    return String(item?.periodo_exibicao || "").trim() || "Não informado";
+  }
+
+  function aplicarFaixaInstitucional(itemDom, item, indice) {
+    const ordemPayload = primeiroNumero(item?.indice);
+    const ordemItem = Math.max(
+      1,
+      Math.trunc(ordemPayload !== null && ordemPayload > 0 ? ordemPayload : indice + 1)
+    );
+    const numeroItem = String(ordemItem).padStart(2, "0");
+    const codFace = String(item?.cod_face || item?.nome_painel || "—").trim() || "—";
+    const periodoCampanha = obterPeriodoCampanha(item);
+
+    const valorCheio = primeiroNumero(
+      item?.valor_periodo_cheio,
+      item?.valor_total,
+      item?.preco_venda_atual,
+      item?.valor_exibido
+    );
+    let valorNegociado = primeiroNumero(
+      item?.valor_periodo_negociado,
+      item?.valor_negociado,
+      item?.novo_valor,
+      item?.valor_final
+    );
+
+    let percentualDesconto = primeiroNumero(
+      item?.percentual_desconto_exibicao,
+      item?.percentual_desconto
+    );
+
+    if (
+      valorNegociado === null
+      && valorCheio !== null
+      && percentualDesconto !== null
+      && percentualDesconto >= 0
+      && percentualDesconto <= 100
+    ) {
+      valorNegociado = valorCheio * (1 - (percentualDesconto / 100));
+    }
+
+    if (valorNegociado === null) {
+      valorNegociado = valorCheio;
+    }
+
+    if (
+      percentualDesconto === null
+      && valorCheio !== null
+      && valorCheio > 0
+      && valorNegociado !== null
+    ) {
+      const descontoCalculado = ((valorCheio - valorNegociado) / valorCheio) * 100;
+      if (descontoCalculado >= 0 && descontoCalculado <= 100) {
+        percentualDesconto = descontoCalculado;
+      }
+    }
+
+    const valorCheioTexto = formatarMoeda(valorCheio);
+    const descontoTexto = formatarPercentual(percentualDesconto);
+    const valorNegociadoTexto = formatarMoeda(valorNegociado);
+    const assinatura = JSON.stringify([
+      numeroItem,
+      codFace,
+      periodoCampanha,
+      valorCheioTexto,
+      descontoTexto,
+      valorNegociadoTexto,
+      urlLogoEuromidia
+    ]);
+
+    const faixaExistente = itemDom.querySelector(".kb-orcamento-faixa-institucional");
+    if (faixaExistente?.dataset.assinatura === assinatura) {
+      itemDom.classList.add("kb-orcamento-item--com-faixa");
+      return;
+    }
+
+    const faixa = document.createElement("section");
+    faixa.className = "kb-orcamento-faixa-institucional";
+    faixa.dataset.assinatura = assinatura;
+    faixa.setAttribute(
+      "aria-label",
+      `Resumo comercial do item ${numeroItem}, painel ${codFace}`
+    );
+
+    const texto = document.createElement("div");
+    texto.className = "kb-orcamento-faixa-texto";
+    texto.append(
+      criarLinhaFaixa([
+        criarCampoFaixa("Item", numeroItem),
+        criarCampoFaixa("Painel", codFace)
+      ]),
+      criarLinhaFaixa([
+        criarCampoFaixa("Período de Campanha", periodoCampanha)
+      ]),
+      criarLinhaFaixa([
+        criarCampoFaixa("Valor Período", valorCheioTexto),
+        criarCampoFaixa("Desconto", descontoTexto),
+        criarCampoFaixa("Valor Período Negociado", valorNegociadoTexto, true)
+      ])
+    );
+    faixa.appendChild(texto);
+
+    if (urlLogoEuromidia) {
+      const marca = document.createElement("div");
+      marca.className = "kb-orcamento-faixa-marca";
+
+      const logo = document.createElement("img");
+      logo.className = "kb-orcamento-faixa-logo";
+      logo.src = urlLogoEuromidia;
+      logo.alt = "Euromídia";
+      logo.loading = "eager";
+      logo.decoding = "async";
+      logo.addEventListener("error", () => {
+        marca.remove();
+        faixa.classList.add("sem-logo");
+      });
+
+      marca.appendChild(logo);
+      faixa.appendChild(marca);
+    } else {
+      faixa.classList.add("sem-logo");
+    }
+
+    itemDom.classList.add("kb-orcamento-item--com-faixa");
+
+    if (faixaExistente) {
+      faixaExistente.replaceWith(faixa);
+    } else {
+      itemDom.appendChild(faixa);
+    }
   }
 
   function aplicarImagensExclusivasOrcamento() {
@@ -4508,6 +5050,9 @@
           background:transparent !important;
           overflow:hidden !important;
         }
+        .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva.kb-orcamento-item--com-faixa .kb-orcamento-imagem-wrap{
+          border-radius:18px 18px 0 0 !important;
+        }
         .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-imagem{
           display:block !important;
           width:100% !important;
@@ -4520,6 +5065,105 @@
         .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria-indicador,
         .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria-nav{
           display:none !important;
+        }
+        .kb-orcamento-faixa-institucional{
+          --kb-orcamento-faixa-bg:#6B6BF2;
+          --kb-orcamento-faixa-label:#FFD000;
+          display:grid !important;
+          grid-template-columns:minmax(0, 1fr) minmax(220px, 320px) !important;
+          align-items:center !important;
+          gap:20px !important;
+          width:100% !important;
+          min-height:112px !important;
+          padding:18px 28px !important;
+          border-top:1px solid rgba(255,255,255,.28) !important;
+          border-radius:0 0 18px 18px !important;
+          background:#6B6BF2 !important;
+          color:#fff !important;
+          font-family:Arial, Helvetica, sans-serif !important;
+          box-shadow:inset 0 1px 0 rgba(255,255,255,.12) !important;
+          -webkit-print-color-adjust:exact !important;
+          print-color-adjust:exact !important;
+        }
+        .kb-orcamento-faixa-institucional.sem-logo{
+          grid-template-columns:minmax(0, 1fr) !important;
+        }
+        .kb-orcamento-faixa-texto{
+          min-width:0 !important;
+          display:grid !important;
+          gap:5px !important;
+          font-size:clamp(13px, 1.2vw, 17px) !important;
+          line-height:1.3 !important;
+        }
+        .kb-orcamento-faixa-linha{
+          min-width:0 !important;
+          display:flex !important;
+          align-items:baseline !important;
+          flex-wrap:wrap !important;
+          column-gap:6px !important;
+          row-gap:3px !important;
+        }
+        .kb-orcamento-faixa-campo{
+          min-width:0 !important;
+          display:inline-flex !important;
+          align-items:baseline !important;
+          gap:4px !important;
+          white-space:nowrap !important;
+        }
+        .kb-orcamento-faixa-campo + .kb-orcamento-faixa-campo::before{
+          content:"|" !important;
+          margin-right:2px !important;
+          color:#FFD000 !important;
+          font-weight:900 !important;
+        }
+        .kb-orcamento-faixa-label{
+          color:#FFD000 !important;
+          font-weight:800 !important;
+        }
+        .kb-orcamento-faixa-valor{
+          color:#fff !important;
+          font-weight:500 !important;
+        }
+        .kb-orcamento-faixa-campo.destaque .kb-orcamento-faixa-label,
+        .kb-orcamento-faixa-campo.destaque .kb-orcamento-faixa-valor{
+          font-weight:950 !important;
+        }
+        .kb-orcamento-faixa-marca{
+          min-width:0 !important;
+          display:flex !important;
+          align-items:center !important;
+          justify-content:flex-end !important;
+        }
+        .kb-orcamento-faixa-logo{
+          display:block !important;
+          width:100% !important;
+          max-width:320px !important;
+          height:auto !important;
+          max-height:78px !important;
+          object-fit:contain !important;
+          object-position:right center !important;
+        }
+        @media (max-width:760px){
+          .kb-orcamento-faixa-institucional{
+            grid-template-columns:minmax(0, 1fr) !important;
+            gap:14px !important;
+            padding:18px 20px !important;
+          }
+          .kb-orcamento-faixa-logo{
+            max-width:240px !important;
+            max-height:64px !important;
+          }
+        }
+        @media (max-width:520px){
+          .kb-orcamento-faixa-institucional{
+            padding:16px !important;
+          }
+          .kb-orcamento-faixa-texto{
+            font-size:12px !important;
+          }
+          .kb-orcamento-faixa-campo{
+            white-space:normal !important;
+          }
         }
       `;
       conteudo.prepend(estiloImpressao);
@@ -4546,18 +5190,161 @@
       itemDom.querySelector(".kb-orcamento-item-info")?.remove();
       itemDom.querySelector(".kb-orcamento-galeria-indicador")?.remove();
       itemDom.querySelector(".kb-orcamento-galeria-nav")?.remove();
+      aplicarFaixaInstitucional(itemDom, item, indice);
     });
+  }
+
+  function garantirEstiloComplementoFinal(conteudo) {
+    if (!conteudo || conteudo.querySelector("#kb-orcamento-complemento-estilo-inline")) return;
+
+    const estilo = document.createElement("style");
+    estilo.id = "kb-orcamento-complemento-estilo-inline";
+    estilo.textContent = `
+      .kb-orcamento-complemento-final{
+        display:grid !important;
+        grid-template-columns:minmax(0, 1fr) !important;
+        gap:16px !important;
+        width:100% !important;
+        min-width:0 !important;
+        margin:0 !important;
+      }
+      .kb-orcamento-complemento-bloco{
+        display:block !important;
+        width:100% !important;
+        min-width:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        overflow:hidden !important;
+        border:1px solid rgba(15,23,42,.10) !important;
+        border-radius:18px !important;
+        background:#fff !important;
+        box-shadow:0 6px 18px rgba(15,23,42,.05) !important;
+        break-inside:avoid !important;
+        page-break-inside:avoid !important;
+      }
+      .kb-orcamento-complemento-imagem{
+        display:block !important;
+        width:100% !important;
+        max-width:100% !important;
+        height:auto !important;
+        margin:0 auto !important;
+        object-fit:contain !important;
+        object-position:center center !important;
+        background:#fff !important;
+      }
+      @media print{
+        .kb-orcamento-complemento-final{
+          gap:0 !important;
+          margin:0 !important;
+        }
+        .kb-orcamento-complemento-bloco{
+          border:0 !important;
+          border-radius:0 !important;
+          box-shadow:none !important;
+        }
+        .kb-orcamento-complemento-imagem{
+          width:100% !important;
+          max-width:100% !important;
+          height:auto !important;
+        }
+      }
+    `;
+    conteudo.prepend(estilo);
+  }
+
+  function criarBlocoImagemComplemento(urlImagem, textoAlternativo, classeAdicional) {
+    if (!urlImagem) return null;
+
+    const bloco = document.createElement("figure");
+    bloco.className = `kb-orcamento-complemento-bloco ${classeAdicional}`.trim();
+
+    const imagem = document.createElement("img");
+    imagem.className = "kb-orcamento-complemento-imagem";
+    imagem.src = urlImagem;
+    imagem.alt = textoAlternativo;
+    imagem.loading = "eager";
+    imagem.decoding = "async";
+    imagem.addEventListener("error", () => {
+      const complemento = bloco.closest(".kb-orcamento-complemento-final");
+      bloco.remove();
+      if (complemento && !complemento.querySelector(".kb-orcamento-complemento-bloco")) {
+        complemento.remove();
+      }
+    });
+
+    bloco.appendChild(imagem);
+    return bloco;
+  }
+
+  function aplicarComplementoFinalOrcamento() {
+    const conteudo = document.getElementById("orcamentoCardConteudo");
+    if (!conteudo) return;
+
+    const possuiPaineis = Boolean(
+      conteudo.querySelector(".kb-orcamento-lista > .kb-orcamento-item")
+    );
+    const complementoExistente = conteudo.querySelector(
+      ".kb-orcamento-complemento-final"
+    );
+
+    if (!possuiPaineis || (!urlObservacoesOrcamento && !urlRodapeOrcamento)) {
+      complementoExistente?.remove();
+      return;
+    }
+
+    garantirEstiloComplementoFinal(conteudo);
+
+    let complemento = complementoExistente;
+    if (!complemento) {
+      complemento = document.createElement("section");
+      complemento.className = "kb-orcamento-complemento-final";
+      complemento.setAttribute("aria-label", "Observações e rodapé do orçamento");
+
+      const observacoes = criarBlocoImagemComplemento(
+        urlObservacoesOrcamento,
+        "Observações do orçamento Euromídia",
+        "kb-orcamento-complemento-observacoes"
+      );
+      const rodape = criarBlocoImagemComplemento(
+        urlRodapeOrcamento,
+        "Rodapé institucional do orçamento Euromídia",
+        "kb-orcamento-complemento-rodape"
+      );
+
+      if (observacoes) complemento.appendChild(observacoes);
+      if (rodape) complemento.appendChild(rodape);
+    }
+
+    /* Mantém o complemento sempre depois de todo o conteúdo e de todos os painéis. */
+    conteudo.appendChild(complemento);
   }
 
   function agendarAplicacao() {
     if (aplicacaoAgendada) return;
     aplicacaoAgendada = true;
-    window.requestAnimationFrame(aplicarImagensExclusivasOrcamento);
+    window.requestAnimationFrame(() => {
+      aplicarImagensExclusivasOrcamento();
+      aplicarComplementoFinalOrcamento();
+    });
   }
 
   const conteudoOrcamento = document.getElementById("orcamentoCardConteudo");
   if (conteudoOrcamento) {
-    const observer = new MutationObserver(agendarAplicacao);
+    const observer = new MutationObserver((mutacoes) => {
+      const recebeuItemOrcamento = mutacoes.some((mutacao) => (
+        Array.from(mutacao.addedNodes || []).some((node) => (
+          node?.nodeType === 1
+          && (
+            node.matches?.(".kb-orcamento-item")
+            || node.querySelector?.(".kb-orcamento-item")
+          )
+        ))
+      ));
+
+      if (recebeuItemOrcamento) {
+        agendarAplicacao();
+      }
+    });
     observer.observe(conteudoOrcamento, { childList: true, subtree: true });
   }
 
@@ -4579,7 +5366,7 @@
   };
 })();
 </script>
-<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260724_orcamento_imagem_exclusiva_v1') }}"></script>
+<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260724_orcamento_observacoes_rodape_v1') }}"></script>
 <script>
 (() => {
   "use strict";
@@ -4648,21 +5435,87 @@
     }
   }
 
+  function decorarFaseDoCard(faseCard) {
+    if (!(faseCard instanceof HTMLElement)) return;
+
+    const nomeNormalizado = normalizarNomeFase(
+      faseCard.getAttribute("title") || faseCard.textContent
+    );
+    const configuracao = fasesComIcone.find((fase) => fase.nomes.includes(nomeNormalizado));
+
+    if (!configuracao) {
+      faseCard.removeAttribute("data-kb-fase-icone");
+      return;
+    }
+
+    if (faseCard.dataset.kbFaseIcone !== configuracao.icone) {
+      faseCard.dataset.kbFaseIcone = configuracao.icone;
+    }
+  }
+
+  function normalizarRotuloEmpresa(valor) {
+    return String(valor || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/:\s*$/, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function decorarDadoEmpresa(item) {
+    if (!(item instanceof HTMLElement)) return;
+
+    const rotulo = item.querySelector(".kb-empresa-k");
+    if (!(rotulo instanceof HTMLElement)) return;
+
+    const nomeRotulo = normalizarRotuloEmpresa(rotulo.textContent);
+
+    if (nomeRotulo === "razao" || nomeRotulo === "razao social" || nomeRotulo === "empresa") {
+      item.dataset.kbEmpresaPrincipal = "1";
+      rotulo.dataset.kbIconeEmpresa = "1";
+
+      if (rotulo.textContent.trim() !== "Empresa") {
+        rotulo.textContent = "Empresa";
+      }
+      return;
+    }
+
+    item.removeAttribute("data-kb-empresa-principal");
+
+    if (nomeRotulo === "cnpj") {
+      rotulo.dataset.kbIconeEmpresa = "1";
+      return;
+    }
+
+    rotulo.removeAttribute("data-kb-icone-empresa");
+  }
+
+  function prepararBotaoRemover(botao) {
+    if (!(botao instanceof HTMLButtonElement)) return;
+    botao.setAttribute("aria-label", "Remover card");
+  }
+
   let atualizacaoAgendada = false;
 
-  function aplicarIconesFases() {
+  function aplicarDecoracaoVisualKanban() {
     atualizacaoAgendada = false;
     board.querySelectorAll(".kb-col-title strong").forEach(decorarTituloFase);
+    board.querySelectorAll(".kb-phase-pill").forEach(decorarFaseDoCard);
+    board.querySelectorAll(".kb-empresa-item").forEach(decorarDadoEmpresa);
+    board
+      .querySelectorAll('.kb-card-del[data-acao-card="remover"]')
+      .forEach(prepararBotaoRemover);
   }
 
-  function agendarAplicacaoIcones() {
+  function agendarDecoracaoVisualKanban() {
     if (atualizacaoAgendada) return;
     atualizacaoAgendada = true;
-    window.requestAnimationFrame(aplicarIconesFases);
+    window.requestAnimationFrame(aplicarDecoracaoVisualKanban);
   }
 
-  const observadorFases = new MutationObserver(agendarAplicacaoIcones);
-  observadorFases.observe(board, {
+  const observadorVisualKanban = new MutationObserver(agendarDecoracaoVisualKanban);
+  observadorVisualKanban.observe(board, {
     childList: true,
     subtree: true,
     characterData: true,
@@ -4670,7 +5523,7 @@
     attributeFilter: ["title"]
   });
 
-  aplicarIconesFases();
+  aplicarDecoracaoVisualKanban();
 })();
 </script>
 {% endblock %}
