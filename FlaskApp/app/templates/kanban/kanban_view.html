@@ -61,6 +61,134 @@
     overflow: hidden;
   }
 
+  /*
+     Cabeçalho institucional Euromídia.
+     A imagem original é posicionada pelo rodapé para exibir somente a faixa
+     gráfica inferior de cabecalho_orcamento.JPG, ocultando a região superior
+     onde existe o telefone. O degradê mantém legibilidade e integra a arte
+     ao azul institucional da aplicação.
+  */
+  .kb-brand-header{
+    --kb-brand-search-clearance: 66px;
+    position:relative;
+    isolation:isolate;
+    margin:-14px -14px 0 -14px;
+    padding:14px 14px 0 14px;
+  }
+
+  .kb-brand-header::before{
+    content:"";
+    position:absolute;
+    z-index:-2;
+    top:0;
+    left:0;
+    right:0;
+    bottom:var(--kb-brand-search-clearance);
+    border-radius:17px 17px 0 0;
+    background-color:#062f8d;
+    background-image:
+      linear-gradient(
+        105deg,
+        rgba(1,31,103,.86) 0%,
+        rgba(4,62,157,.68) 48%,
+        rgba(5,43,123,.82) 100%
+      ),
+      url("{{ url_for('static', filename='OrcamentoPaineisEuromidia/cabecalho_orcamento.JPG') }}");
+    background-repeat:no-repeat, no-repeat;
+    background-position:center, center bottom;
+    background-size:cover, 112% auto;
+    box-shadow:
+      inset 0 -3px 0 rgba(248,185,0,.92),
+      inset 0 -4px 0 rgba(255,255,255,.10);
+  }
+
+  .kb-brand-header::after{
+    content:"";
+    position:absolute;
+    z-index:-1;
+    top:0;
+    left:0;
+    right:0;
+    bottom:var(--kb-brand-search-clearance);
+    border-radius:17px 17px 0 0;
+    pointer-events:none;
+    background:
+      linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px) 0 0 / 54px 54px,
+      linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px) 0 0 / 54px 54px,
+      linear-gradient(180deg, rgba(255,255,255,.035), rgba(0,0,0,.07));
+  }
+
+  .kb-brand-header .kb-title h1{
+    color:#fff;
+    text-shadow:0 2px 12px rgba(0,20,70,.28);
+  }
+
+  .kb-brand-header .kb-desc{
+    color:rgba(255,255,255,.82);
+    text-shadow:0 1px 8px rgba(0,20,70,.25);
+  }
+
+  .kb-brand-header > .kb-divider{
+    background:rgba(255,255,255,.18);
+  }
+
+  .kb-brand-header .kb-search-label{
+    color:#fff;
+    text-shadow:0 1px 8px rgba(0,20,70,.28);
+  }
+
+  .kb-brand-header .kb-actions .kb-btn.ghost,
+  .kb-brand-header .kb-actions .kb-btn:not(.primary){
+    border-color:rgba(255,255,255,.34);
+    background:rgba(255,255,255,.94);
+  }
+
+  .kb-brand-header .kb-resumo-card{
+    border-color:rgba(176,199,235,.72);
+    box-shadow:
+      0 10px 26px rgba(0,25,83,.20),
+      inset 0 1px 0 rgba(255,255,255,.88);
+  }
+
+  .kb-brand-header .kb-filtro-multi-btn{
+    border-color:rgba(255,255,255,.55);
+    box-shadow:0 8px 22px rgba(0,25,83,.14);
+  }
+
+  .kb-brand-header .kb-filtro-multi.is-open .kb-filtro-multi-btn{
+    border-color:rgba(255,205,44,.82);
+    box-shadow:0 0 0 4px rgba(255,205,44,.20);
+  }
+
+  .kb-brand-header .kb-toolbar{
+    position:relative;
+  }
+
+  @media (max-width: 920px){
+    .kb-brand-header{
+      --kb-brand-search-clearance: 118px;
+      margin:-10px -10px 0 -10px;
+      padding:10px 10px 0 10px;
+    }
+
+    .kb-brand-header::before,
+    .kb-brand-header::after{
+      border-radius:17px 17px 0 0;
+      background-size:cover, auto 100%;
+    }
+  }
+
+  @media (max-width: 640px){
+    .kb-brand-header{
+      --kb-brand-search-clearance: 136px;
+    }
+
+    .kb-brand-header::before{
+      background-position:center, 42% bottom;
+      background-size:cover, auto 100%;
+    }
+  }
+
   .kb-top{
     display:grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -215,21 +343,41 @@
     overflow:hidden;
     min-height: 92px;
     padding: 14px 16px;
-    border-radius: 16px;
-    border: 1px solid var(--kb-line);
-    background: linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(248,250,252,.98) 100%);
-    box-shadow: 0 6px 18px rgba(15,23,42,.08);
+    border-radius: 14px;
+    border: 1px solid rgba(160,185,225,.58);
+    background: linear-gradient(
+      180deg,
+      rgba(248,251,255,.98) 0%,
+      rgba(239,246,255,.96) 100%
+    );
+    box-shadow:
+      0 8px 22px rgba(0,25,80,.18),
+      inset 0 1px 0 rgba(255,255,255,.88);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
     display:flex;
     flex-direction:column;
     justify-content:space-between;
     gap:10px;
+    transition:
+      transform .14s ease,
+      box-shadow .14s ease,
+      border-color .14s ease;
+  }
+
+  .kb-resumo-card:hover{
+    transform:translateY(-2px);
+    border-color:rgba(126,162,216,.78);
+    box-shadow:
+      0 12px 28px rgba(0,25,80,.22),
+      inset 0 1px 0 rgba(255,255,255,.92);
   }
 
   .kb-resumo-card::before{
     content:"";
     position:absolute;
     inset:0 auto 0 0;
-    width: 5px;
+    width: 4px;
     background: var(--resumo-accent, var(--kb-primary));
   }
 
@@ -245,7 +393,7 @@
     font-size: 12px;
     line-height: 1.2;
     font-weight: 950;
-    color: rgba(15,23,42,.62);
+    color: #526684;
     letter-spacing: .02em;
     text-transform: uppercase;
   }
@@ -257,7 +405,16 @@
     display:inline-flex;
     align-items:center;
     justify-content:center;
-    background: color-mix(in srgb, var(--resumo-accent, var(--kb-primary)) 12%, white);
+    background: color-mix(
+      in srgb,
+      var(--resumo-accent, var(--kb-primary)) 11%,
+      #F4F8FF
+    );
+    border:1px solid color-mix(
+      in srgb,
+      var(--resumo-accent, var(--kb-primary)) 14%,
+      transparent
+    );
     color: var(--resumo-accent, var(--kb-primary));
     font-size: 16px;
     line-height: 1;
@@ -269,7 +426,7 @@
     font-size: clamp(22px, 2.1vw, 30px);
     line-height: 1;
     font-weight: 950;
-    color: var(--kb-text);
+    color: #071F4D;
     letter-spacing: -0.03em;
   }
 
@@ -278,7 +435,7 @@
   }
 
   .kb-resumo-valor.positivo{
-    color:#166534;
+    color:#087A36;
   }
 
   .kb-resumo-rodape{
@@ -786,6 +943,71 @@
     overflow: hidden;
     text-overflow: ellipsis;
     color: var(--col-text);
+  }
+
+  /*
+     Ícones das fases comerciais.
+     A decoração é aplicada por data-kb-fase-icone para não acoplar o CSS
+     ao texto do contador, que é atualizado dinamicamente pelo Kanban.
+  */
+  .kb-col-title strong[data-kb-fase-icone]{
+    position:relative;
+    display:flex;
+    align-items:center;
+    min-height:28px;
+    padding-left:34px;
+  }
+
+  .kb-col-title strong[data-kb-fase-icone]::before{
+    content:"";
+    position:absolute;
+    left:0;
+    top:50%;
+    width:26px;
+    height:26px;
+    transform:translateY(-50%);
+    border-radius:8px;
+    background-repeat:no-repeat;
+    background-position:center;
+    background-size:contain;
+    filter:drop-shadow(0 2px 3px rgba(15,23,42,.14));
+    pointer-events:none;
+  }
+
+  .kb-col-title strong[data-kb-fase-icone="a-fazer"]::before{
+    background-image:url("{{ url_for('static', filename='imagens/IconesFasesKanban/AFazer.png') }}");
+  }
+
+  .kb-col-title strong[data-kb-fase-icone="proposta-enviada"]::before{
+    background-image:url("{{ url_for('static', filename='imagens/IconesFasesKanban/PropostaEnviada.png') }}");
+  }
+
+  .kb-col-title strong[data-kb-fase-icone="refazer"]::before{
+    background-image:url("{{ url_for('static', filename='imagens/IconesFasesKanban/Refazer.png') }}");
+  }
+
+  .kb-col-title strong[data-kb-fase-icone="aprovado-cliente"]::before{
+    background-image:url("{{ url_for('static', filename='imagens/IconesFasesKanban/AprovadoCliente.png') }}");
+  }
+
+  .kb-col-title strong[data-kb-fase-icone="aguardando-liberacao"]::before{
+    background-image:url("{{ url_for('static', filename='imagens/IconesFasesKanban/AguardandoLiberacao.png') }}");
+  }
+
+  .kb-col-title strong[data-kb-fase-icone="documentos-enviados"]::before{
+    background-image:url("{{ url_for('static', filename='imagens/IconesFasesKanban/DocumentosEnviados.png') }}");
+  }
+
+  @media (max-width: 520px){
+    .kb-col-title strong[data-kb-fase-icone]{
+      min-height:26px;
+      padding-left:31px;
+    }
+
+    .kb-col-title strong[data-kb-fase-icone]::before{
+      width:24px;
+      height:24px;
+    }
   }
 
   .kb-col-sub{
@@ -2951,6 +3173,48 @@
   }
 
 
+  /*
+   * Quando a face possui uma arte pronta de orçamento
+   * (DimImagemPainel.BitImagemOrcamento = 1), o item deve exibir somente
+   * essa arte, sem repetir abaixo as informações que já estão na imagem.
+   */
+  .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva{
+    padding:0;
+    gap:0;
+    overflow:hidden;
+    background:transparent;
+  }
+
+  .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria{
+    gap:0;
+    width:100%;
+  }
+
+  .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-imagem-wrap{
+    width:100%;
+    min-height:0;
+    aspect-ratio:auto;
+    padding:0;
+    border:0;
+    border-radius:18px;
+    background:transparent;
+  }
+
+  .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-imagem{
+    width:100%;
+    height:auto;
+    max-height:none;
+    object-fit:contain;
+    object-position:center center;
+  }
+
+  .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-item-info,
+  .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria-indicador,
+  .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria-nav{
+    display:none !important;
+  }
+
+
   .kb-orcamento-item-titulo{
     margin:0;
     font-size:21px;
@@ -3499,7 +3763,8 @@
 {% endif %}
 
 <div class="kb-wrap">
-  <div class="kb-top">
+  <section class="kb-brand-header" aria-label="Resumo comercial Euromídia">
+    <div class="kb-top">
     <div class="kb-title">
       <h1>{{ kanban.NomeKanban }}</h1>
       <p class="kb-desc">{{ kanban.Descricao or "—" }}</p>
@@ -3518,7 +3783,7 @@
 
   <div class="kb-resumo" id="kbResumoComercial">
     <div class="kb-resumo-grid {% if not pode_ver_custo_margem %}kb-resumo-grid-sem-custo-margem{% endif %}">
-      <article class="kb-resumo-card" style="--resumo-accent:#2563EB;">
+      <article class="kb-resumo-card" style="--resumo-accent:#2A6FDB;">
         <div class="kb-resumo-topo">
           <p class="kb-resumo-titulo">Atendimentos Ativos</p>
           <span class="kb-resumo-icone">🎯</span>
@@ -3527,7 +3792,7 @@
        
       </article>
 
-      <article class="kb-resumo-card" style="--resumo-accent:#F97316;">
+      <article class="kb-resumo-card" style="--resumo-accent:#F2A900;">
         <div class="kb-resumo-topo">
           <p class="kb-resumo-titulo">Aprovação Preço</p>
           <span class="kb-resumo-icone">🏷️</span>
@@ -3537,7 +3802,7 @@
       </article>
 
       {% if pode_ver_custo_margem %}
-      <article class="kb-resumo-card" style="--resumo-accent:#7C3AED;">
+      <article class="kb-resumo-card" style="--resumo-accent:#59739B;">
         <div class="kb-resumo-topo">
           <p class="kb-resumo-titulo">Custo</p>
           <span class="kb-resumo-icone">💸</span>
@@ -3547,7 +3812,7 @@
       </article>
       {% endif %}
 
-      <article class="kb-resumo-card" style="--resumo-accent:#0F766E;">
+      <article class="kb-resumo-card" style="--resumo-accent:#1261B5;">
         <div class="kb-resumo-topo">
           <p class="kb-resumo-titulo">Preço</p>
           <span class="kb-resumo-icone">💰</span>
@@ -3557,7 +3822,7 @@
       </article>
 
       {% if pode_ver_custo_margem %}
-      <article class="kb-resumo-card" style="--resumo-accent:#16A34A;">
+      <article class="kb-resumo-card" style="--resumo-accent:#159447;">
         <div class="kb-resumo-topo">
           <p class="kb-resumo-titulo">Margem</p>
           <span class="kb-resumo-icone">📈</span>
@@ -3638,6 +3903,7 @@
       </div>
     </div>
   </div>
+  </section>
 
   <div class="kb-divider"></div>
 
@@ -4169,5 +4435,242 @@
     "urlApiCardOrcamentoTemplate": url_for('kanban.api_card_orcamento', id_card=0).replace('/0/', '/__ID_CARD__/')
   } | tojson }}
 </script>
-<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260619_perf_live_kanban_v2') }}"></script>
+<script>
+(() => {
+  "use strict";
+
+  const seletorEndpointOrcamento = /\/api\/cards\/\d+\/orcamento(?:[/?#]|$)/i;
+  const fetchOriginal = window.fetch.bind(window);
+  let ultimoPayloadOrcamento = null;
+  let aplicacaoAgendada = false;
+
+  function obterUrlFetch(recurso) {
+    if (typeof recurso === "string") return recurso;
+    if (recurso instanceof URL) return recurso.href;
+    if (recurso && typeof recurso.url === "string") return recurso.url;
+    return "";
+  }
+
+  function obterImagemExclusiva(item) {
+    if (!item || item.usar_imagem_orcamento_exclusiva !== true) return null;
+
+    const imagemDireta = item.imagem_orcamento_exclusiva;
+    if (imagemDireta && imagemDireta.url) return imagemDireta;
+
+    const imagens = Array.isArray(item.imagens) ? item.imagens : [];
+    return imagens.find((imagem) => (
+      imagem
+      && imagem.fallback !== true
+      && Number(imagem.bit_imagem_orcamento || 0) === 1
+      && imagem.url
+    )) || null;
+  }
+
+  function aplicarImagensExclusivasOrcamento() {
+    aplicacaoAgendada = false;
+
+    const payload = ultimoPayloadOrcamento;
+    const conteudo = document.getElementById("orcamentoCardConteudo");
+    const itensPayload = Array.isArray(payload?.itens) ? payload.itens : [];
+
+    if (!conteudo || !itensPayload.length) return;
+
+    const itensDom = Array.from(
+      conteudo.querySelectorAll(".kb-orcamento-lista > .kb-orcamento-item")
+    );
+
+    if (!itensDom.length) return;
+
+    const temImagemExclusiva = itensPayload.some((item) => Boolean(obterImagemExclusiva(item)));
+    if (temImagemExclusiva && !conteudo.querySelector("#kb-orcamento-imagem-exclusiva-estilo-inline")) {
+      const estiloImpressao = document.createElement("style");
+      estiloImpressao.id = "kb-orcamento-imagem-exclusiva-estilo-inline";
+      estiloImpressao.textContent = `
+        .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva{
+          padding:0 !important;
+          gap:0 !important;
+          overflow:hidden !important;
+          background:transparent !important;
+        }
+        .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria{
+          display:block !important;
+          width:100% !important;
+          gap:0 !important;
+        }
+        .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-imagem-wrap{
+          width:100% !important;
+          height:auto !important;
+          min-height:0 !important;
+          aspect-ratio:auto !important;
+          padding:0 !important;
+          border:0 !important;
+          border-radius:18px !important;
+          background:transparent !important;
+          overflow:hidden !important;
+        }
+        .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-imagem{
+          display:block !important;
+          width:100% !important;
+          height:auto !important;
+          max-height:none !important;
+          object-fit:contain !important;
+          object-position:center center !important;
+        }
+        .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-item-info,
+        .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria-indicador,
+        .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria-nav{
+          display:none !important;
+        }
+      `;
+      conteudo.prepend(estiloImpressao);
+    }
+
+    itensPayload.forEach((item, indice) => {
+      const imagemExclusiva = obterImagemExclusiva(item);
+      if (!imagemExclusiva) return;
+
+      const itemDom = itensDom[indice];
+      if (!itemDom) return;
+
+      itemDom.classList.add("kb-orcamento-item--imagem-exclusiva");
+      itemDom.dataset.codFace = String(item.cod_face || "");
+      itemDom.dataset.imagemOrcamentoExclusiva = "1";
+
+      const imagemDom = itemDom.querySelector(".kb-orcamento-imagem");
+      if (imagemDom && imagemExclusiva.url) {
+        imagemDom.src = String(imagemExclusiva.url);
+        imagemDom.alt = `Orçamento da face ${String(item.cod_face || "painel")}`;
+        imagemDom.loading = "eager";
+      }
+
+      itemDom.querySelector(".kb-orcamento-item-info")?.remove();
+      itemDom.querySelector(".kb-orcamento-galeria-indicador")?.remove();
+      itemDom.querySelector(".kb-orcamento-galeria-nav")?.remove();
+    });
+  }
+
+  function agendarAplicacao() {
+    if (aplicacaoAgendada) return;
+    aplicacaoAgendada = true;
+    window.requestAnimationFrame(aplicarImagensExclusivasOrcamento);
+  }
+
+  const conteudoOrcamento = document.getElementById("orcamentoCardConteudo");
+  if (conteudoOrcamento) {
+    const observer = new MutationObserver(agendarAplicacao);
+    observer.observe(conteudoOrcamento, { childList: true, subtree: true });
+  }
+
+  window.fetch = async (...argumentos) => {
+    const resposta = await fetchOriginal(...argumentos);
+    const url = obterUrlFetch(argumentos[0]);
+
+    if (seletorEndpointOrcamento.test(url)) {
+      resposta.clone().json().then((payload) => {
+        if (!payload || payload.ok !== true) return;
+        ultimoPayloadOrcamento = payload;
+        agendarAplicacao();
+      }).catch(() => {
+        /* A resposta original continua sendo tratada normalmente pelo Kanban. */
+      });
+    }
+
+    return resposta;
+  };
+})();
+</script>
+<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260724_orcamento_imagem_exclusiva_v1') }}"></script>
+<script>
+(() => {
+  "use strict";
+
+  const board = document.getElementById("board");
+  if (!board) return;
+
+  const fasesComIcone = [
+    { nomes: ["a fazer (back office)"], icone: "a-fazer" },
+    { nomes: ["proposta enviada"], icone: "proposta-enviada" },
+    { nomes: ["refazer"], icone: "refazer" },
+    { nomes: ["aprovado cliente"], icone: "aprovado-cliente" },
+    {
+      nomes: ["aguardando liberacao (gerencia)", "aguardando liberacao"],
+      icone: "aguardando-liberacao",
+      nomeVisual: "Aguardando Liberação"
+    },
+    { nomes: ["documentos enviados"], icone: "documentos-enviados" }
+  ];
+
+  function normalizarNomeFase(valor) {
+    return String(valor || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s*\(\s*\d+\s*\)\s*$/, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function obterContagemVisual(texto) {
+    const correspondencia = String(texto || "").match(/\(\s*\d+\s*\)\s*$/);
+    return correspondencia ? correspondencia[0].replace(/\s+/g, "") : "";
+  }
+
+  function decorarTituloFase(titulo) {
+    if (!(titulo instanceof HTMLElement)) return;
+
+    const textoAtual = titulo.textContent.trim();
+    const tituloAtual = titulo.getAttribute("title") || "";
+    const nomeNormalizado = normalizarNomeFase(tituloAtual || textoAtual);
+    const configuracao = fasesComIcone.find((fase) => fase.nomes.includes(nomeNormalizado));
+
+    if (!configuracao) {
+      titulo.removeAttribute("data-kb-fase-icone");
+      return;
+    }
+
+    if (titulo.dataset.kbFaseIcone !== configuracao.icone) {
+      titulo.dataset.kbFaseIcone = configuracao.icone;
+    }
+
+    if (configuracao.nomeVisual) {
+      const contagem = obterContagemVisual(textoAtual);
+      const textoVisual = `${configuracao.nomeVisual}${contagem ? ` ${contagem}` : ""}`;
+
+      if (textoAtual !== textoVisual) {
+        titulo.textContent = textoVisual;
+      }
+
+      if (tituloAtual !== configuracao.nomeVisual) {
+        titulo.setAttribute("title", configuracao.nomeVisual);
+      }
+
+      titulo.setAttribute("aria-label", textoVisual);
+    }
+  }
+
+  let atualizacaoAgendada = false;
+
+  function aplicarIconesFases() {
+    atualizacaoAgendada = false;
+    board.querySelectorAll(".kb-col-title strong").forEach(decorarTituloFase);
+  }
+
+  function agendarAplicacaoIcones() {
+    if (atualizacaoAgendada) return;
+    atualizacaoAgendada = true;
+    window.requestAnimationFrame(aplicarIconesFases);
+  }
+
+  const observadorFases = new MutationObserver(agendarAplicacaoIcones);
+  observadorFases.observe(board, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ["title"]
+  });
+
+  aplicarIconesFases();
+})();
+</script>
 {% endblock %}

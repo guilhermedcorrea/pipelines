@@ -107,20 +107,53 @@
     vertical-align:middle;
     overflow-wrap:anywhere;
   }
+  .cad-imagem-box{
+    width:104px;
+    height:70px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+    border:1px solid #dbe3ef;
+    border-radius:10px;
+    background:#f8fafc;
+  }
+  .cad-imagem-box img{
+    width:100%;
+    height:100%;
+    display:block;
+    object-fit:cover;
+  }
+  .cad-imagem-vazia{
+    width:100%;
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:8px;
+    text-align:center;
+    color:#64748b;
+    font-size:.72rem;
+    font-weight:700;
+    line-height:1.2;
+  }
+  .cad-imagem-vazia[hidden]{ display:none; }
   .cad-tabela th:nth-child(1),
-  .cad-tabela td:nth-child(1){ width:8%; }
+  .cad-tabela td:nth-child(1){ width:126px; }
   .cad-tabela th:nth-child(2),
   .cad-tabela td:nth-child(2){ width:8%; }
   .cad-tabela th:nth-child(3),
-  .cad-tabela td:nth-child(3){ width:6%; }
+  .cad-tabela td:nth-child(3){ width:8%; }
   .cad-tabela th:nth-child(4),
-  .cad-tabela td:nth-child(4){ width:17%; }
+  .cad-tabela td:nth-child(4){ width:6%; }
   .cad-tabela th:nth-child(5),
-  .cad-tabela td:nth-child(5){ width:auto; }
+  .cad-tabela td:nth-child(5){ width:15%; }
   .cad-tabela th:nth-child(6),
-  .cad-tabela td:nth-child(6){ width:9%; }
+  .cad-tabela td:nth-child(6){ width:auto; }
   .cad-tabela th:nth-child(7),
-  .cad-tabela td:nth-child(7){ width:8%; }
+  .cad-tabela td:nth-child(7){ width:9%; }
+  .cad-tabela th:nth-child(8),
+  .cad-tabela td:nth-child(8){ width:8%; }
   .cad-linha{
     cursor:pointer;
     transition:background .15s ease;
@@ -171,16 +204,23 @@
     color:#64748b;
   }
   .cad-lista-rodape{
-    display:flex;
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) auto minmax(0, 1fr);
     align-items:center;
-    justify-content:space-between;
     gap:14px;
     padding:14px 16px;
     border-top:1px solid #e2e8f0;
     background:#fff;
   }
+  .cad-lista-contagem{
+    grid-column:1;
+    justify-self:start;
+  }
   .cad-paginacao{
+    grid-column:2;
+    justify-self:center;
     display:flex;
+    justify-content:center;
     gap:6px;
     flex-wrap:wrap;
   }
@@ -207,7 +247,16 @@
     .cad-lista-shell{ padding:14px; }
     .cad-lista-filtros{ grid-template-columns:1fr; }
     .cad-lista-head{ flex-direction:column; }
-    .cad-lista-rodape{ align-items:flex-start; flex-direction:column; }
+    .cad-lista-rodape{
+      grid-template-columns:1fr;
+      justify-items:center;
+      text-align:center;
+    }
+    .cad-lista-contagem,
+    .cad-paginacao{
+      grid-column:1;
+      justify-self:center;
+    }
     .cad-tabela{ table-layout:auto; }
     .cad-tabela th:nth-child(n),
     .cad-tabela td:nth-child(n){ width:auto; }
@@ -250,6 +299,10 @@
       color:#64748b;
     }
     .cad-endereco{ max-width:none; }
+    .cad-imagem-box{
+      width:min(100%, 260px);
+      height:150px;
+    }
     .cad-lista-rodape{
       margin-top:12px;
       border:1px solid #e2e8f0;
@@ -287,6 +340,7 @@
       <table class="cad-tabela">
         <thead>
           <tr>
+            <th>Imagem</th>
             <th>CodPonto</th>
             <th>CodFace</th>
             <th>Face</th>
@@ -300,6 +354,21 @@
           {% for item in itens %}
             {% set url_edicao = url_for('admin.cadastro_painel_editar', id_face=item.IDDimFacesPaineis) %}
             <tr class="cad-linha" tabindex="0" data-url="{{ url_edicao }}" title="Dê dois cliques para editar">
+              <td data-label="Imagem">
+                <div class="cad-imagem-box">
+                  {% if item.UrlImagemPainel %}
+                    <img
+                      src="{{ item.UrlImagemPainel }}"
+                      alt="Imagem do painel {{ item.CodFace or item.CodPonto or '' }}"
+                      loading="lazy"
+                      decoding="async"
+                    >
+                    <span class="cad-imagem-vazia" hidden>Imagem indisponível</span>
+                  {% else %}
+                    <span class="cad-imagem-vazia">Sem imagem</span>
+                  {% endif %}
+                </div>
+              </td>
               <td class="cad-codigo" data-label="CodPonto">{{ item.CodPonto or '—' }}</td>
               <td class="cad-codigo" data-label="CodFace">{{ item.CodFace or '—' }}</td>
               <td data-label="Face">{{ item.Face or '—' }}</td>
@@ -320,14 +389,14 @@
               <td data-label="Ação"><a class="cad-acao" href="{{ url_edicao }}">Editar</a></td>
             </tr>
           {% else %}
-            <tr><td colspan="7" class="cad-vazio">Nenhuma face de painel encontrada com os filtros informados.</td></tr>
+            <tr><td colspan="8" class="cad-vazio">Nenhuma face de painel encontrada com os filtros informados.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
 
     <div class="cad-lista-rodape">
-      <div>
+      <div class="cad-lista-contagem">
         Exibindo {{ paginacao.inicio }}–{{ paginacao.fim }} de {{ paginacao.total }} registro(s).
       </div>
       {% if paginacao.total_paginas > 1 %}
@@ -356,6 +425,14 @@
 </div>
 
 <script>
+  document.querySelectorAll('.cad-imagem-box img').forEach(function(imagem){
+    imagem.addEventListener('error', function(){
+      const fallback = imagem.parentElement.querySelector('.cad-imagem-vazia');
+      imagem.hidden = true;
+      if (fallback) fallback.hidden = false;
+    });
+  });
+
   document.querySelectorAll('.cad-linha[data-url]').forEach(function(linha){
     linha.addEventListener('dblclick', function(event){
       if (event.target.closest('a, button, input, select')) return;

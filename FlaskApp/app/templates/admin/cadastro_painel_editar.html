@@ -473,7 +473,7 @@
 
     <section class="painel-card" id="dados-painel">
       <div class="painel-card-head">
-        <div><h2>Dados gerais do painel</h2><p>Cadastro principal armazenado em DimPaineisEuromidia.</p></div>
+        <div><h2>Dados gerais do painel</h2></div>
       </div>
       <div class="painel-card-body">
         <div class="painel-grid">
@@ -519,7 +519,7 @@
     </section>
 
     <section class="painel-card" id="dados-face">
-      <div class="painel-card-head"><div><h2>Dados da face</h2><p>CodPonto e CodFace são carregados automaticamente e não são alterados nesta tela.</p></div></div>
+      <div class="painel-card-head"><div><h2>Dados da face</h2></div></div>
       <div class="painel-card-body">
         <div class="painel-grid cols-3">
           <div class="painel-campo"><label>CodPonto</label><input value="{{ painel.CodPonto }}" readonly></div>
@@ -573,7 +573,7 @@
     </section>
 
     <section class="painel-card" id="imagens">
-      <div class="painel-card-head"><div><h2>Imagens da face</h2><p>As imagens já cadastradas em DimImagemPainel são carregadas automaticamente. Novos arquivos continuam sendo renomeados pelo CodFace.</p></div></div>
+
       <div class="painel-card-body">
         <div class="painel-imagens">
           <div class="painel-imagem-card">
@@ -640,7 +640,7 @@
         {% if imagens_cadastradas %}
           <div class="painel-galeria-existente">
             <h3>Registros de imagem ativos desta face</h3>
-            <p>Esta relação vem diretamente de <strong>Silver.DimImagemPainel</strong>. Ela também permite conferir registros antigos ou duplicados que ainda estejam ativos.</p>
+
             <div class="painel-galeria-grid">
               {% for imagem in imagens_cadastradas %}
                 <article class="painel-galeria-item">
@@ -727,7 +727,7 @@
         <button type="button" class="painel-btn-icon painel-btn-add" id="btnAdicionarPreco" title="Adicionar preço">+</button>
       </div>
       <div class="painel-card-body">
-        <div class="painel-ajuda" style="margin:0 0 12px;">Para PAINEL DIGITAL e RELÓGIO MULTIMENSAGEM DIGITAL, Exibições/dia aceita somente 540 ou 1080. Para os demais tipos, o banco recebe NULL.</div>
+
         <div class="painel-tabela-wrap">
           <table class="painel-tabela" id="tabelaPrecos" style="min-width:1080px;">
             <thead>

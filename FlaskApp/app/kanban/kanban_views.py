@@ -18602,6 +18602,14 @@ def _obter_imagens_painel_orcamento(
     cod_face: Any = None,
     cod_ponto: Any = None,
 ) -> list[dict[str, Any]]:
+    """
+    Retorna somente a imagem exclusiva de orçamento da face.
+
+    A correspondência é feita pela face exata (IDDimFacesPaineis) e, como
+    fallback seguro, pelo CodFace. CodPonto não é usado para localizar a arte,
+    porque um mesmo ponto pode possuir várias faces e a imagem de orçamento é
+    cadastrada para uma face específica.
+    """
     id_face = int(id_face_painel or 0) if str(id_face_painel or "").strip() else None
     cod_face_norm = _normalizar_texto(cod_face).upper()
     cod_ponto_norm = _normalizar_texto(cod_ponto)
@@ -18625,9 +18633,6 @@ def _obter_imagens_painel_orcamento(
                     WHEN :cod_face <> ''
                          AND UPPER(LTRIM(RTRIM(COALESCE(i.CodFace, '')))) = :cod_face
                     THEN 1
-                    WHEN :cod_ponto <> ''
-                         AND LTRIM(RTRIM(COALESCE(i.CodPonto, ''))) = :cod_ponto
-                    THEN 2
                     ELSE 9
                 END AS OrdemCorrespondencia
             FROM [Integracao].[Silver].[DimImagemPainel] i
@@ -18636,10 +18641,9 @@ def _obter_imagens_painel_orcamento(
               AND (
                     (:id_face_painel IS NOT NULL AND TRY_CONVERT(int, i.IDDimFacesPaineis) = TRY_CONVERT(int, :id_face_painel))
                  OR (:cod_face <> '' AND UPPER(LTRIM(RTRIM(COALESCE(i.CodFace, '')))) = :cod_face)
-                 OR (:cod_ponto <> '' AND LTRIM(RTRIM(COALESCE(i.CodPonto, ''))) = :cod_ponto)
               )
         )
-        SELECT
+        SELECT TOP (1)
             IDDimImagemPainel,
             IDDimFacesPaineis,
             UrlImagem,
@@ -18651,12 +18655,9 @@ def _obter_imagens_painel_orcamento(
             BitImagemOrcamento,
             OrdemCorrespondencia
         FROM imagens_base
+        WHERE OrdemCorrespondencia < 9
         ORDER BY
             OrdemCorrespondencia ASC,
-            CASE
-                WHEN TRY_CONVERT(int, NumeroImagem) IS NULL THEN 999999
-                ELSE TRY_CONVERT(int, NumeroImagem)
-            END ASC,
             DataAtualizacao DESC,
             IDDimImagemPainel DESC
     """)
@@ -18666,12 +18667,8 @@ def _obter_imagens_painel_orcamento(
         {
             "id_face_painel": id_face,
             "cod_face": cod_face_norm,
-            "cod_ponto": cod_ponto_norm,
         },
     ).mappings().all()
-
-    imagens: list[dict[str, Any]] = []
-    urls_vistas: set[str] = set()
 
     for row in rows:
         registro = dict(row)
@@ -18680,26 +18677,19 @@ def _obter_imagens_painel_orcamento(
         if not url_imagem:
             continue
 
-        if url_imagem in urls_vistas:
-            continue
-
-        urls_vistas.add(url_imagem)
-
-        imagens.append(
+        return [
             {
                 "id_imagem_painel": int(registro.get("IDDimImagemPainel") or 0) or None,
                 "url": url_imagem,
-                "numero_imagem": int(registro.get("NumeroImagem") or 0) or len(imagens) + 1,
-                "cod_face": _normalizar_texto(registro.get("CodFace")),
-                "cod_ponto": _normalizar_texto(registro.get("CodPonto")),
-                "bit_imagem_orcamento": int(registro.get("BitImagemOrcamento") or 0),
-                "ordem_correspondencia": int(registro.get("OrdemCorrespondencia") or 9),
+                "numero_imagem": int(registro.get("NumeroImagem") or 0) or 1,
+                "cod_face": _normalizar_texto(registro.get("CodFace")) or cod_face_norm,
+                "cod_ponto": _normalizar_texto(registro.get("CodPonto")) or cod_ponto_norm,
+                "bit_imagem_orcamento": 1,
+                "ordem_correspondencia": int(registro.get("OrdemCorrespondencia") or 0),
                 "fallback": False,
+                "imagem_orcamento_exclusiva": True,
             }
-        )
-
-    if imagens:
-        return imagens
+        ]
 
     return [
         {
@@ -18711,6 +18701,7 @@ def _obter_imagens_painel_orcamento(
             "bit_imagem_orcamento": None,
             "ordem_correspondencia": 99,
             "fallback": True,
+            "imagem_orcamento_exclusiva": False,
         }
     ]
 
@@ -18756,6 +18747,16 @@ def _montar_orcamento_card_payload(id_card: int) -> dict[str, Any]:
             cod_face=item.get("CodFace"),
             cod_ponto=item.get("CodPonto"),
         )
+        imagem_orcamento_exclusiva = next(
+            (
+                imagem
+                for imagem in imagens
+                if not bool(imagem.get("fallback"))
+                and int(imagem.get("bit_imagem_orcamento") or 0) == 1
+            ),
+            None,
+        )
+        usar_imagem_orcamento_exclusiva = imagem_orcamento_exclusiva is not None
 
         itens_orcamento.append(
             {
@@ -18793,6 +18794,8 @@ def _montar_orcamento_card_payload(id_card: int) -> dict[str, Any]:
                 "imagens": imagens,
                 "quantidade_imagens": len(imagens),
                 "tem_imagem_real": any(not bool(img.get("fallback")) for img in imagens),
+                "usar_imagem_orcamento_exclusiva": usar_imagem_orcamento_exclusiva,
+                "imagem_orcamento_exclusiva": imagem_orcamento_exclusiva,
             }
         )
 

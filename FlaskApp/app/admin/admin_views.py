@@ -26180,10 +26180,51 @@ def cadastro_paineis_lista():
                 p.UF,
                 p.Referencia,
                 p.BitAtivo,
-                p.DataAtualizacao
+                p.DataAtualizacao,
+                imagem.IDDimImagemPainel,
+                imagem.UrlImagem,
+                imagem.NumeroImagem,
+                imagem.DataAtualizacao AS DataAtualizacaoImagem,
+                imagem.BitAtivo AS BitAtivoImagem,
+                imagem.BitImagemOrcamento
             FROM [Integracao].[Silver].[DimFacesPaineis] AS f WITH (NOLOCK)
             INNER JOIN [Integracao].[Silver].[DimPaineisEuromidia] AS p WITH (NOLOCK)
                 ON p.IDDimPaineisEuromidia = f.IDDimPaineisEuromidia
+            OUTER APPLY
+            (
+                SELECT TOP (1)
+                       img.IDDimImagemPainel,
+                       img.UrlImagem,
+                       img.NumeroImagem,
+                       img.DataAtualizacao,
+                       img.BitAtivo,
+                       img.BitImagemOrcamento
+                FROM [Integracao].[Silver].[DimImagemPainel] AS img WITH (NOLOCK)
+                WHERE ISNULL(img.BitAtivo, 1) = 1
+                  AND
+                  (
+                      img.IDDimFacesPaineis = f.IDDimFacesPaineis
+                      OR
+                      (
+                          LTRIM(RTRIM(ISNULL(img.CodFace, ''))) = LTRIM(RTRIM(ISNULL(f.CodFace, '')))
+                          AND
+                          (
+                              img.IDDimFacesPaineis IS NULL
+                              OR img.IDDimFacesPaineis = f.IDDimFacesPaineis
+                          )
+                      )
+                  )
+                ORDER BY
+                    CASE
+                        WHEN ISNULL(img.BitImagemOrcamento, 0) = 0
+                         AND ISNULL(img.NumeroImagem, 1) <> 2
+                         AND LOWER(ISNULL(img.UrlImagem, '')) NOT LIKE '%[_]2.%'
+                        THEN 0
+                        ELSE 1
+                    END,
+                    ISNULL(img.DataAtualizacao, '19000101') DESC,
+                    img.IDDimImagemPainel DESC
+            ) AS imagem
             WHERE {where_sql}
             ORDER BY p.CodPonto, f.CodFace
             OFFSET :offset ROWS FETCH NEXT :por_pagina ROWS ONLY
@@ -26191,9 +26232,35 @@ def cadastro_paineis_lista():
         params_lista,
     ).mappings().all()
 
+    itens = []
+    for registro in rows:
+        item = dict(registro)
+        imagem_registro = {
+            "IDDimImagemPainel": item.pop("IDDimImagemPainel", None),
+            "UrlImagem": item.pop("UrlImagem", None),
+            "NumeroImagem": item.pop("NumeroImagem", None),
+            "DataAtualizacao": item.pop("DataAtualizacaoImagem", None),
+            "BitAtivo": item.pop("BitAtivoImagem", None),
+            "BitImagemOrcamento": item.pop("BitImagemOrcamento", None),
+        }
+
+        try:
+            imagem_tela = _cadpainel_preparar_imagem_para_tela(
+                imagem_registro,
+                str(item.get("CodFace") or "").strip(),
+            )
+            item["UrlImagemPainel"] = imagem_tela.get("UrlExibicao") or None
+            item["ImagemPainelEncontrada"] = bool(imagem_tela.get("ArquivoEncontrado"))
+        except (OSError, ValueError):
+            # A listagem continua disponível mesmo se um arquivo antigo estiver inválido.
+            item["UrlImagemPainel"] = str(imagem_registro.get("UrlImagem") or "").strip() or None
+            item["ImagemPainelEncontrada"] = False
+
+        itens.append(item)
+
     return render_template(
         "admin/cadastro_paineis_lista.html",
-        itens=[dict(x) for x in rows],
+        itens=itens,
         filtros={"q": busca, "status": status},
         paginacao={
             "pagina": pagina,
