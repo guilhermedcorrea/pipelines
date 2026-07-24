@@ -2989,35 +2989,135 @@
   .kb-orcamento-head-marca{
     position:relative;
     min-width:0;
-    min-height:320px;
-    height:clamp(320px, 30vw, 420px);
+    width:100%;
+    min-height:0;
+    height:auto;
+    aspect-ratio:678 / 242;
     padding:0;
     margin:0;
     border:0;
-    border-bottom:1px solid rgba(11,78,162,.10);
-    background:#0b43ad;
-    display:flex;
-    align-items:center;
-    justify-content:center;
+    /*
+      O mesmo degradê do encaixe fica como fundo de segurança. Assim, durante
+      o carregamento da arte ou nas bordas semitransparentes do recorte, nunca
+      aparece novamente a faixa azul-marinho que estava sobrando.
+    */
+    background:linear-gradient(90deg, #46B3CE 0%, #248FC2 48%, #0053AA 100%);
     overflow:hidden;
+    isolation:isolate;
   }
 
-  .kb-orcamento-head-marca::after{
-    content:"";
+  .kb-orcamento-capa-preenchimento{
     position:absolute;
-    inset:0;
-    background: linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(11,78,162,.12) 100%);
+    /*
+      O JavaScript substitui estas medidas pela caixa transparente real da
+      imagem. Estes valores servem apenas como fallback enquanto a imagem
+      ainda está carregando.
+    */
+    /*
+      Por padrão fica acima da arte para manter compatibilidade caso a imagem
+      não possua canal alpha. Quando o recorte transparente é detectado, a
+      regra abaixo envia o preenchimento para trás da imagem.
+    */
+    z-index:3;
+    left:0;
+    right:41.35%;
+    top:47%;
+    bottom:5%;
+    border-radius:0 24px 24px 0;
+    background:linear-gradient(90deg, #46B3CE 0%, #248FC2 48%, #0053AA 100%);
+    box-shadow:none;
+    overflow:hidden;
     pointer-events:none;
   }
 
-  .kb-orcamento-head-logo{
-    position:relative;
+  .kb-orcamento-head-marca[data-recorte-capa-detectado="1"]
+  .kb-orcamento-capa-preenchimento{
     z-index:1;
+  }
+
+  .kb-orcamento-head-logo{
+    position:absolute;
+    inset:0;
+    /* A arte fica por cima e funciona como a máscara exata do quebra-cabeça. */
+    z-index:2;
     width:100%;
     height:100%;
     object-fit:cover;
     object-position:center center;
     display:block;
+    pointer-events:none;
+  }
+
+  .kb-orcamento-capa-conteudo{
+    position:absolute;
+    z-index:1;
+    left:17.5%;
+    right:6.5%;
+    top:13%;
+    bottom:10%;
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    justify-content:flex-start;
+    min-width:0;
+    color:#FFFFFF;
+    font-family:"Montserrat", "Segoe UI", Arial, sans-serif;
+    text-shadow:none;
+    pointer-events:none;
+  }
+
+  .kb-orcamento-capa-empresa,
+  .kb-orcamento-capa-marca{
+    max-width:100%;
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    color:#FFBD59;
+    font-style:italic;
+    font-weight:900;
+    letter-spacing:-.01em;
+    line-height:1.05;
+    text-transform:uppercase;
+  }
+
+  .kb-orcamento-capa-empresa{
+    font-size:clamp(12px, 1.65vw, 22px);
+  }
+
+  .kb-orcamento-capa-marca{
+    margin-top:clamp(5px, .55vw, 8px);
+    font-size:clamp(11px, 1.45vw, 19px);
+  }
+
+  .kb-orcamento-capa-vendedor{
+    display:flex;
+    align-items:center;
+    flex-wrap:nowrap;
+    gap:clamp(3px, .38vw, 7px);
+    max-width:100%;
+    min-width:0;
+    margin-top:clamp(8px, .8vw, 12px);
+    color:#FFFFFF;
+    font-size:clamp(7px, .82vw, 11px);
+    font-weight:700;
+    line-height:1.2;
+    white-space:nowrap;
+  }
+
+  .kb-orcamento-capa-vendedor-valor{
+    color:#FFFFFF;
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .kb-orcamento-capa-separador{
+    flex:0 0 auto;
+    color:#FFBD59;
+    font-weight:900;
+    text-shadow:none;
   }
 
   .kb-orcamento-head-corpo{
@@ -3594,8 +3694,7 @@
     }
 
     .kb-orcamento-head-marca{
-      min-height: 260px;
-      height:300px;
+      aspect-ratio:678 / 242;
     }
   }
 
@@ -3610,8 +3709,14 @@
     }
 
     .kb-orcamento-head-marca{
-      min-height:220px;
-      height:240px;
+      aspect-ratio:678 / 242;
+    }
+
+    .kb-orcamento-capa-conteudo{
+      left:14%;
+      right:5%;
+      top:12%;
+      bottom:9%;
     }
 
     .kb-orcamento-resumo,
@@ -4746,7 +4851,7 @@
     "idUsuarioLogado": id_usuario_logado_kanban,
     "idVendedorLogado": id_vendedor_logado_kanban,
     "urlPainelPublicidade": url_for('static', filename='imagens/painel-publicitario.png'),
-    "urlCabecalhoOrcamentoPadrao": url_for('static', filename='OrcamentoPaineisEuromidia/cabecalho_orcamento.JPG'),
+    "urlCabecalhoOrcamentoPadrao": url_for('static', filename='imagens/OrcamentoEuromidia/capa_sem_o_pedaco.png'),
     "urlLogoEuromidia": url_for('static', filename='imagens/logoeuro.png'),
     "urlObservacoesOrcamento": url_for('static', filename='imagens/OrcamentoEuromidia/Observacoes.png'),
     "urlRodapeOrcamento": url_for('static', filename='imagens/OrcamentoEuromidia/RodapeOrcamentoEuromidia.jpeg'),

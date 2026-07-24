@@ -18592,8 +18592,89 @@ def _montar_endereco_painel_orcamento(item: dict[str, Any]) -> str:
 def _url_cabecalho_orcamento() -> str:
     return url_for(
         "static",
-        filename="OrcamentoPaineisEuromidia/cabecalho_orcamento.JPG",
+        filename="imagens/OrcamentoEuromidia/capa_sem_o_pedaco.png",
     )
+
+
+def _obter_vendedor_orcamento_card(card: dict[str, Any]) -> dict[str, Any]:
+    """Resolve os dados comerciais do vendedor responsável pelo card.
+
+    O telefone está em Integracao.dbo.Vendedores. O e-mail não existe nessa
+    tabela; por isso ele é obtido de Integracao.Silver.DimUsuarios por meio do
+    IDDimUsuarios vinculado ao vendedor. A busca usa o usuário responsável pelo
+    card, evitando exibir os dados do usuário que apenas abriu o orçamento.
+    """
+    card = card if isinstance(card, dict) else {}
+    id_usuario_responsavel = _int_ou_none(card.get("IDUsuarioRelacionadoCard"))
+    id_empresa_proprietaria = _int_ou_none(card.get("IDEmpresaProprietaria"))
+
+    vendedor: dict[str, Any] = {}
+
+    if id_usuario_responsavel:
+        sql = text(f"""
+            SELECT TOP (1)
+                v.IDVendedor,
+                v.IDDimUsuarios,
+                NULLIF(LTRIM(RTRIM(v.NomeVendedor)), '') AS NomeVendedor,
+                NULLIF(LTRIM(RTRIM(v.Telefone)), '') AS Telefone,
+                NULLIF(LTRIM(RTRIM(u.Email)), '') AS Email
+            FROM {TABELA_VENDEDORES} v
+            LEFT JOIN [Integracao].[Silver].[DimUsuarios] u
+              ON u.IDDimUsuarios = v.IDDimUsuarios
+            WHERE v.IDDimUsuarios = :id_usuario
+              AND ISNULL(v.BitAtivo, 1) = 1
+            ORDER BY
+                CASE
+                    WHEN :id_empresa IS NOT NULL
+                     AND TRY_CONVERT(int, v.IDEmpresaProprietaria) = :id_empresa
+                    THEN 0
+                    ELSE 1
+                END,
+                v.IDVendedor ASC;
+        """)
+
+        row = db.session.execute(
+            sql,
+            {
+                "id_usuario": int(id_usuario_responsavel),
+                "id_empresa": int(id_empresa_proprietaria) if id_empresa_proprietaria else None,
+            },
+        ).mappings().first()
+
+        if row:
+            vendedor = dict(row)
+
+    # Fallback seguro: ainda retorna nome/e-mail do responsável do card mesmo
+    # quando esse usuário não possui cadastro correspondente em Vendedores.
+    if id_usuario_responsavel and (not vendedor or not vendedor.get("Email")):
+        usuario = db.session.execute(
+            text("""
+                SELECT TOP (1)
+                    NULLIF(LTRIM(RTRIM(NomeUsuario)), '') AS NomeUsuario,
+                    NULLIF(LTRIM(RTRIM(Email)), '') AS Email
+                FROM [Integracao].[Silver].[DimUsuarios]
+                WHERE IDDimUsuarios = :id_usuario;
+            """),
+            {"id_usuario": int(id_usuario_responsavel)},
+        ).mappings().first()
+
+        if usuario:
+            usuario_dict = dict(usuario)
+            if not vendedor.get("NomeVendedor"):
+                vendedor["NomeVendedor"] = usuario_dict.get("NomeUsuario")
+            if not vendedor.get("Email"):
+                vendedor["Email"] = usuario_dict.get("Email")
+
+    return {
+        "id_vendedor": _int_ou_none(vendedor.get("IDVendedor")),
+        "id_usuario": id_usuario_responsavel,
+        "nome": (
+            _normalizar_texto(vendedor.get("NomeVendedor"))
+            or _normalizar_texto(card.get("NomeUsuarioResponsavel"))
+        ),
+        "email": _normalizar_texto(vendedor.get("Email")),
+        "telefone": _normalizar_texto(vendedor.get("Telefone")),
+    }
 
 
 def _obter_imagens_painel_orcamento(
@@ -18714,11 +18795,17 @@ def _montar_orcamento_card_payload(id_card: int) -> dict[str, Any]:
     empresa = {
         "id_empresa": int(card.get("IDEmpresaRelacionadaCard") or 0) or None,
         "razao_social": _normalizar_texto(card.get("EmpresaRazaoSocial")),
+        "nome_fantasia": (
+            _normalizar_texto(card.get("EmpresaNomeFantasia"))
+            or _normalizar_texto(card.get("NomeEmpresa"))
+            or _normalizar_texto(card.get("EmpresaRazaoSocial"))
+        ),
         "cnpj": _normalizar_texto(card.get("EmpresaCNPJ")),
         "cnae": _normalizar_texto(card.get("EmpresaCNAE")),
         "setor": _normalizar_texto(card.get("EmpresaSetor")),
         "classe": _normalizar_texto(card.get("EmpresaClasse")),
     }
+    vendedor = _obter_vendedor_orcamento_card(card)
 
     itens_orcamento: list[dict[str, Any]] = []
     valor_total_geral = Decimal("0")
@@ -18866,10 +18953,15 @@ def _montar_orcamento_card_payload(id_card: int) -> dict[str, Any]:
         "id_card": int(id_card),
         "titulo_card": _normalizar_texto(card.get("Titulo")) or f"Card {int(id_card)}",
         "descricao_card": _normalizar_texto(card.get("Descricao")),
+        "marca_exibida": (
+            _normalizar_texto(card.get("Marca"))
+            or _normalizar_texto(card.get("Titulo"))
+        ),
         "empresa": empresa,
+        "vendedor": vendedor,
         "cabecalho": {
             "url": _url_cabecalho_orcamento(),
-            "alt": "Cabeçalho do orçamento Euromídia",
+            "alt": "Capa do orçamento Euromídia",
         },
         "itens": itens_orcamento,
         "resumo": {
@@ -21220,7 +21312,7 @@ def api_card_orcamento(id_card: int):
         usar_cache = not _request_pede_dado_fresco()
 
         chave = _chave_cache_json(
-            "kanban:api:card:orcamento:v2",
+            "kanban:api:card:orcamento:v3",
             id_emp,
             id_kanban,
             id_card,

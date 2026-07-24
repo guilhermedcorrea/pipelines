@@ -17249,42 +17249,265 @@ async function moverCard(idCard, idFasePara, posicao) {
     return el("div", {class:"kb-orcamento-galeria"}, [wrapImagem]);
   }
 
+  function detectarCaixaTransparenteCabecalho(imagem){
+    const larguraNatural = Number(imagem?.naturalWidth || 0);
+    const alturaNatural = Number(imagem?.naturalHeight || 0);
+
+    if (!larguraNatural || !alturaNatural) {
+      return null;
+    }
+
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = larguraNatural;
+      canvas.height = alturaNatural;
+
+      const contexto = canvas.getContext("2d", { willReadFrequently:true });
+      if (!contexto) {
+        return null;
+      }
+
+      contexto.clearRect(0, 0, larguraNatural, alturaNatural);
+      contexto.drawImage(imagem, 0, 0, larguraNatural, alturaNatural);
+
+      const pixels = contexto.getImageData(0, 0, larguraNatural, alturaNatural).data;
+      let minX = larguraNatural;
+      let minY = alturaNatural;
+      let maxX = -1;
+      let maxY = -1;
+      let quantidadeTransparentes = 0;
+
+      /*
+        O recorte criado no PNG tem alpha zero. Considero também os pixels
+        quase transparentes da suavização da borda para não deixar frestas.
+      */
+      for (let y = 0; y < alturaNatural; y += 1) {
+        const inicioLinha = y * larguraNatural * 4;
+
+        for (let x = 0; x < larguraNatural; x += 1) {
+          const alpha = pixels[inicioLinha + (x * 4) + 3];
+          if (alpha > 24) {
+            continue;
+          }
+
+          quantidadeTransparentes += 1;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+
+      const totalPixels = larguraNatural * alturaNatural;
+      const larguraRecorte = maxX >= minX ? (maxX - minX + 1) : 0;
+      const alturaRecorte = maxY >= minY ? (maxY - minY + 1) : 0;
+
+      /* Ignora transparências pequenas, como ruído ou suavização externa. */
+      if (
+        quantidadeTransparentes < totalPixels * 0.01 ||
+        larguraRecorte < larguraNatural * 0.10 ||
+        alturaRecorte < alturaNatural * 0.08
+      ) {
+        return null;
+      }
+
+      const folga = 2;
+      minX = Math.max(0, minX - folga);
+      minY = Math.max(0, minY - folga);
+      maxX = Math.min(larguraNatural - 1, maxX + folga);
+      maxY = Math.min(alturaNatural - 1, maxY + folga);
+
+      return {
+        x:minX,
+        y:minY,
+        largura:maxX - minX + 1,
+        altura:maxY - minY + 1,
+        larguraNatural,
+        alturaNatural
+      };
+    } catch (erro) {
+      /*
+        Se algum navegador bloquear a leitura do canvas, o CSS mantém um
+        fallback coerente. O orçamento continua funcionando normalmente.
+      */
+      console.warn("Não foi possível medir automaticamente o recorte da capa do orçamento.", erro);
+      return null;
+    }
+  }
+
+  function aplicarEncaixeCabecalhoOrcamento(imagem, preenchimento, caixaRecorte){
+    const container = imagem?.closest?.(".kb-orcamento-head-marca");
+    if (!container || !preenchimento || !caixaRecorte) {
+      return false;
+    }
+
+    const larguraContainer = Number(container.clientWidth || 0);
+    const alturaContainer = Number(container.clientHeight || 0);
+    if (!larguraContainer || !alturaContainer) {
+      return false;
+    }
+
+    const larguraNatural = caixaRecorte.larguraNatural;
+    const alturaNatural = caixaRecorte.alturaNatural;
+
+    /*
+      A imagem usa object-fit: cover. Portanto calculo exatamente a escala e
+      o corte central que o navegador aplica antes de converter o recorte para
+      percentuais do container.
+    */
+    const escala = Math.max(
+      larguraContainer / larguraNatural,
+      alturaContainer / alturaNatural
+    );
+
+    const larguraRenderizada = larguraNatural * escala;
+    const alturaRenderizada = alturaNatural * escala;
+    const deslocamentoX = (larguraContainer - larguraRenderizada) / 2;
+    const deslocamentoY = (alturaContainer - alturaRenderizada) / 2;
+
+    const x1Bruto = deslocamentoX + (caixaRecorte.x * escala);
+    const y1Bruto = deslocamentoY + (caixaRecorte.y * escala);
+    const x2Bruto = deslocamentoX + ((caixaRecorte.x + caixaRecorte.largura) * escala);
+    const y2Bruto = deslocamentoY + ((caixaRecorte.y + caixaRecorte.altura) * escala);
+
+    const x1 = Math.max(0, Math.min(larguraContainer, x1Bruto));
+    const y1 = Math.max(0, Math.min(alturaContainer, y1Bruto));
+    const x2 = Math.max(0, Math.min(larguraContainer, x2Bruto));
+    const y2 = Math.max(0, Math.min(alturaContainer, y2Bruto));
+
+    if (x2 <= x1 || y2 <= y1) {
+      return false;
+    }
+
+    const percentual = (valor, total) => `${((valor / total) * 100).toFixed(6)}%`;
+
+    preenchimento.style.left = percentual(x1, larguraContainer);
+    preenchimento.style.top = percentual(y1, alturaContainer);
+    preenchimento.style.width = percentual(x2 - x1, larguraContainer);
+    preenchimento.style.height = percentual(y2 - y1, alturaContainer);
+    preenchimento.style.right = "auto";
+    preenchimento.style.bottom = "auto";
+
+    container.dataset.recorteCapaDetectado = "1";
+    return true;
+  }
+
+  function prepararEncaixeCabecalhoOrcamento(imagem, preenchimento){
+    if (!imagem || !preenchimento) {
+      return;
+    }
+
+    let caixaRecorte = null;
+    let observador = null;
+    let tentativas = 0;
+
+    const tentarAplicar = () => {
+      if (!caixaRecorte) {
+        return false;
+      }
+
+      const aplicado = aplicarEncaixeCabecalhoOrcamento(imagem, preenchimento, caixaRecorte);
+      if (aplicado && observador) {
+        observador.disconnect();
+        observador = null;
+      }
+
+      return aplicado;
+    };
+
+    const medirImagem = () => {
+      if (!caixaRecorte) {
+        caixaRecorte = detectarCaixaTransparenteCabecalho(imagem);
+      }
+
+      if (!caixaRecorte) {
+        return;
+      }
+
+      if (tentarAplicar()) {
+        return;
+      }
+
+      const container = imagem.closest?.(".kb-orcamento-head-marca");
+      if (container && typeof ResizeObserver !== "undefined" && !observador) {
+        observador = new ResizeObserver(() => {
+          tentarAplicar();
+        });
+        observador.observe(container);
+      }
+
+      const repetir = () => {
+        if (tentarAplicar() || tentativas >= 8) {
+          return;
+        }
+        tentativas += 1;
+        setTimeout(repetir, 60);
+      };
+
+      repetir();
+    };
+
+    imagem.addEventListener("load", medirImagem, { once:true });
+
+    if (imagem.complete && imagem.naturalWidth > 0) {
+      setTimeout(medirImagem, 0);
+    }
+  }
+
   function renderizarOrcamentoCard(payload){
     if (!orcamentoCardConteudo) return;
 
     const dados = payload && typeof payload === "object" ? payload : {};
     const resumo = dados.resumo && typeof dados.resumo === "object" ? dados.resumo : {};
     const empresa = dados.empresa && typeof dados.empresa === "object" ? dados.empresa : {};
+    const vendedor = dados.vendedor && typeof dados.vendedor === "object" ? dados.vendedor : {};
     const cabecalho = dados.cabecalho && typeof dados.cabecalho === "object" ? dados.cabecalho : {};
     const itens = Array.isArray(dados.itens) ? dados.itens : [];
     const tituloCard = safeStr(dados.titulo_card || `Card ${idNum(dados.id_card)}`).trim() || `Card ${idNum(dados.id_card)}`;
-    const descricaoCard = safeStr(dados.descricao_card || "").trim();
-    const empresaNome = safeStr(empresa.razao_social || "").trim();
+    const marcaExibida = safeStr(dados.marca_exibida || tituloCard).trim() || "Marca não informada";
+    const empresaNome = safeStr(empresa.nome_fantasia || empresa.razao_social || "").trim() || "Empresa não vinculada";
+    const nomeVendedor = safeStr(vendedor.nome || "").trim() || "Vendedor não informado";
+    const emailVendedor = safeStr(vendedor.email || "").trim() || "E-mail não informado";
+    const telefoneVendedor = safeStr(vendedor.telefone || "").trim() || "Telefone não informado";
 
     const urlCabecalho =
       safeStr(cabecalho.url || URL_CABECALHO_ORCAMENTO_PADRAO).trim();
 
     const altCabecalho =
-      safeStr(cabecalho.alt || "Cabeçalho do orçamento Euromídia").trim() || "Cabeçalho do orçamento Euromídia";
+      safeStr(cabecalho.alt || "Capa do orçamento Euromídia").trim() || "Capa do orçamento Euromídia";
 
     orcamentoCardConteudo.innerHTML = "";
 
-    const blocoTitulos = el("div", {class:"kb-orcamento-head-titulos"}, [
-      el("span", {class:"kb-orcamento-kicker"}, ["Razão Social"]),
-      el("h2", {class:"kb-orcamento-titulo", title: empresaNome || ""}, [empresaNome || "Empresa não vinculada"]),
-      el("p", {class:"kb-orcamento-subtitulo"}, [
-        tituloCard,
-        descricaoCard ? ` • ${descricaoCard}` : ""
-      ])
+    const linhaVendedor = el("div", {
+      class:"kb-orcamento-capa-vendedor",
+      title:`${nomeVendedor} | ${emailVendedor} | ${telefoneVendedor}`
+    }, [
+      el("span", {class:"kb-orcamento-capa-vendedor-valor"}, [nomeVendedor]),
+      el("span", {class:"kb-orcamento-capa-separador", "aria-hidden":"true"}, ["|"]),
+      el("span", {class:"kb-orcamento-capa-vendedor-valor"}, [emailVendedor]),
+      el("span", {class:"kb-orcamento-capa-separador", "aria-hidden":"true"}, ["|"]),
+      el("span", {class:"kb-orcamento-capa-vendedor-valor"}, [telefoneVendedor])
+    ]);
+
+    const conteudoCapa = el("div", {class:"kb-orcamento-capa-conteudo"}, [
+      el("div", {class:"kb-orcamento-capa-empresa", title:empresaNome}, [empresaNome]),
+      el("div", {class:"kb-orcamento-capa-marca", title:marcaExibida}, [marcaExibida]),
+      linhaVendedor
     ]);
 
     const headChildren = [];
+    let imagemCabecalhoAjuste = null;
+    let preenchimentoCapaAjuste = null;
 
     if (urlCabecalho){
+      const preenchimentoCapa = el("div", {
+        class:"kb-orcamento-capa-preenchimento"
+      }, [conteudoCapa]);
+
       const imagemCabecalho = el("img", {
         class:"kb-orcamento-head-logo",
-        src: urlCabecalho,
-        alt: altCabecalho,
+        src:urlCabecalho,
+        alt:altCabecalho,
         loading:"eager",
         decoding:"async"
       });
@@ -17293,28 +17516,26 @@ async function moverCard(idCard, idFasePara, posicao) {
         imagemCabecalho.style.display = "none";
       });
 
+      imagemCabecalhoAjuste = imagemCabecalho;
+      preenchimentoCapaAjuste = preenchimentoCapa;
+
       headChildren.push(
-        el("div", {class:"kb-orcamento-head-marca"}, [imagemCabecalho])
+        el("div", {class:"kb-orcamento-head-marca"}, [
+          preenchimentoCapa,
+          imagemCabecalho
+        ])
+      );
+    } else {
+      headChildren.push(
+        el("div", {class:"kb-orcamento-head-marca"}, [
+          el("div", {class:"kb-orcamento-capa-preenchimento"}, [conteudoCapa])
+        ])
       );
     }
 
-    headChildren.push(
-      el("div", {class:"kb-orcamento-head-corpo"}, [
-        blocoTitulos
-      ])
-    );
-
     const head = el("section", {
-      class:`kb-orcamento-head${urlCabecalho ? "" : " sem-marca"}`
+      class:"kb-orcamento-head"
     }, headChildren);
-
-    const blocoEmpresa = el("section", {class:"kb-orcamento-empresa"}, [
-      el("p", {class:"kb-orcamento-bloco-titulo"}, ["Dados da empresa"]),
-      el("div", {class:"kb-orcamento-empresa-grid"}, [
-        criarCampoOrcamento("Razão social", empresa.razao_social),
-        criarCampoOrcamento("CNPJ", mascaraCnpj(empresa.cnpj || ""))
-      ])
-    ]);
 
     const lista = el("section", {class:"kb-orcamento-lista"}, []);
 
@@ -17392,8 +17613,14 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     orcamentoCardConteudo.appendChild(head);
-    orcamentoCardConteudo.appendChild(blocoEmpresa);
     orcamentoCardConteudo.appendChild(lista);
+
+    if (imagemCabecalhoAjuste && preenchimentoCapaAjuste) {
+      prepararEncaixeCabecalhoOrcamento(
+        imagemCabecalhoAjuste,
+        preenchimentoCapaAjuste
+      );
+    }
   }
 
 
@@ -17445,25 +17672,107 @@ async function moverCard(idCard, idFasePara, posicao) {
         padding-top:14px;
       }
       .kb-orcamento-head-marca{
+        position:relative;
         min-width:0;
-        min-height:260px;
-        height:260px;
+        width:100%;
+        min-height:0;
+        height:auto;
+        aspect-ratio:678 / 242;
         padding:0;
         margin:0;
         border:0;
-        border-bottom:1px solid rgba(11,78,162,.10);
-        background:#0b43ad;
-        display:flex;
-        align-items:center;
-        justify-content:center;
+        background:linear-gradient(90deg, #46B3CE 0%, #248FC2 48%, #0053AA 100%);
+        overflow:hidden;
+        isolation:isolate;
+      }
+      .kb-orcamento-capa-preenchimento{
+        position:absolute;
+        z-index:3;
+        left:0;
+        right:41.35%;
+        top:47%;
+        bottom:5%;
+        border-radius:0 24px 24px 0;
+        background:linear-gradient(90deg, #46B3CE 0%, #248FC2 48%, #0053AA 100%);
+        box-shadow:none;
         overflow:hidden;
       }
+      .kb-orcamento-head-marca[data-recorte-capa-detectado="1"] .kb-orcamento-capa-preenchimento{
+        z-index:1;
+      }
       .kb-orcamento-head-logo{
+        position:absolute;
+        inset:0;
+        z-index:2;
         width:100%;
         height:100%;
         object-fit:cover;
         object-position:center center;
         display:block;
+      }
+      .kb-orcamento-capa-conteudo{
+        position:absolute;
+        z-index:1;
+        left:17.5%;
+        right:6.5%;
+        top:13%;
+        bottom:10%;
+        display:flex;
+        flex-direction:column;
+        align-items:flex-start;
+        justify-content:flex-start;
+        min-width:0;
+        color:#FFFFFF;
+        font-family:"Montserrat", "Segoe UI", Arial, sans-serif;
+        text-shadow:none;
+      }
+      .kb-orcamento-capa-empresa,
+      .kb-orcamento-capa-marca{
+        max-width:100%;
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        color:#FFBD59;
+        font-style:italic;
+        font-weight:900;
+        letter-spacing:-.01em;
+        line-height:1.05;
+        text-transform:uppercase;
+      }
+      .kb-orcamento-capa-empresa{
+        font-size:22px;
+      }
+      .kb-orcamento-capa-marca{
+        margin-top:8px;
+        font-size:19px;
+      }
+      .kb-orcamento-capa-vendedor{
+        display:flex;
+        align-items:center;
+        flex-wrap:nowrap;
+        gap:6px;
+        max-width:100%;
+        min-width:0;
+        margin-top:12px;
+        color:#FFFFFF;
+        font-size:11px;
+        font-weight:700;
+        line-height:1.2;
+        white-space:nowrap;
+      }
+      .kb-orcamento-capa-vendedor-valor{
+        color:#FFFFFF;
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+      .kb-orcamento-capa-separador{
+        flex:0 0 auto;
+        color:#FFBD59;
+        font-weight:900;
+        text-shadow:none;
       }
       .kb-orcamento-head-corpo{
         display:grid;
