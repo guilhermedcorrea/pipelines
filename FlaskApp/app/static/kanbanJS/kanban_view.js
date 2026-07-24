@@ -376,6 +376,7 @@
   const btnToggleSegmentoCard = document.getElementById("btnToggleSegmentoCard");
   const listaSegmentoCardBusca = document.getElementById("listaSegmentoCardBusca");
   const selectSegmentoCard = document.getElementById("selectSegmentoCard");
+  const cardNomeVisual = document.getElementById("cardNomeVisual");
   const cardIdVisual = document.getElementById("cardIdVisual");
   const cardTipoClienteBadgeVisual = document.getElementById("cardTipoClienteBadgeVisual");
   const cardOrigemAtendimentoBadgeVisual = document.getElementById("cardOrigemAtendimentoBadgeVisual");
@@ -4995,6 +4996,12 @@ function obterTemaOrigemAtendimento(cardOuIdOuNome){
     const idOrigemAtendimento = derivarIdOrigemAtendimentoDoCard(cardNorm);
     const nomeOrigemAtendimento = nomeOrigemAtendimentoDoCard(cardNorm);
     const temaOrigemAtendimento = obterTemaOrigemAtendimento(idOrigemAtendimento || nomeOrigemAtendimento);
+    const nomeCard = safeStr(cardNorm.Titulo || "").trim();
+
+    if (cardNomeVisual) {
+      cardNomeVisual.textContent = nomeCard || "Detalhes do Card";
+      cardNomeVisual.title = nomeCard || "Detalhes do Card";
+    }
 
     if (cardIdVisual) {
       cardIdVisual.textContent = idCard ? `#${idCard}` : "#—";
@@ -16390,6 +16397,13 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
   }
 
+  inputTituloCard?.addEventListener("input", () => {
+    if (!cardNomeVisual) return;
+    const nomeCardDigitado = safeStr(inputTituloCard.value || "").trim();
+    cardNomeVisual.textContent = nomeCardDigitado || "Detalhes do Card";
+    cardNomeVisual.title = nomeCardDigitado || "Detalhes do Card";
+  });
+
   btnFecharCard.addEventListener("click", () => {
     fecharModalCard();
   });
@@ -18347,6 +18361,10 @@ async function moverCard(idCard, idFasePara, posicao) {
       if (modalCard) {
         modalCard.dataset.idFaseAtual = "";
         modalCard.dataset.jaPassouFaseFormularioContrato = "0";
+      }
+      if (cardNomeVisual) {
+        cardNomeVisual.textContent = "Detalhes do Card";
+        cardNomeVisual.title = "Detalhes do Card";
       }
       atualizarVisibilidadeFormularioSolicitacaoContrato();
       if (msgCard) {
