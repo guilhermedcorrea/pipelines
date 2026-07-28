@@ -143,6 +143,9 @@ x-flask-common: &flask-common
     CACHE_REDIS_URL: redis://redis:6379/2
     SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/3
     SOCKETIO_CHANNEL: flaskapp_socketio
+    SOCKETIO_ASYNC_MODE: threading
+    SOCKETIO_PING_INTERVAL: "25"
+    SOCKETIO_PING_TIMEOUT: "30"
     RATELIMIT_STORAGE_URI: redis://redis:6379/4
 
     CELERY_BROKER_URL: redis://redis:6379/1
@@ -300,7 +303,7 @@ services:
     restart: unless-stopped
 
   # Instância Flask 1.
-  # Usa 4 workers gthread por container. Socket.IO permanece compatível com async_mode=threading e Redis message_queue.
+  # Usa 6 workers gthread por container. Socket.IO compartilha eventos pelo Redis entre todos os processos/containers.
   flask-app-1:
     <<: *flask-common
 

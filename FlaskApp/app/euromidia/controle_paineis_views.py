@@ -24070,7 +24070,8 @@ def api_ocupacao_reserva_dados_modal():
         str(request.args.get("somente_empresas") or "").strip().lower()
         in {"1", "true", "sim", "yes"}
     )
-    q_empresa_cnpj = re.sub(r"\D+", "", q_empresa)
+    q_empresa_cnpj = re.sub(r"\D+", "", q_empresa)[:14]
+    q_empresa_tem_letras = bool(re.search(r"[^\W\d_]", q_empresa, flags=re.UNICODE))
 
     dt_ini = (request.args.get("dt_ini") or "").strip()
     dt_fim = (request.args.get("dt_fim") or "").strip()
@@ -24084,88 +24085,150 @@ def api_ocupacao_reserva_dados_modal():
                 continue
         return []
 
-    sql_empresas = """
-        SELECT TOP (300)
-            e.IDEmpresa,
-            RazaoSocial = NULLIF(LTRIM(RTRIM(CAST(e.RazaoSocial AS nvarchar(300)))), ''),
-            NomeFantasia = NULLIF(LTRIM(RTRIM(CAST(e.NomeFantasia AS nvarchar(300)))), ''),
-            Nome = COALESCE(
-                NULLIF(LTRIM(RTRIM(CAST(e.RazaoSocial AS nvarchar(300)))), ''),
-                NULLIF(LTRIM(RTRIM(CAST(e.NomeFantasia AS nvarchar(300)))), ''),
-                CONCAT('Empresa ', CAST(e.IDEmpresa AS varchar(30)))
-            ),
-            CNPJ = NULLIF(LTRIM(RTRIM(CAST(e.CNPJ AS varchar(32)))), '')
-        FROM [Integracao].[Silver].[DimEmpresas] AS e
-        WHERE e.IDEmpresa IS NOT NULL
-          AND (
-                :q_empresa = ''
-                OR COALESCE(CAST(e.RazaoSocial AS nvarchar(300)), '')
-                       COLLATE Latin1_General_CI_AI LIKE :q_empresa_like
-                OR COALESCE(CAST(e.NomeFantasia AS nvarchar(300)), '')
-                       COLLATE Latin1_General_CI_AI LIKE :q_empresa_like
-                OR (
-                    :q_empresa_cnpj <> ''
-                    AND REPLACE(
-                            REPLACE(
-                                REPLACE(
-                                    REPLACE(
-                                        REPLACE(
-                                            REPLACE(COALESCE(CAST(e.CNPJ AS varchar(32)), ''), '.', ''),
-                                        '/', ''),
-                                    '-', ''),
-                                ' ', ''),
-                            '(', ''),
-                        ')', '') LIKE :q_empresa_cnpj_like
-                )
-              )
-        ORDER BY
-            CASE
-                WHEN :q_empresa <> ''
-                 AND COALESCE(CAST(e.RazaoSocial AS nvarchar(300)), '')
-                       COLLATE Latin1_General_CI_AI = :q_empresa THEN 0
-                WHEN :q_empresa <> ''
-                 AND COALESCE(CAST(e.NomeFantasia AS nvarchar(300)), '')
-                       COLLATE Latin1_General_CI_AI = :q_empresa THEN 1
-                WHEN :q_empresa_cnpj <> ''
-                 AND REPLACE(
-                        REPLACE(
-                            REPLACE(
-                                REPLACE(
-                                    REPLACE(
-                                        REPLACE(COALESCE(CAST(e.CNPJ AS varchar(32)), ''), '.', ''),
-                                    '/', ''),
-                                '-', ''),
-                            ' ', ''),
-                        '(', ''),
-                    ')', '') = :q_empresa_cnpj THEN 2
-                WHEN :q_empresa <> ''
-                 AND COALESCE(CAST(e.RazaoSocial AS nvarchar(300)), '')
-                       COLLATE Latin1_General_CI_AI LIKE :q_empresa_prefixo THEN 3
-                WHEN :q_empresa <> ''
-                 AND COALESCE(CAST(e.NomeFantasia AS nvarchar(300)), '')
-                       COLLATE Latin1_General_CI_AI LIKE :q_empresa_prefixo THEN 4
-                ELSE 9
-            END,
-            COALESCE(
-                NULLIF(LTRIM(RTRIM(CAST(e.RazaoSocial AS nvarchar(300)))), ''),
-                NULLIF(LTRIM(RTRIM(CAST(e.NomeFantasia AS nvarchar(300)))), ''),
-                CONCAT('Empresa ', CAST(e.IDEmpresa AS varchar(30)))
-            ) ASC,
-            e.IDEmpresa ASC
+    def formatar_prefixo_cnpj_reserva(digitos: str) -> str:
+        """Formata também CNPJ parcial sem aplicar função na coluna do banco."""
+        valor = re.sub(r"\D+", "", str(digitos or ""))[:14]
+        if len(valor) <= 2:
+            return valor
+        if len(valor) <= 5:
+            return f"{valor[:2]}.{valor[2:]}"
+        if len(valor) <= 8:
+            return f"{valor[:2]}.{valor[2:5]}.{valor[5:]}"
+        if len(valor) <= 12:
+            return f"{valor[:2]}.{valor[2:5]}.{valor[5:8]}/{valor[8:]}"
+        return f"{valor[:2]}.{valor[2:5]}.{valor[5:8]}/{valor[8:12]}-{valor[12:]}"
+
+    sql_colunas_empresas = """
+        e.IDEmpresa,
+        RazaoSocial = NULLIF(LTRIM(RTRIM(e.RazaoSocial)), ''),
+        NomeFantasia = NULLIF(LTRIM(RTRIM(e.NomeFantasia)), ''),
+        Nome = COALESCE(
+            NULLIF(LTRIM(RTRIM(e.RazaoSocial)), ''),
+            NULLIF(LTRIM(RTRIM(e.NomeFantasia)), ''),
+            CONCAT('Empresa ', CONVERT(varchar(30), e.IDEmpresa))
+        ),
+        CNPJ = NULLIF(LTRIM(RTRIM(e.CNPJ)), '')
     """
-    empresas = [
-        dict(row)
-        for row in db.session.execute(
-            text(sql_empresas),
-            {
-                "q_empresa": q_empresa,
-                "q_empresa_like": f"%{q_empresa}%",
-                "q_empresa_prefixo": f"{q_empresa}%",
-                "q_empresa_cnpj": q_empresa_cnpj,
-                "q_empresa_cnpj_like": f"%{q_empresa_cnpj}%" if q_empresa_cnpj else "",
-            },
-        ).mappings().all()
-    ]
+
+    def executar_busca_empresas(sql_txt: str, parametros: dict) -> list[dict]:
+        return [
+            dict(row)
+            for row in db.session.execute(text(sql_txt), parametros).mappings().all()
+        ]
+
+    # O termo compõe apenas a chave; o hash evita expor CNPJ/nome no backend
+    # compartilhado de cache. Não há IDEmpresaProprietaria na consulta nem na chave.
+    tipo_busca_empresa = (
+        "cnpj"
+        if q_empresa_cnpj and not q_empresa_tem_letras
+        else ("nome" if q_empresa else "inicial")
+    )
+    cache_termo_empresa = q_empresa.casefold()
+    cache_hash_empresa = hashlib.sha256(
+        cache_termo_empresa.encode("utf-8", errors="ignore")
+    ).hexdigest()
+    cache_key_empresas = (
+        f"reserva:busca_empresas:v4:{tipo_busca_empresa}:{cache_hash_empresa}"
+    )
+    empresas = _cache_get_seguro_paineis(cache_key_empresas, padrao=None)
+
+    if empresas is None:
+        if tipo_busca_empresa == "cnpj":
+            # Comparação direta e prefixada: ao contrário do REPLACE/CAST anterior,
+            # o SQL Server pode fazer seek em índice da coluna CNPJ. Aceito tanto
+            # armazenamento puro (30908417000118) quanto mascarado.
+            cnpj_mascarado = formatar_prefixo_cnpj_reserva(q_empresa_cnpj)
+            busca_cnpj_completa = len(q_empresa_cnpj) == 14
+            operador_cnpj = "=" if busca_cnpj_completa else "LIKE"
+            sufixo_cnpj = "" if busca_cnpj_completa else "%"
+
+            # Primeiro consulto o padrão sem máscara, que é o formato utilizado
+            # atualmente pela DimEmpresas. Só faço a segunda consulta se for
+            # necessário atender uma base legada que tenha pontuação.
+            sql_empresas_cnpj = f"""
+                SELECT TOP (50)
+                    {sql_colunas_empresas}
+                FROM [Integracao].[Silver].[DimEmpresas] AS e WITH (NOLOCK)
+                WHERE e.IDEmpresa IS NOT NULL
+                  AND e.CNPJ IS NOT NULL
+                  AND e.CNPJ {operador_cnpj} CONVERT(varchar(33), :cnpj_busca)
+                ORDER BY e.IDEmpresa ASC
+                OPTION (RECOMPILE);
+            """
+            empresas = executar_busca_empresas(
+                sql_empresas_cnpj,
+                {"cnpj_busca": f"{q_empresa_cnpj}{sufixo_cnpj}"},
+            )
+            if not empresas and cnpj_mascarado != q_empresa_cnpj:
+                empresas = executar_busca_empresas(
+                    sql_empresas_cnpj,
+                    {"cnpj_busca": f"{cnpj_mascarado}{sufixo_cnpj}"},
+                )
+
+        elif tipo_busca_empresa == "nome":
+            params_empresas = {
+                "nome_exato": q_empresa,
+                "nome_prefixo": f"{q_empresa}%",
+                "nome_contem": f"%{q_empresa}%",
+            }
+            sql_empresas_prefixo = f"""
+                SELECT TOP (50)
+                    {sql_colunas_empresas}
+                FROM [Integracao].[Silver].[DimEmpresas] AS e WITH (NOLOCK)
+                WHERE e.IDEmpresa IS NOT NULL
+                  AND (
+                        e.RazaoSocial LIKE :nome_prefixo COLLATE Latin1_General_CI_AI
+                     OR e.NomeFantasia LIKE :nome_prefixo COLLATE Latin1_General_CI_AI
+                  )
+                ORDER BY
+                    CASE
+                        WHEN e.RazaoSocial = :nome_exato COLLATE Latin1_General_CI_AI THEN 0
+                        WHEN e.NomeFantasia = :nome_exato COLLATE Latin1_General_CI_AI THEN 1
+                        WHEN e.RazaoSocial LIKE :nome_prefixo COLLATE Latin1_General_CI_AI THEN 2
+                        ELSE 3
+                    END,
+                    e.IDEmpresa ASC
+                OPTION (RECOMPILE);
+            """
+            empresas = executar_busca_empresas(sql_empresas_prefixo, params_empresas)
+
+            # Mantém a busca por palavra no meio do nome, mas só paga o custo do
+            # "%termo%" quando a busca indexável por prefixo não encontrou nada.
+            if not empresas:
+                sql_empresas_contem = f"""
+                    SELECT TOP (50)
+                        {sql_colunas_empresas}
+                    FROM [Integracao].[Silver].[DimEmpresas] AS e WITH (NOLOCK)
+                    WHERE e.IDEmpresa IS NOT NULL
+                      AND (
+                            e.RazaoSocial LIKE :nome_contem COLLATE Latin1_General_CI_AI
+                         OR e.NomeFantasia LIKE :nome_contem COLLATE Latin1_General_CI_AI
+                      )
+                    ORDER BY e.IDEmpresa ASC
+                    OPTION (RECOMPILE);
+                """
+                empresas = executar_busca_empresas(
+                    sql_empresas_contem,
+                    params_empresas,
+                )
+
+        else:
+            # Abertura do modal: uma amostra pequena e determinística, sem ordenar
+            # milhões de empresas por razão social.
+            sql_empresas_iniciais = f"""
+                SELECT TOP (50)
+                    {sql_colunas_empresas}
+                FROM [Integracao].[Silver].[DimEmpresas] AS e WITH (NOLOCK)
+                WHERE e.IDEmpresa IS NOT NULL
+                ORDER BY e.IDEmpresa DESC;
+            """
+            empresas = executar_busca_empresas(sql_empresas_iniciais, {})
+
+        _cache_set_seguro_paineis(
+            cache_key_empresas,
+            empresas,
+            timeout_segundos=120,
+        )
 
     # Nas pesquisas feitas enquanto o usuário digita, devolvo apenas empresas.
     # Assim a tela não recalcula ocupações, contratos e vendedores a cada tecla.

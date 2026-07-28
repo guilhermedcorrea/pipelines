@@ -384,3 +384,63 @@ def paineis_lista_inscrever(dados=None):
 def paineis_lista_pedir_atualizacao(dados=None):
     """Eu reaproveito a mesma inscrição quando o front pedir novo recálculo."""
     return paineis_lista_inscrever(dados or {})
+
+
+# =========================================================
+# VENCIMENTOS DE CAMPANHAS — ações refletidas em tempo real
+# =========================================================
+NAMESPACE_VENCIMENTOS_CAMPANHAS = "/vencimentos-campanhas"
+ROOM_VENCIMENTOS_CAMPANHAS = "vencimentos_campanhas:usuarios_autenticados"
+
+
+def emitir_atualizacao_vencimentos_campanhas(payload: dict | None = None) -> dict:
+    """Distribui somente os identificadores e o novo estado após o commit da ação."""
+
+    dados_origem = dict(payload or {})
+    dados = {
+        "ok": True,
+        "acao": _normalizar_texto_socket(dados_origem.get("acao")).upper(),
+        "fonte_linha": _normalizar_texto_socket(dados_origem.get("fonte_linha")).upper(),
+        "id_reserva": _int_socket(dados_origem.get("id_reserva")) or None,
+        "id_vencimento": _int_socket(dados_origem.get("id_vencimento")) or None,
+        "id_card": _int_socket(dados_origem.get("id_card")) or None,
+        "status": _normalizar_texto_socket(dados_origem.get("status")).upper(),
+        "remover_linha": bool(dados_origem.get("remover_linha")),
+        "mensagem": _normalizar_texto_socket(dados_origem.get("mensagem"))[:500],
+        "atualizado_em": datetime.now().isoformat(timespec="seconds"),
+    }
+
+    socketio.emit(
+        "vencimentos:atualizado",
+        dados,
+        namespace=NAMESPACE_VENCIMENTOS_CAMPANHAS,
+        to=ROOM_VENCIMENTOS_CAMPANHAS,
+    )
+    return dados
+
+
+@socketio.on("connect", namespace=NAMESPACE_VENCIMENTOS_CAMPANHAS)
+def vencimentos_campanhas_conectar():
+    """Aceita somente sessão autenticada e inscreve a tela no canal compartilhado."""
+
+    if not current_user.is_authenticated:
+        return False
+
+    join_room(ROOM_VENCIMENTOS_CAMPANHAS)
+    emit(
+        "vencimentos:conectado",
+        {
+            "ok": True,
+            "atualizado_em": datetime.now().isoformat(timespec="seconds"),
+        },
+        namespace=NAMESPACE_VENCIMENTOS_CAMPANHAS,
+    )
+    return True
+
+
+@socketio.on("disconnect", namespace=NAMESPACE_VENCIMENTOS_CAMPANHAS)
+def vencimentos_campanhas_desconectar():
+    """Remove a conexão encerrada da sala da tela."""
+
+    if current_user.is_authenticated:
+        leave_room(ROOM_VENCIMENTOS_CAMPANHAS)

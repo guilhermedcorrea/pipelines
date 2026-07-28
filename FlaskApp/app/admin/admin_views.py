@@ -29,7 +29,11 @@ try:
 except ImportError: 
     requests = None
 
-from app.socket_events import emitir_resumo_mensagens_usuario, emitir_nova_mensagem_usuario
+from app.socket_events import (
+    emitir_atualizacao_vencimentos_campanhas,
+    emitir_nova_mensagem_usuario,
+    emitir_resumo_mensagens_usuario,
+)
 
 
 admin = Blueprint("admin", __name__)
@@ -20878,6 +20882,51 @@ def lista_precos_euromidia_alterar_bitativo(id_preco: int):
 # ==========================================================
 
 
+def _campanhas_vencimentos_requisicao_assincrona() -> bool:
+    """Identifica ações disparadas pelo JavaScript sem recarregar a tela inteira."""
+
+    if str(request.headers.get("X-Requested-With") or "").strip().lower() == "xmlhttprequest":
+        return True
+
+    return request.accept_mimetypes.best == "application/json"
+
+
+def _campanhas_vencimentos_resposta_acao(
+    *,
+    mensagem: str,
+    categoria: str,
+    url_destino: str,
+    status_http: int = 200,
+    payload: dict | None = None,
+):
+    """Responde em JSON para a tela dinâmica e preserva o redirect como fallback."""
+
+    dados = {
+        "ok": int(status_http) < 400,
+        "mensagem": str(mensagem or "").strip(),
+        "categoria": str(categoria or "info").strip().lower(),
+        "redirect_url": str(url_destino or "").strip(),
+    }
+    dados.update(dict(payload or {}))
+
+    if _campanhas_vencimentos_requisicao_assincrona():
+        return jsonify(dados), int(status_http)
+
+    flash(dados["mensagem"], dados["categoria"])
+    return redirect(dados["redirect_url"])
+
+
+def _campanhas_vencimentos_publicar_atualizacao(payload: dict) -> None:
+    """Publica a alteração após o commit sem transformar falha de socket em falha SQL."""
+
+    try:
+        emitir_atualizacao_vencimentos_campanhas(dict(payload or {}))
+    except Exception:
+        current_app.logger.exception(
+            "Falha ao publicar atualização em tempo real da tela de vencimentos."
+        )
+
+
 def _campanhas_vencimentos_usuario_logado_id() -> int | None:
     """Retorna o IDDimUsuarios do usuário logado com fallback para nomes comuns usados no projeto."""
 
@@ -21379,6 +21428,9 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                 END,
                 venc.BitAtivo,
                 ReservaExpiraEm = CAST(NULL AS datetime2),
+                TipoReserva = CAST(NULL AS int),
+                TipoVinculoOrigem = CAST(NULL AS nvarchar(120)),
+                IDFatoOcupacaoOrigem = CAST(NULL AS int),
                 venc.DataCriacao,
                 venc.DataAtualizacao
             FROM
@@ -21471,6 +21523,9 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                 END,
                 BitAtivo = CAST(1 AS bit),
                 ReservaExpiraEm = reserva.ExpiraEm,
+                reserva.TipoReserva,
+                reserva.TipoVinculoOrigem,
+                reserva.IDFatoOcupacaoOrigem,
                 DataCriacao = reserva.CriadoEm,
                 DataAtualizacao = reserva.DataAtualizacao
             FROM
@@ -21608,11 +21663,11 @@ def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
     if fonte_linha not in {"CAMPANHA", "RESERVA"}:
         fonte_linha = "CAMPANHA"
     d["FonteLinha"] = fonte_linha
-
+    pode_renovar_origem = bool(d.get("PodeRenovar"))
     try:
-        d["PodeRenovar"] = bool(int(d.get("PodeRenovar") or 0)) and fonte_linha in {"CAMPANHA", "RESERVA"}
+        pode_renovar_origem = bool(int(d.get("PodeRenovar") or 0))
     except Exception:
-        d["PodeRenovar"] = bool(d.get("PodeRenovar")) and fonte_linha in {"CAMPANHA", "RESERVA"}
+        pass
 
     razao_social = str(d.get("RazaoSocial") or "").strip()
     if not razao_social or razao_social == "0":
@@ -21635,6 +21690,45 @@ def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
         dias_int = None
 
     status_nome = str(d.get("NomeStatus") or "").strip().upper()
+    status_campanha_permite_renovar = status_nome in {
+        "CAMPANHA ATIVA",
+        "CAMPANHA VENCENDO",
+    }
+    status_reserva_permite_efetivar = status_nome == "RESERVADO"
+
+    tipo_reserva = _parse_int(d.get("TipoReserva")) or 0
+    tipo_vinculo_origem = str(d.get("TipoVinculoOrigem") or "").strip().upper()
+    d["ReservaPreferenciaRenovacao"] = bool(
+        fonte_linha == "RESERVA"
+        and (
+            tipo_reserva == 2
+            or "PREFERENCIA RENOV" in tipo_vinculo_origem
+            or "PREFERÊNCIA RENOV" in tipo_vinculo_origem
+            or (_parse_int(d.get("IDFatoOcupacaoOrigem")) or 0) > 0
+        )
+    )
+    reserva_tem_prazo_48h_uteis = d.get("ReservaExpiraEm") is not None
+    d["ReservaPermiteAcoes"] = bool(
+        fonte_linha == "RESERVA"
+        and status_reserva_permite_efetivar
+        and (
+            reserva_tem_prazo_48h_uteis
+            or d["ReservaPreferenciaRenovacao"]
+        )
+    )
+
+    # Regra da coluna AÇÃO:
+    # - reserva comum ou de preferência: somente Efetivar/Cancelar;
+    # - campanha ativa ou vencendo: somente Renovar;
+    # - os demais estados não recebem ações.
+    d["PodeEfetivarReserva"] = bool(
+        d["ReservaPermiteAcoes"]
+    )
+    d["PodeRenovar"] = bool(
+        fonte_linha == "CAMPANHA"
+        and pode_renovar_origem
+        and status_campanha_permite_renovar
+    )
 
     if dias_int is None:
         d["ClasseDias"] = "sem-data"
@@ -22379,6 +22473,7 @@ def _campanhas_vencimentos_buscar_base_renovacao(id_vencimento: int) -> dict | N
             venc.IDFatoControleContratosEuromidia,
             venc.IDFatoControleContratosItensEuromidia,
             venc.IDDimStatusCampanha,
+            st.NomeStatus,
             item.IDVendedor AS IDVendedor,
             NomeVendedor = COALESCE(
                 NULLIF(LTRIM(RTRIM(CONVERT(varchar(200), vend.NomeVendedor))), ''),
@@ -22491,6 +22586,9 @@ def _campanhas_vencimentos_buscar_base_renovacao(id_vencimento: int) -> dict | N
 
         INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
             ON ctr.IDFatoControleContratosEuromidia = venc.IDFatoControleContratosEuromidia
+
+        LEFT JOIN [Integracao].[Silver].[DimStatusCampanha] AS st
+            ON st.IDDimStatusCampanha = venc.IDDimStatusCampanha
 
         INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
             ON item.IDFatoControleContratosItensEuromidia = venc.IDFatoControleContratosItensEuromidia
@@ -23628,7 +23726,9 @@ def _campanhas_vencimentos_buscar_base_reserva(id_reserva: int) -> dict | None:
             reserva.CriadoPorIDUsuario,
             reserva.ExpiraEm,
             reserva.ReservaOrdemPrioridade,
+            reserva.TipoReserva,
             reserva.TipoVinculoOrigem,
+            reserva.IDFatoOcupacaoOrigem,
             reserva.BitEmpresasRelacionadas
 
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
@@ -23984,8 +24084,12 @@ def vencimentos_campanhas_cancelar_reserva(id_reserva: int):
     id_usuario_logado = int(_campanhas_vencimentos_usuario_logado_id() or 0)
 
     if id_reserva_int <= 0:
-        flash("Reserva inválida para cancelamento.", "warning")
-        return redirect(url_retorno)
+        return _campanhas_vencimentos_resposta_acao(
+            mensagem="Reserva inválida para cancelamento.",
+            categoria="warning",
+            url_destino=url_retorno,
+            status_http=400,
+        )
 
     if id_usuario_logado <= 0:
         abort(403, description="Não foi possível identificar o usuário logado para cancelar a reserva.")
@@ -24002,7 +24106,10 @@ def vencimentos_campanhas_cancelar_reserva(id_reserva: int):
                     r.Status,
                     r.Origem,
                     r.CanceladoEm,
-                    r.ExpiraEm
+                    r.ExpiraEm,
+                    r.TipoReserva,
+                    r.TipoVinculoOrigem,
+                    r.IDFatoOcupacaoOrigem
                 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS r WITH (UPDLOCK, ROWLOCK)
                 WHERE r.IDFatoOcupacaoPaineisEuromidia = :id_reserva
                   AND r.CanceladoEm IS NULL
@@ -24015,12 +24122,32 @@ def vencimentos_campanhas_cancelar_reserva(id_reserva: int):
 
         if not reserva:
             db.session.rollback()
-            flash("Não encontrei a reserva ativa para cancelar. Ela pode já ter sido cancelada, expirada ou efetivada.", "warning")
-            return redirect(url_retorno)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Não encontrei a reserva ativa para cancelar. Ela pode já ter sido cancelada, expirada ou efetivada.",
+                categoria="warning",
+                url_destino=url_retorno,
+                status_http=409,
+            )
 
         criador_reserva = _parse_int(reserva.get("CriadoPorIDUsuario")) or 0
         pode_cancelar_todas = _campanhas_vencimentos_usuario_pode_cancelar_todas_reservas()
         pode_cancelar_proprias = _campanhas_vencimentos_usuario_pode_operar_reservas_proprias()
+        tipo_vinculo_reserva = str(reserva.get("TipoVinculoOrigem") or "").strip().upper()
+        reserva_preferencia = bool(
+            (_parse_int(reserva.get("TipoReserva")) or 0) == 2
+            or "PREFERENCIA RENOV" in tipo_vinculo_reserva
+            or "PREFERÊNCIA RENOV" in tipo_vinculo_reserva
+            or (_parse_int(reserva.get("IDFatoOcupacaoOrigem")) or 0) > 0
+        )
+
+        if reserva.get("ExpiraEm") is None and not reserva_preferencia:
+            db.session.rollback()
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Esta reserva não pertence ao prazo operacional de 48 horas úteis.",
+                categoria="warning",
+                url_destino=url_retorno,
+                status_http=409,
+            )
 
         if not pode_cancelar_todas:
             if not pode_cancelar_proprias:
@@ -24034,8 +24161,17 @@ def vencimentos_campanhas_cancelar_reserva(id_reserva: int):
             f"- ID Usuário: {id_usuario_logado}."
         )
 
-        resultado = db.session.execute(
+        reserva_cancelada = db.session.execute(
             text("""
+                SET NOCOUNT ON;
+
+                DECLARE @ReservasCanceladas TABLE
+                (
+                    IDReserva INT NOT NULL,
+                    StatusAtual NVARCHAR(20) NULL,
+                    CanceladoEm DATETIME2 NULL
+                );
+
                 UPDATE [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
                    SET Status = 'CANCELADO',
                        CanceladoEm = SYSDATETIME(),
@@ -24049,6 +24185,16 @@ def vencimentos_campanhas_cancelar_reserva(id_reserva: int):
                            END,
                            :observacao_cancelamento
                        )
+                OUTPUT
+                    inserted.IDFatoOcupacaoPaineisEuromidia,
+                    inserted.Status,
+                    inserted.CanceladoEm
+                INTO @ReservasCanceladas
+                (
+                    IDReserva,
+                    StatusAtual,
+                    CanceladoEm
+                )
                  WHERE IDFatoOcupacaoPaineisEuromidia = :id_reserva
                    AND CanceladoEm IS NULL
                    AND UPPER(LTRIM(RTRIM(ISNULL(Origem, '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
@@ -24057,6 +24203,12 @@ def vencimentos_campanhas_cancelar_reserva(id_reserva: int):
                         :pode_cancelar_todas = 1
                         OR CriadoPorIDUsuario = :id_usuario_logado
                    );
+
+                SELECT TOP (1)
+                    IDReserva,
+                    StatusAtual,
+                    CanceladoEm
+                FROM @ReservasCanceladas;
             """),
             {
                 "id_reserva": id_reserva_int,
@@ -24064,19 +24216,47 @@ def vencimentos_campanhas_cancelar_reserva(id_reserva: int):
                 "pode_cancelar_todas": 1 if pode_cancelar_todas else 0,
                 "observacao_cancelamento": observacao_cancelamento,
             },
-        )
+        ).mappings().first()
 
-        if int(resultado.rowcount or 0) <= 0:
+        # Não uso Result.rowcount para confirmar este UPDATE. No SQL Server/pyodbc
+        # ele pode retornar -1 quando NOCOUNT ou triggers estão envolvidos, mesmo
+        # que a linha tenha sido alterada. O OUTPUT INTO acima é a confirmação
+        # transacional e inequívoca de que esta reserva específica foi cancelada.
+        if not reserva_cancelada:
             db.session.rollback()
-            flash("A reserva não foi cancelada porque o status mudou antes da confirmação.", "warning")
-            return redirect(url_retorno)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="A reserva não foi cancelada porque o status mudou antes da confirmação.",
+                categoria="warning",
+                url_destino=url_retorno,
+                status_http=409,
+            )
 
         db.session.commit()
-        flash(f"Reserva #{id_reserva_int} cancelada com sucesso.", "success")
-        return redirect(url_retorno)
+        mensagem_sucesso = f"Reserva #{id_reserva_int} cancelada com sucesso."
+        payload_atualizacao = {
+            "acao": "CANCELAR_RESERVA",
+            "fonte_linha": "RESERVA",
+            "id_reserva": int(id_reserva_int),
+            "status": "CANCELADO",
+            "remover_linha": True,
+            "mensagem": mensagem_sucesso,
+        }
+        _campanhas_vencimentos_publicar_atualizacao(payload_atualizacao)
+        return _campanhas_vencimentos_resposta_acao(
+            mensagem=mensagem_sucesso,
+            categoria="success",
+            url_destino=url_retorno,
+            payload=payload_atualizacao,
+        )
 
-    except HTTPException:
+    except HTTPException as exc:
         db.session.rollback()
+        if _campanhas_vencimentos_requisicao_assincrona():
+            return jsonify({
+                "ok": False,
+                "mensagem": str(exc.description or "Ação não autorizada."),
+                "categoria": "danger",
+            }), int(exc.code or 500)
         raise
 
     except Exception as exc:
@@ -24085,8 +24265,12 @@ def vencimentos_campanhas_cancelar_reserva(id_reserva: int):
             "Erro ao cancelar reserva pela tela de vencimentos. id_reserva=%s",
             id_reserva_int,
         )
-        flash(f"Erro ao cancelar reserva: {exc}", "danger")
-        return redirect(url_retorno)
+        return _campanhas_vencimentos_resposta_acao(
+            mensagem=f"Erro ao cancelar reserva: {exc}",
+            categoria="danger",
+            url_destino=url_retorno,
+            status_http=500,
+        )
 
 
 @admin.route("/vencimentos-campanhas/reserva/<int:id_reserva>/renovar", methods=["POST"])
@@ -24100,19 +24284,41 @@ def vencimentos_campanhas_renovar_reserva(id_reserva: int):
     try:
         reserva = _campanhas_vencimentos_buscar_base_reserva(int(id_reserva))
         if not reserva:
-            flash("Não encontrei a reserva selecionada ou ela não está mais ativa/reservada.", "warning")
-            return redirect(url_falha)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Não encontrei a reserva selecionada ou ela não está mais ativa/reservada.",
+                categoria="warning",
+                url_destino=url_falha,
+                status_http=409,
+            )
 
-        usuario_logado_eh_vendedor = _campanhas_vencimentos_usuario_eh_vendedor()
         id_usuario_logado = int(_campanhas_vencimentos_usuario_logado_id() or 0)
-        id_usuario_vendedor = int(reserva.get("IDDimUsuariosVendedor") or 0)
+        id_criador_reserva = int(reserva.get("CriadoPorIDUsuario") or 0)
+        pode_operar_todas = _campanhas_vencimentos_usuario_pode_cancelar_todas_reservas()
+        pode_operar_proprias = _campanhas_vencimentos_usuario_pode_operar_reservas_proprias()
 
-        if usuario_logado_eh_vendedor:
-            if id_usuario_logado <= 0:
-                abort(403, description="Não foi possível identificar o usuário logado para validar a reserva.")
+        if not pode_operar_todas:
+            if (
+                not pode_operar_proprias
+                or id_usuario_logado <= 0
+                or id_criador_reserva <= 0
+                or id_criador_reserva != id_usuario_logado
+            ):
+                abort(403, description="Você só pode efetivar reservas criadas pelo seu próprio usuário.")
 
-            if id_usuario_vendedor <= 0 or id_usuario_vendedor != id_usuario_logado:
-                abort(403, description="Você só pode criar card para reserva vinculada ao seu vendedor.")
+        tipo_vinculo_reserva = str(reserva.get("TipoVinculoOrigem") or "").strip().upper()
+        reserva_preferencia = bool(
+            (_parse_int(reserva.get("TipoReserva")) or 0) == 2
+            or "PREFERENCIA RENOV" in tipo_vinculo_reserva
+            or "PREFERÊNCIA RENOV" in tipo_vinculo_reserva
+            or (_parse_int(reserva.get("IDFatoOcupacaoOrigem")) or 0) > 0
+        )
+        if reserva.get("ExpiraEm") is None and not reserva_preferencia:
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Esta reserva não pertence ao prazo operacional de 48 horas úteis.",
+                categoria="warning",
+                url_destino=url_falha,
+                status_http=409,
+            )
 
         id_reserva_final = _parse_int(reserva.get("IDFatoOcupacaoPaineisEuromidia") or reserva.get("IDReservaOcupacao"))
         data_inicio_reserva = reserva.get("DataInicioCampanha")
@@ -24120,25 +24326,45 @@ def vencimentos_campanhas_renovar_reserva(id_reserva: int):
         cod_face = str(reserva.get("CodFace") or "").strip().upper()
 
         if not id_reserva_final:
-            flash("Não consegui criar o card porque o ID da reserva está inválido.", "warning")
-            return redirect(url_falha)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Não consegui criar o card porque o ID da reserva está inválido.",
+                categoria="warning",
+                url_destino=url_falha,
+                status_http=400,
+            )
 
         if not data_inicio_reserva or not data_fim_reserva:
-            flash("Não consegui criar o card porque a reserva não possui início e término válidos.", "warning")
-            return redirect(url_falha)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Não consegui criar o card porque a reserva não possui início e término válidos.",
+                categoria="warning",
+                url_destino=url_falha,
+                status_http=400,
+            )
 
         if data_fim_reserva < data_inicio_reserva:
-            flash("Não consegui criar o card porque o término da reserva é menor que a data de início.", "warning")
-            return redirect(url_falha)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Não consegui criar o card porque o término da reserva é menor que a data de início.",
+                categoria="warning",
+                url_destino=url_falha,
+                status_http=400,
+            )
 
         if not cod_face:
-            flash("Não consegui criar o card porque a reserva não possui CodFace.", "warning")
-            return redirect(url_falha)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Não consegui criar o card porque a reserva não possui CodFace.",
+                categoria="warning",
+                url_destino=url_falha,
+                status_http=400,
+            )
 
         prazo_dias = (data_fim_reserva - data_inicio_reserva).days + 1
         if prazo_dias <= 0:
-            flash("Não consegui criar o card porque o prazo calculado da reserva ficou inválido.", "warning")
-            return redirect(url_falha)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Não consegui criar o card porque o prazo calculado da reserva ficou inválido.",
+                categoria="warning",
+                url_destino=url_falha,
+                status_http=400,
+            )
 
         reserva["IDReservaPreferenciaRenovacao"] = int(id_reserva_final)
         reserva["ReservaPreferenciaRenovacao"] = {
@@ -24170,12 +24396,26 @@ def vencimentos_campanhas_renovar_reserva(id_reserva: int):
             )
 
             db.session.commit()
-            flash(
+            mensagem_existente = (
                 f"Já existia um card para a reserva #{id_reserva_final}: #{id_card_existente}. "
-                "Atualizei o título, descrição, IDReserva, painel/face e removi tags indevidas de Aditivo/Renovação.",
-                "info",
+                "Atualizei o título, descrição, IDReserva, painel/face e removi tags indevidas de Aditivo/Renovação."
             )
-            return redirect(url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA)))
+            url_kanban = url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA))
+            payload_atualizacao = {
+                "acao": "EFETIVAR_RESERVA",
+                "fonte_linha": "RESERVA",
+                "id_reserva": int(id_reserva_final),
+                "id_card": int(id_card_existente),
+                "status": "PROCESSO_INICIADO",
+                "mensagem": mensagem_existente,
+            }
+            _campanhas_vencimentos_publicar_atualizacao(payload_atualizacao)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem=mensagem_existente,
+                categoria="info",
+                url_destino=url_kanban,
+                payload=payload_atualizacao,
+            )
 
         titulo = _campanhas_vencimentos_titulo_card_reserva(reserva)
         descricao = _campanhas_vencimentos_descricao_card_reserva(reserva)
@@ -24197,17 +24437,37 @@ def vencimentos_campanhas_renovar_reserva(id_reserva: int):
         )
 
         db.session.commit()
-        flash(
+        mensagem_sucesso = (
             "Card criado no Kanban 1 a partir da reserva: "
             f"#{id_card} • Reserva #{id_reserva_final} • {cod_face} • "
             f"{_campanhas_vencimentos_formatar_data_pt(data_inicio_reserva)} até "
-            f"{_campanhas_vencimentos_formatar_data_pt(data_fim_reserva)}.",
-            "success",
+            f"{_campanhas_vencimentos_formatar_data_pt(data_fim_reserva)}."
         )
-        return redirect(url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA)))
+        url_kanban = url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA))
+        payload_atualizacao = {
+            "acao": "EFETIVAR_RESERVA",
+            "fonte_linha": "RESERVA",
+            "id_reserva": int(id_reserva_final),
+            "id_card": int(id_card),
+            "status": "PROCESSO_INICIADO",
+            "mensagem": mensagem_sucesso,
+        }
+        _campanhas_vencimentos_publicar_atualizacao(payload_atualizacao)
+        return _campanhas_vencimentos_resposta_acao(
+            mensagem=mensagem_sucesso,
+            categoria="success",
+            url_destino=url_kanban,
+            payload=payload_atualizacao,
+        )
 
-    except HTTPException:
+    except HTTPException as exc:
         db.session.rollback()
+        if _campanhas_vencimentos_requisicao_assincrona():
+            return jsonify({
+                "ok": False,
+                "mensagem": str(exc.description or "Ação não autorizada."),
+                "categoria": "danger",
+            }), int(exc.code or 500)
         raise
 
     except Exception as exc:
@@ -24216,8 +24476,12 @@ def vencimentos_campanhas_renovar_reserva(id_reserva: int):
             "Erro ao criar card de reserva pela tela de vencimentos. id_reserva=%s",
             id_reserva,
         )
-        flash(f"Erro ao criar card da reserva: {exc}", "danger")
-        return redirect(url_falha)
+        return _campanhas_vencimentos_resposta_acao(
+            mensagem=f"Erro ao criar card da reserva: {exc}",
+            categoria="danger",
+            url_destino=url_falha,
+            status_http=500,
+        )
 
 
 
@@ -24236,8 +24500,21 @@ def vencimentos_campanhas_renovar(id_vencimento: int):
     try:
         campanha = _campanhas_vencimentos_buscar_base_renovacao(int(id_vencimento))
         if not campanha:
-            flash("Não encontrei a campanha selecionada para renovação.", "warning")
-            return redirect(url_falha)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Não encontrei a campanha selecionada para renovação.",
+                categoria="warning",
+                url_destino=url_falha,
+                status_http=404,
+            )
+
+        status_campanha = str(campanha.get("NomeStatus") or "").strip().upper()
+        if status_campanha not in {"CAMPANHA ATIVA", "CAMPANHA VENCENDO"}:
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Somente campanhas ativas ou vencendo podem iniciar renovação.",
+                categoria="warning",
+                url_destino=url_falha,
+                status_http=409,
+            )
 
         usuario_logado_eh_vendedor = _campanhas_vencimentos_usuario_eh_vendedor()
         id_usuario_logado = int(_campanhas_vencimentos_usuario_logado_id() or 0)
@@ -24255,21 +24532,37 @@ def vencimentos_campanhas_renovar(id_vencimento: int):
         cod_face = str(campanha.get("CodFace") or "").strip().upper()
 
         if not data_inicio_original or not data_termino_original:
-            flash("Não consegui criar a renovação porque a campanha não possui início e término válidos.", "warning")
-            return redirect(url_falha)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Não consegui criar a renovação porque a campanha não possui início e término válidos.",
+                categoria="warning",
+                url_destino=url_falha,
+                status_http=400,
+            )
 
         if data_termino_original < data_inicio_original:
-            flash("Não consegui criar a renovação porque o término da campanha é menor que a data de início.", "warning")
-            return redirect(url_falha)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Não consegui criar a renovação porque o término da campanha é menor que a data de início.",
+                categoria="warning",
+                url_destino=url_falha,
+                status_http=400,
+            )
 
         if not cod_face:
-            flash("Não consegui criar a renovação porque o item da campanha não possui CodFace.", "warning")
-            return redirect(url_falha)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Não consegui criar a renovação porque o item da campanha não possui CodFace.",
+                categoria="warning",
+                url_destino=url_falha,
+                status_http=400,
+            )
 
         prazo_dias = (data_termino_original - data_inicio_original).days + 1
         if prazo_dias <= 0:
-            flash("Não consegui criar a renovação porque o prazo calculado da campanha ficou inválido.", "warning")
-            return redirect(url_falha)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Não consegui criar a renovação porque o prazo calculado da campanha ficou inválido.",
+                categoria="warning",
+                url_destino=url_falha,
+                status_http=400,
+            )
 
         data_inicio_renovacao = data_termino_original + timedelta(days=1)
         data_fim_renovacao = data_inicio_renovacao + timedelta(days=prazo_dias - 1)
@@ -24309,12 +24602,27 @@ def vencimentos_campanhas_renovar(id_vencimento: int):
 
             db.session.commit()
             msg_reserva = f" Reserva vinculada: #{id_reserva_preferencia}." if id_reserva_preferencia else ""
-            flash(
+            mensagem_existente = (
                 f"Já existia um card de renovação para essa campanha: #{id_card_existente}. "
-                f"Garanti novamente o vínculo de painel/face no card.{msg_reserva}",
-                "info",
+                f"Garanti novamente o vínculo de painel/face no card.{msg_reserva}"
             )
-            return redirect(url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA)))
+            url_kanban = url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA))
+            payload_atualizacao = {
+                "acao": "RENOVAR_CAMPANHA",
+                "fonte_linha": "CAMPANHA",
+                "id_vencimento": int(id_vencimento),
+                "id_card": int(id_card_existente),
+                "id_reserva": int(id_reserva_preferencia or 0) or None,
+                "status": "RENOVACAO_INICIADA",
+                "mensagem": mensagem_existente,
+            }
+            _campanhas_vencimentos_publicar_atualizacao(payload_atualizacao)
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem=mensagem_existente,
+                categoria="info",
+                url_destino=url_kanban,
+                payload=payload_atualizacao,
+            )
 
         id_card = _campanhas_vencimentos_criar_card_renovacao(
             campanha=campanha,
@@ -24325,18 +24633,39 @@ def vencimentos_campanhas_renovar(id_vencimento: int):
 
         db.session.commit()
         msg_reserva = f" • Reserva vinculada #{id_reserva_preferencia}" if id_reserva_preferencia else ""
-        flash(
+        mensagem_sucesso = (
             "Card de renovação criado no Kanban 1: "
             f"#{id_card} • {cod_face} • "
             f"{_campanhas_vencimentos_formatar_data_pt(data_inicio_renovacao)} até "
             f"{_campanhas_vencimentos_formatar_data_pt(data_fim_renovacao)}"
-            f"{msg_reserva}.",
-            "success",
+            f"{msg_reserva}."
         )
-        return redirect(url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA)))
+        url_kanban = url_for("kanban.kanban_view", id_kanban=int(ID_KANBAN_RENOVACAO_CAMPANHA))
+        payload_atualizacao = {
+            "acao": "RENOVAR_CAMPANHA",
+            "fonte_linha": "CAMPANHA",
+            "id_vencimento": int(id_vencimento),
+            "id_card": int(id_card),
+            "id_reserva": int(id_reserva_preferencia or 0) or None,
+            "status": "RENOVACAO_INICIADA",
+            "mensagem": mensagem_sucesso,
+        }
+        _campanhas_vencimentos_publicar_atualizacao(payload_atualizacao)
+        return _campanhas_vencimentos_resposta_acao(
+            mensagem=mensagem_sucesso,
+            categoria="success",
+            url_destino=url_kanban,
+            payload=payload_atualizacao,
+        )
 
-    except HTTPException:
+    except HTTPException as exc:
         db.session.rollback()
+        if _campanhas_vencimentos_requisicao_assincrona():
+            return jsonify({
+                "ok": False,
+                "mensagem": str(exc.description or "Ação não autorizada."),
+                "categoria": "danger",
+            }), int(exc.code or 500)
         raise
 
     except Exception as exc:
@@ -24345,8 +24674,12 @@ def vencimentos_campanhas_renovar(id_vencimento: int):
             "Erro ao criar card de renovação de campanha. id_vencimento=%s",
             id_vencimento,
         )
-        flash(f"Erro ao criar card de renovação: {exc}", "danger")
-        return redirect(url_falha)
+        return _campanhas_vencimentos_resposta_acao(
+            mensagem=f"Erro ao criar card de renovação: {exc}",
+            categoria="danger",
+            url_destino=url_falha,
+            status_http=500,
+        )
 
 
 
@@ -24467,6 +24800,9 @@ def vencimentos_campanhas_euromidia():
             vc.DiasParaVencer,
             vc.BitAtivo,
             vc.ReservaExpiraEm,
+            vc.TipoReserva,
+            vc.TipoVinculoOrigem,
+            vc.IDFatoOcupacaoOrigem,
             vc.DataCriacao,
             vc.DataAtualizacao
         {sql_from_where}
@@ -24515,12 +24851,19 @@ def vencimentos_campanhas_euromidia():
             and (_parse_int(item.get("IDFatoControleContratosEuromidia")) or 0) > 0
         )
         item["UsuarioPodeRenovarLinha"] = bool(
-            linha_pertence_ao_usuario_logado
+            fonte_linha == "CAMPANHA"
+            and linha_pertence_ao_usuario_logado
             and bool(item.get("PodeRenovar"))
+        )
+        item["UsuarioPodeEfetivarReserva"] = bool(
+            fonte_linha == "RESERVA"
+            and linha_pertence_ao_usuario_logado
+            and bool(item.get("PodeEfetivarReserva"))
         )
 
         item["UsuarioPodeCancelarReserva"] = bool(
             fonte_linha == "RESERVA"
+            and bool(item.get("ReservaPermiteAcoes"))
             and (_parse_int(item.get("IDReservaOcupacao")) or 0) > 0
             and (
                 usuario_logado_pode_cancelar_todas_reservas
@@ -24685,6 +25028,9 @@ def vencimentos_campanhas_sugestoes():
             vc.DiasParaVencer,
             vc.BitAtivo,
             vc.ReservaExpiraEm,
+            vc.TipoReserva,
+            vc.TipoVinculoOrigem,
+            vc.IDFatoOcupacaoOrigem,
             vc.DataAtualizacao
         {sql_from_where}
         ORDER BY

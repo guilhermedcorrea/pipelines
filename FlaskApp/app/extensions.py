@@ -12,7 +12,11 @@ login_manager = LoginManager()
 csrf = CSRFProtect()
 limiter = Limiter(key_func=get_remote_address)
 cache = Cache()
-socketio = SocketIO()
+socketio = SocketIO(
+    async_mode=os.getenv("SOCKETIO_ASYNC_MODE", "threading"),
+    ping_interval=int(os.getenv("SOCKETIO_PING_INTERVAL", "25")),
+    ping_timeout=int(os.getenv("SOCKETIO_PING_TIMEOUT", "30")),
+)
 
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}

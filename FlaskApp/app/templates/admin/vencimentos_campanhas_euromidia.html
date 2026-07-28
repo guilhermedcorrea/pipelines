@@ -702,6 +702,37 @@
     box-shadow:none;
   }
 
+  .vc-acao-trigger[aria-busy="true"]{
+    cursor:wait;
+    opacity:.65;
+    animation:vcAcaoPulse .8s ease-in-out infinite alternate;
+  }
+
+  .vc-acao-status-inline{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:34px;
+    padding:7px 10px;
+    border-radius:10px;
+    background:#ECFDF5;
+    color:#166534;
+    font-size:11px;
+    font-weight:900;
+    line-height:1.25;
+  }
+
+  .vc-row-removendo{
+    opacity:0;
+    transform:translateX(12px);
+    transition:opacity .16s ease, transform .16s ease;
+  }
+
+  @keyframes vcAcaoPulse{
+    from{ transform:scale(1); }
+    to{ transform:scale(.92); }
+  }
+
   .vc-acao-menu[hidden]{
     display:none !important;
   }
@@ -1979,9 +2010,15 @@
             {% for row in itens %}
               {% set usuario_pode_acessar_contrato = row.UsuarioPodeAcessarContrato if row.UsuarioPodeAcessarContrato is defined else (not usuario_logado_eh_vendedor and row.IDFatoControleContratosEuromidia) %}
               {% set usuario_pode_renovar_linha = row.UsuarioPodeRenovarLinha if row.UsuarioPodeRenovarLinha is defined else (not usuario_logado_eh_vendedor and row.PodeRenovar) %}
+              {% set usuario_pode_efetivar_reserva = row.UsuarioPodeEfetivarReserva if row.UsuarioPodeEfetivarReserva is defined else false %}
               {% set usuario_pode_cancelar_reserva = row.UsuarioPodeCancelarReserva if row.UsuarioPodeCancelarReserva is defined else false %}
               {% set linha_eh_reserva = row.FonteLinha == 'RESERVA' and row.IDReservaOcupacao %}
-              <tr data-fonte-linha="{{ row.FonteLinha }}" data-id-reserva="{{ row.IDReservaOcupacao or '' }}">
+              {% set linha_tem_acao = usuario_pode_efetivar_reserva or usuario_pode_cancelar_reserva or usuario_pode_renovar_linha %}
+              <tr
+                data-fonte-linha="{{ row.FonteLinha }}"
+                data-id-reserva="{{ row.IDReservaOcupacao or '' }}"
+                data-id-vencimento="{{ row.IDFatoVencimentoCampanhaEuromidia if row.FonteLinha == 'CAMPANHA' else '' }}"
+              >
                 <td data-label="Contrato">
                   {% if usuario_pode_acessar_contrato %}
                     {% set url_contrato_rapido = url_for('Paineis.contratos_detalhe', id_contrato=row.IDFatoControleContratosEuromidia, return_to=request.full_path, modo_rapido=1) %}
@@ -2058,11 +2095,12 @@
                 </td>
 
                 <td class="vc-acao-cell" data-label="AÇÃO">
+                  {% if linha_tem_acao %}
                   <div
                     id="vcAcaoWrap{{ loop.index0 }}"
                     class="vc-acao-wrap js-acao-wrap"
                     data-linha-reserva="{{ 1 if linha_eh_reserva else 0 }}"
-                    data-pode-efetivar="{{ 1 if linha_eh_reserva and usuario_pode_renovar_linha else 0 }}"
+                    data-pode-efetivar="{{ 1 if usuario_pode_efetivar_reserva else 0 }}"
                     data-pode-cancelar="{{ 1 if linha_eh_reserva and usuario_pode_cancelar_reserva else 0 }}"
                     data-pode-renovar="{{ 1 if not linha_eh_reserva and usuario_pode_renovar_linha and row.IDFatoVencimentoCampanhaEuromidia else 0 }}"
                   >
@@ -2094,6 +2132,7 @@
                     >
                       <div class="vc-acao-menu-titulo">Selecione uma ação</div>
 
+                      {% if usuario_pode_efetivar_reserva %}
                       <label class="vc-acao-opcao">
                         <input
                           type="checkbox"
@@ -2103,7 +2142,9 @@
                         >
                         <span class="vc-acao-opcao-texto">Efetivar Reserva</span>
                       </label>
+                      {% endif %}
 
+                      {% if linha_eh_reserva and usuario_pode_cancelar_reserva %}
                       <label class="vc-acao-opcao">
                         <input
                           type="checkbox"
@@ -2113,7 +2154,9 @@
                         >
                         <span class="vc-acao-opcao-texto">Cancelar Reserva</span>
                       </label>
+                      {% endif %}
 
+                      {% if not linha_eh_reserva and usuario_pode_renovar_linha and row.IDFatoVencimentoCampanhaEuromidia %}
                       <label class="vc-acao-opcao">
                         <input
                           type="checkbox"
@@ -2123,9 +2166,10 @@
                         >
                         <span class="vc-acao-opcao-texto">Renovar</span>
                       </label>
+                      {% endif %}
                     </div>
 
-                    {% if linha_eh_reserva and usuario_pode_renovar_linha %}
+                    {% if usuario_pode_efetivar_reserva %}
                       <form
                         class="vc-acao-form js-form-efetivar-reserva"
                         method="post"
@@ -2164,6 +2208,9 @@
                     </form>
                     {% endif %}
                   </div>
+                  {% else %}
+                    <span class="muted" title="Nenhuma ação disponível para o estado atual.">—</span>
+                  {% endif %}
                 </td>
               </tr>
             {% endfor %}
@@ -3103,29 +3150,159 @@
     return vcAcaoAbrirModal('Confirmação', mensagem, true);
   }
 
-  function vcAcaoEnviarFormulario(wrap, seletorFormulario){
-    const formularioAcao = wrap ? wrap.querySelector(seletorFormulario) : null;
+  function vcAcaoEncontrarLinha(payload){
+    const idReserva = String((payload && payload.id_reserva) || '').trim();
+    const idVencimento = String((payload && payload.id_vencimento) || '').trim();
 
-    if(!formularioAcao){
-      vcAcaoExibirMensagem('Esta ação não está disponível para a linha selecionada.');
+    if(idReserva){
+      return document.querySelector(`tr[data-fonte-linha="RESERVA"][data-id-reserva="${CSS.escape(idReserva)}"]`);
+    }
+
+    if(idVencimento){
+      return document.querySelector(`tr[data-fonte-linha="CAMPANHA"][data-id-vencimento="${CSS.escape(idVencimento)}"]`);
+    }
+
+    return null;
+  }
+
+  function vcAcaoGarantirEstadoVazio(){
+    const tbody = document.querySelector('.vc-table tbody');
+    if(!tbody || tbody.querySelector('tr[data-fonte-linha]')){ return; }
+    if(tbody.querySelector('.vc-empty')){ return; }
+
+    const linha = document.createElement('tr');
+    const celula = document.createElement('td');
+    celula.colSpan = 10;
+    celula.className = 'vc-empty';
+    celula.textContent = 'Nenhuma campanha encontrada.';
+    linha.appendChild(celula);
+    tbody.appendChild(linha);
+  }
+
+  function vcAcaoAplicarAtualizacao(payload){
+    if(!payload || !payload.acao){ return; }
+
+    const linha = vcAcaoEncontrarLinha(payload);
+    if(!linha){ return; }
+
+    const wrapLinha = linha.querySelector('.js-acao-wrap');
+    if(wrapLinha && wrapLinha.id){
+      const menuDesanexado = document.querySelector(
+        `.js-acao-menu[data-owner-id="${CSS.escape(wrapLinha.id)}"]`
+      );
+      if(menuDesanexado && !linha.contains(menuDesanexado)){
+        menuDesanexado.remove();
+      }
+    }
+
+    if(payload.acao === 'CANCELAR_RESERVA' || payload.remover_linha === true){
+      linha.classList.add('vc-row-removendo');
+      setTimeout(function(){
+        linha.remove();
+        vcAcaoGarantirEstadoVazio();
+      }, 170);
       return;
     }
 
+    if(payload.acao === 'EFETIVAR_RESERVA' || payload.acao === 'RENOVAR_CAMPANHA'){
+      const celulaAcao = linha.querySelector('.vc-acao-cell');
+      if(!celulaAcao){ return; }
+
+      const idCard = String(payload.id_card || '').trim();
+      const texto = payload.acao === 'EFETIVAR_RESERVA'
+        ? `Efetivação iniciada${idCard ? ` • Card #${idCard}` : ''}`
+        : `Renovação iniciada${idCard ? ` • Card #${idCard}` : ''}`;
+
+      celulaAcao.replaceChildren();
+      const status = document.createElement('span');
+      status.className = 'vc-acao-status-inline';
+      status.textContent = texto;
+      status.title = String(payload.mensagem || texto);
+      celulaAcao.appendChild(status);
+    }
+  }
+
+  async function vcAcaoEnviarFormulario(wrap, seletorFormulario){
+    const formularioAcao = wrap ? wrap.querySelector(seletorFormulario) : null;
+
+    if(!formularioAcao){
+      await vcAcaoExibirMensagem('Esta ação não está disponível para a linha selecionada.');
+      return false;
+    }
+
     if(formularioAcao.dataset.enviando === '1'){
-      return;
+      return false;
     }
 
     formularioAcao.dataset.enviando = '1';
     const trigger = wrap.querySelector('.js-acao-trigger');
+    const linha = wrap.closest('tr');
     if(trigger){
       trigger.disabled = true;
       trigger.setAttribute('aria-busy', 'true');
+      trigger.title = 'Processando ação...';
     }
 
-    if(typeof formularioAcao.requestSubmit === 'function'){
-      formularioAcao.requestSubmit();
-    }else{
-      formularioAcao.submit();
+    if(linha){
+      linha.setAttribute('aria-busy', 'true');
+    }
+
+    try{
+      const resposta = await fetch(formularioAcao.action, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: new FormData(formularioAcao),
+        cache: 'no-store'
+      });
+
+      const contentType = String(resposta.headers.get('content-type') || '').toLowerCase();
+      if(!contentType.includes('application/json')){
+        if(resposta.redirected && resposta.url){
+          window.location.assign(resposta.url);
+          return true;
+        }
+        throw new Error(`Resposta inesperada do servidor (HTTP ${resposta.status}).`);
+      }
+
+      const dados = await resposta.json();
+      if(!resposta.ok || !dados.ok){
+        throw new Error(dados.mensagem || `A ação não foi concluída (HTTP ${resposta.status}).`);
+      }
+
+      vcAcaoAplicarAtualizacao(dados);
+
+      if(dados.acao === 'CANCELAR_RESERVA'){
+        return true;
+      }
+
+      if(dados.redirect_url){
+        setTimeout(function(){
+          window.location.assign(dados.redirect_url);
+        }, 220);
+      }
+
+      return true;
+    }catch(erro){
+      delete formularioAcao.dataset.enviando;
+      if(trigger){
+        trigger.disabled = false;
+        trigger.removeAttribute('aria-busy');
+        trigger.title = 'Abrir opções de ação';
+      }
+      if(linha){
+        linha.removeAttribute('aria-busy');
+      }
+
+      await vcAcaoAbrirModal(
+        'Não foi possível concluir',
+        (erro && erro.message) ? erro.message : 'Falha inesperada ao executar a ação.',
+        false
+      );
+      return false;
     }
   }
 
@@ -3148,7 +3325,7 @@
         return;
       }
 
-      vcAcaoEnviarFormulario(wrap, '.js-form-efetivar-reserva');
+      await vcAcaoEnviarFormulario(wrap, '.js-form-efetivar-reserva');
       return;
     }
 
@@ -3165,7 +3342,7 @@
 
       const confirmouCancelamento = await vcAcaoConfirmar('Deseja Cancelar essa Reserva?');
       if(confirmouCancelamento){
-        vcAcaoEnviarFormulario(wrap, '.js-form-cancelar-reserva');
+        await vcAcaoEnviarFormulario(wrap, '.js-form-cancelar-reserva');
       }
       return;
     }
@@ -3183,7 +3360,7 @@
 
       const confirmouRenovacao = await vcAcaoConfirmar('Deseja Iniciar o processo de Renovação?');
       if(confirmouRenovacao){
-        vcAcaoEnviarFormulario(wrap, '.js-form-renovar');
+        await vcAcaoEnviarFormulario(wrap, '.js-form-renovar');
       }
       return;
     }
@@ -3281,6 +3458,27 @@
   window.addEventListener('scroll', function(){
     vcAcaoFecharTodosMenus();
   }, true);
+
+  if(typeof window.io === 'function'){
+    const vcSocket = window.io('/vencimentos-campanhas', {
+      transports: ['websocket', 'polling'],
+      upgrade: true,
+      rememberUpgrade: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 600,
+      reconnectionDelayMax: 4000,
+      timeout: 10000
+    });
+
+    vcSocket.on('vencimentos:atualizado', function(payload){
+      vcAcaoAplicarAtualizacao(payload || {});
+    });
+
+    window.addEventListener('beforeunload', function(){
+      try{ vcSocket.disconnect(); }catch(e){}
+    }, {once:true});
+  }
 
   document.querySelectorAll('.vc-page details.vc-dd').forEach(configurarDropdown);
 

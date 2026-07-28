@@ -1876,11 +1876,17 @@
 
     let timerBuscaServidor = null;
     let sequenciaBuscaServidor = 0;
+    let controleBuscaServidor = null;
 
     function render(){
       const termo = normalizar(input.value);
+      const termoDigitos = texto(input.value).replace(/\D/g, "");
       const itens = (cfg.getLista() || []).filter(function(item){
-        return !termo || normalizar(cfg.getLabel(item)).includes(termo);
+        if(!termo) return true;
+        const rotulo = cfg.getLabel(item);
+        if(normalizar(rotulo).includes(termo)) return true;
+        return termoDigitos.length >= 3
+          && texto(rotulo).replace(/\D/g, "").includes(termoDigitos);
       });
       lista.innerHTML = "";
 
@@ -1918,16 +1924,22 @@
       const minhaSequencia = ++sequenciaBuscaServidor;
 
       timerBuscaServidor = setTimeout(async function(){
+        if(controleBuscaServidor){
+          controleBuscaServidor.abort();
+        }
+        controleBuscaServidor = new AbortController();
+
         try{
-          await cfg.buscarServidor(termoDigitado);
+          await cfg.buscarServidor(termoDigitado, controleBuscaServidor.signal);
         }catch(e){
+          if(e && e.name === "AbortError") return;
           console.error("[reserva] Falha ao pesquisar empresa no servidor:", e);
         }
 
         if(minhaSequencia === sequenciaBuscaServidor){
           render();
         }
-      }, 250);
+      }, 180);
     }
 
     input.addEventListener("input", function(){
@@ -1946,17 +1958,25 @@
   }
 
   function bindDadosReservaGlobal(){
+    const cacheBuscasEmpresas = new Map();
+
     montarComboGlobalReserva({
       input: elInputClienteGlobal,
       lista: elListaClienteGlobal,
       botao: elBtnClienteGlobal,
       getLista:function(){ return dadosReservaGlobal.clientes; },
       getLabel:labelEmpresa,
-      buscarServidor:async function(termo){
+      buscarServidor:async function(termo, signal){
         const busca = texto(termo).trim();
 
-        if(busca.length < 2){
+        if(busca.length < 3){
           dadosReservaGlobal.clientes = dadosReservaGlobal.clientes_iniciais.slice();
+          return;
+        }
+
+        const chaveBusca = normalizar(busca);
+        if(cacheBuscasEmpresas.has(chaveBusca)){
+          dadosReservaGlobal.clientes = cacheBuscasEmpresas.get(chaveBusca).slice();
           return;
         }
 
@@ -1965,7 +1985,8 @@
         qs.set("q_empresa", busca);
 
         const resp = await fetch(URL_DADOS_MODAL + "?" + qs.toString(), {
-          credentials:"same-origin"
+          credentials:"same-origin",
+          signal:signal
         });
         const data = await resp.json().catch(function(){ return null; });
 
@@ -1973,7 +1994,14 @@
           throw new Error((data && data.erro) || "Pesquisa de empresas falhou.");
         }
 
-        dadosReservaGlobal.clientes = data.clientes || data.empresas || [];
+        const empresasEncontradas = data.clientes || data.empresas || [];
+        dadosReservaGlobal.clientes = empresasEncontradas;
+        cacheBuscasEmpresas.set(chaveBusca, empresasEncontradas.slice());
+
+        if(cacheBuscasEmpresas.size > 40){
+          const primeiraChave = cacheBuscasEmpresas.keys().next().value;
+          cacheBuscasEmpresas.delete(primeiraChave);
+        }
       },
       onInputLivre:function(){ dadosReservaGlobal.id_cliente = ""; },
       onSelect:function(item, input){
