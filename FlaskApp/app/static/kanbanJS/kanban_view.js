@@ -17639,7 +17639,39 @@ async function moverCard(idCard, idFasePara, posicao) {
 
 
   function montarHtmlImpressaoOrcamentoCard(){
-    const conteudoAtual = orcamentoCardConteudo?.innerHTML || "";
+    /*
+     * A impressão recebe uma cópia limpa do orçamento. Os <style> criados
+     * dinamicamente para o modal são removidos porque podem carregar altura
+     * máxima e overflow da tela para o iframe, transformando todo o orçamento
+     * em uma única folha com barra de rolagem interna.
+     */
+    const conteudoImpressao = orcamentoCardConteudo?.cloneNode(true);
+    conteudoImpressao?.querySelectorAll("style").forEach((estilo) => estilo.remove());
+
+    /*
+     * A arte horizontal do cabeçalho já ocupa toda a largura disponível. Para
+     * preencher também a altura da primeira folha sem cortar ou deformar a
+     * imagem principal, a mesma arte é usada como fundo institucional da capa.
+     */
+    const cabecalhoImpressao = conteudoImpressao?.querySelector(".kb-orcamento-head");
+    const imagemCabecalhoOriginal = orcamentoCardConteudo?.querySelector(
+      ".kb-orcamento-head-logo"
+    );
+    const urlCabecalho = safeStr(
+      imagemCabecalhoOriginal?.currentSrc || imagemCabecalhoOriginal?.src || ""
+    ).trim();
+    if (cabecalhoImpressao && urlCabecalho) {
+      const urlCssSegura = urlCabecalho
+        .replaceAll("\\", "\\\\")
+        .replaceAll('"', '\\"')
+        .replace(/[\r\n\f]/g, "");
+      cabecalhoImpressao.style.setProperty(
+        "--kb-orcamento-capa-print",
+        `url("${urlCssSegura}")`
+      );
+    }
+
+    const conteudoAtual = conteudoImpressao?.innerHTML || "";
     if (!safeStr(conteudoAtual).trim()){
       return "";
     }
@@ -17651,53 +17683,125 @@ async function moverCard(idCard, idFasePara, posicao) {
     const estilosImpressao = `
       *{ box-sizing:border-box; }
       html, body{
+        width:auto;
+        min-width:0;
+        max-width:none;
+        height:auto;
+        min-height:0;
+        max-height:none;
         margin:0;
         padding:0;
-        background:#f5f7fb;
+        overflow:visible;
+        background:#ffffff;
         color:#0f172a;
         font-family: Arial, Helvetica, sans-serif;
+        -webkit-print-color-adjust:exact;
+        print-color-adjust:exact;
       }
       body{
-        padding:24px;
+        padding:0;
       }
       .kb-orcamento-print-page{
-        max-width:1180px;
-        margin:0 auto;
-        display:grid;
-        gap:16px;
+        display:block;
+        position:static;
+        width:100%;
+        min-width:0;
+        max-width:none;
+        height:auto;
+        min-height:0;
+        max-height:none;
+        margin:0;
+        padding:0;
+        overflow:visible;
       }
       .kb-orcamento-wrap{
-        display:grid;
-        gap:16px;
+        display:block;
+        position:static;
+        width:100%;
+        min-width:0;
+        max-width:none;
+        height:auto;
+        min-height:0;
+        max-height:none;
+        margin:0;
+        padding:0;
+        overflow:visible;
       }
       .kb-orcamento-head{
-        display:grid;
-        grid-template-columns:1fr;
+        position:relative;
+        isolation:isolate;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        width:100%;
+        /*
+         * 209 mm (em vez de 210 mm) preserva o efeito de página inteira e
+         * deixa 1 mm de tolerância contra arredondamentos do Chrome/PDF.
+         */
+        height:209mm;
+        min-height:209mm;
+        max-height:209mm;
         gap:0;
-        align-items:stretch;
-        padding:0;
-        border:1px solid rgba(15,23,42,.12);
-        border-radius:20px;
-        background:linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(248,250,252,.98) 100%);
+        padding:8mm 0;
+        border:0;
+        border-radius:0;
+        background:
+          radial-gradient(circle at 18% 52%, rgba(70,179,206,.52) 0%, rgba(36,143,194,.20) 34%, transparent 66%),
+          linear-gradient(135deg, #081052 0%, #071B70 45%, #003B89 100%);
         box-shadow:none;
         overflow:hidden;
+        break-inside:avoid;
+        page-break-inside:avoid;
+        margin:0;
+      }
+      .kb-orcamento-head::before{
+        content:"";
+        position:absolute;
+        inset:-12mm;
+        z-index:-2;
+        background-image:
+          linear-gradient(180deg, rgba(4,9,55,.42) 0%, rgba(0,37,105,.54) 100%),
+          var(
+            --kb-orcamento-capa-print,
+            linear-gradient(135deg, #081052 0%, #0053AA 100%)
+          );
+        background-size:cover;
+        background-position:center center;
+        filter:blur(7mm) saturate(1.15);
+        transform:scale(1.08);
+      }
+      .kb-orcamento-head::after{
+        content:"";
+        position:absolute;
+        inset:0;
+        z-index:-1;
+        background:
+          linear-gradient(90deg, rgba(3,10,68,.28) 0%, rgba(0,83,170,.08) 48%, rgba(3,10,68,.30) 100%),
+          linear-gradient(180deg, rgba(255,255,255,.04) 0%, rgba(0,0,0,.16) 100%);
       }
       .kb-orcamento-head.sem-marca{
-        padding-top:14px;
+        padding:8mm;
       }
       .kb-orcamento-head-marca{
         position:relative;
+        z-index:1;
+        flex:0 0 auto;
         min-width:0;
-        width:100%;
+        width:calc(100% - 12mm);
+        max-width:100%;
         min-height:0;
         height:auto;
         aspect-ratio:678 / 242;
         padding:0;
         margin:0;
         border:0;
+        border-radius:6mm;
         background:linear-gradient(90deg, #46B3CE 0%, #248FC2 48%, #0053AA 100%);
         overflow:hidden;
         isolation:isolate;
+        box-shadow:
+          0 5mm 14mm rgba(0,0,0,.34),
+          0 0 0 .35mm rgba(255,255,255,.18);
       }
       .kb-orcamento-capa-preenchimento{
         position:absolute;
@@ -17866,6 +17970,9 @@ async function moverCard(idCard, idFasePara, posicao) {
         padding:16px 18px;
         display:grid;
         gap:12px;
+        margin:0 0 4mm;
+        break-inside:avoid;
+        page-break-inside:avoid;
       }
       .kb-orcamento-empresa-grid,
       .kb-orcamento-dados-grid{
@@ -17886,8 +17993,15 @@ async function moverCard(idCard, idFasePara, posicao) {
         word-break:break-word;
       }
       .kb-orcamento-lista{
-        display:grid;
-        gap:16px;
+        display:block;
+        position:static;
+        width:100%;
+        height:auto;
+        min-height:0;
+        max-height:none;
+        margin:0;
+        padding:0;
+        overflow:visible;
       }
       .kb-orcamento-item{
         padding:16px;
@@ -17895,6 +18009,11 @@ async function moverCard(idCard, idFasePara, posicao) {
         grid-template-columns:1fr;
         gap:14px;
         align-items:start;
+        width:100%;
+        max-width:100%;
+        margin:0;
+        break-before:page;
+        page-break-before:always;
         break-inside:avoid;
         page-break-inside:avoid;
       }
@@ -17970,6 +18089,146 @@ async function moverCard(idCard, idFasePara, posicao) {
         display:block;
         background:#ffffff;
       }
+      .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva{
+        display:grid;
+        grid-template-columns:minmax(0, 1fr);
+        grid-template-rows:minmax(0, 1fr) auto;
+        width:100%;
+        min-width:100%;
+        max-width:100%;
+        height:209mm;
+        min-height:209mm;
+        max-height:209mm;
+        margin:0;
+        padding:0;
+        gap:0;
+        border:0;
+        border-radius:0;
+        overflow:hidden;
+        background:#ffffff;
+      }
+      .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria{
+        display:block;
+        width:100%;
+        min-width:100%;
+        max-width:100%;
+        height:100%;
+        min-height:0;
+        overflow:hidden;
+      }
+      .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-imagem-wrap{
+        display:flex;
+        width:100%;
+        min-width:100%;
+        max-width:100%;
+        height:100%;
+        min-height:0;
+        max-height:none;
+        aspect-ratio:auto;
+        margin:0;
+        padding:0;
+        border:0;
+        border-radius:0;
+        overflow:hidden;
+        background:#ffffff;
+        align-items:center;
+        justify-content:center;
+      }
+      .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-imagem{
+        display:block;
+        width:100%;
+        min-width:100%;
+        height:100%;
+        max-width:100%;
+        max-height:100%;
+        margin:0;
+        object-fit:contain;
+        object-position:center center;
+        background:#ffffff;
+      }
+      .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-item-info,
+      .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria-indicador,
+      .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria-nav{
+        display:none !important;
+      }
+      .kb-orcamento-faixa-institucional{
+        --kb-orcamento-faixa-bg:#6B6BF2;
+        --kb-orcamento-faixa-label:#FFD000;
+        display:grid;
+        grid-template-columns:minmax(0, 1fr) minmax(48mm, 72mm);
+        align-items:center;
+        width:100%;
+        min-width:100%;
+        max-width:100%;
+        min-height:28mm;
+        max-height:28mm;
+        gap:5mm;
+        margin:0;
+        padding:3.5mm 7mm;
+        border:0;
+        border-radius:0;
+        overflow:hidden;
+        background:var(--kb-orcamento-faixa-bg);
+        color:#ffffff;
+      }
+      .kb-orcamento-faixa-institucional.sem-logo{
+        grid-template-columns:minmax(0, 1fr);
+      }
+      .kb-orcamento-faixa-texto{
+        min-width:0;
+        display:grid;
+        gap:1.2mm;
+        font-size:8.5pt;
+        line-height:1.2;
+      }
+      .kb-orcamento-faixa-linha{
+        min-width:0;
+        display:flex;
+        align-items:baseline;
+        flex-wrap:wrap;
+        column-gap:1.5mm;
+        row-gap:.8mm;
+      }
+      .kb-orcamento-faixa-campo{
+        min-width:0;
+        display:inline-flex;
+        align-items:baseline;
+        gap:1mm;
+        white-space:nowrap;
+      }
+      .kb-orcamento-faixa-campo + .kb-orcamento-faixa-campo::before{
+        content:"|";
+        margin-right:.5mm;
+        color:var(--kb-orcamento-faixa-label);
+        font-weight:900;
+      }
+      .kb-orcamento-faixa-label{
+        color:var(--kb-orcamento-faixa-label);
+        font-weight:800;
+      }
+      .kb-orcamento-faixa-valor{
+        color:#ffffff;
+        font-weight:500;
+      }
+      .kb-orcamento-faixa-campo.destaque .kb-orcamento-faixa-label,
+      .kb-orcamento-faixa-campo.destaque .kb-orcamento-faixa-valor{
+        font-weight:950;
+      }
+      .kb-orcamento-faixa-marca{
+        min-width:0;
+        display:flex;
+        align-items:center;
+        justify-content:flex-end;
+      }
+      .kb-orcamento-faixa-logo{
+        display:block;
+        width:100%;
+        max-width:72mm;
+        height:auto;
+        max-height:18mm;
+        object-fit:contain;
+        object-position:right center;
+      }
       .kb-orcamento-galeria-nav{
         position:absolute;
         inset:0;
@@ -18034,13 +18293,69 @@ async function moverCard(idCard, idFasePara, posicao) {
         font-weight:800;
         color:rgba(15,23,42,.68);
       }
+      .kb-orcamento-complemento-final{
+        display:block;
+        position:static;
+        width:100%;
+        height:auto;
+        min-height:0;
+        max-height:none;
+        margin:0;
+        padding:0;
+        overflow:visible;
+      }
+      .kb-orcamento-complemento-bloco{
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        width:100%;
+        min-width:100%;
+        max-width:100%;
+        height:209mm;
+        min-height:209mm;
+        max-height:209mm;
+        margin:0;
+        padding:0;
+        border:0;
+        border-radius:0;
+        overflow:hidden;
+        background:#ffffff;
+        box-shadow:none;
+        break-before:page;
+        page-break-before:always;
+        break-inside:avoid;
+        page-break-inside:avoid;
+      }
+      .kb-orcamento-complemento-imagem{
+        display:block;
+        width:100%;
+        height:100%;
+        max-width:100%;
+        max-height:100%;
+        margin:0;
+        object-fit:contain;
+        object-position:center center;
+        background:#ffffff;
+      }
       @page{
-        size:auto;
-        margin:12mm;
+        size:A4 landscape;
+        /*
+         * As artes já possuem composição, rodapé e área de segurança próprios.
+         * Remover a margem da folha elimina os vãos laterais sem precisar
+         * deformar ou recortar a imagem.
+         */
+        margin:0;
       }
       @media print{
+        html,
         body{
+          width:auto;
+          height:auto;
+          min-height:0;
+          max-height:none;
+          margin:0;
           padding:0;
+          overflow:visible;
           background:#ffffff;
         }
       }
@@ -18127,7 +18442,12 @@ async function moverCard(idCard, idFasePara, posicao) {
         });
 
         verificar();
-        setTimeout(concluir, 1200);
+        /*
+         * Orçamentos com várias artes podem depender de imagens maiores.
+         * O limite maior evita abrir a prévia enquanto parte das páginas ainda
+         * não foi dimensionada pelo navegador.
+         */
+        setTimeout(concluir, 8000);
       } catch (erro) {
         console.error("Erro ao aguardar recursos do orçamento para impressão:", erro);
         resolve();
@@ -20111,5 +20431,3 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
   });
 })();
-
-

@@ -5462,6 +5462,305 @@
     });
   }
 
+  const CSS_IMPRESSAO_ORCAMENTO = `
+    @page{
+      size:297mm 210mm;
+      margin:8mm;
+    }
+
+    *,
+    *::before,
+    *::after{
+      box-sizing:border-box !important;
+    }
+
+    html,
+    body{
+      width:auto !important;
+      min-width:0 !important;
+      margin:0 !important;
+      padding:0 !important;
+      background:#fff !important;
+      color:#0f172a !important;
+      -webkit-print-color-adjust:exact !important;
+      print-color-adjust:exact !important;
+    }
+
+    body{
+      font-family:Arial, Helvetica, sans-serif !important;
+    }
+
+    .kb-orcamento-wrap{
+      display:block !important;
+      width:100% !important;
+      max-width:none !important;
+      min-width:0 !important;
+      margin:0 !important;
+      padding:0 !important;
+    }
+
+    .kb-orcamento-head,
+    .kb-orcamento-empresa,
+    .kb-orcamento-vazio{
+      width:100% !important;
+      max-width:100% !important;
+      margin:0 0 4mm !important;
+      break-inside:avoid !important;
+      page-break-inside:avoid !important;
+      box-shadow:none !important;
+    }
+
+    .kb-orcamento-lista{
+      display:block !important;
+      width:100% !important;
+      margin:0 !important;
+      padding:0 !important;
+    }
+
+    .kb-orcamento-lista > .kb-orcamento-item{
+      width:100% !important;
+      max-width:100% !important;
+      min-width:0 !important;
+      margin:0 !important;
+      break-before:page !important;
+      page-break-before:always !important;
+      break-inside:avoid !important;
+      page-break-inside:avoid !important;
+      box-shadow:none !important;
+    }
+
+    /*
+     * Cada arte exclusiva usa uma folha A4 paisagem. A altura fica alguns
+     * milímetros abaixo da área útil para evitar uma página extra causada por
+     * arredondamento do mecanismo de impressão do Chrome.
+     */
+    .kb-orcamento-lista > .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva{
+      display:grid !important;
+      grid-template-columns:minmax(0, 1fr) !important;
+      grid-template-rows:minmax(0, 1fr) auto !important;
+      width:100% !important;
+      height:191mm !important;
+      max-height:191mm !important;
+      padding:0 !important;
+      gap:0 !important;
+      border:0 !important;
+      border-radius:0 !important;
+      overflow:hidden !important;
+      background:#fff !important;
+    }
+
+    .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-galeria{
+      display:block !important;
+      width:100% !important;
+      height:100% !important;
+      min-height:0 !important;
+      overflow:hidden !important;
+    }
+
+    .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-imagem-wrap{
+      display:flex !important;
+      width:100% !important;
+      height:100% !important;
+      min-height:0 !important;
+      max-height:none !important;
+      aspect-ratio:auto !important;
+      margin:0 !important;
+      padding:0 !important;
+      border:0 !important;
+      border-radius:0 !important;
+      overflow:hidden !important;
+      background:#fff !important;
+      align-items:center !important;
+      justify-content:center !important;
+    }
+
+    .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-imagem{
+      display:block !important;
+      width:100% !important;
+      height:100% !important;
+      max-width:100% !important;
+      max-height:100% !important;
+      margin:0 !important;
+      object-fit:contain !important;
+      object-position:center center !important;
+      background:#fff !important;
+    }
+
+    .kb-orcamento-faixa-institucional{
+      display:grid !important;
+      grid-template-columns:minmax(0, 1fr) minmax(48mm, 72mm) !important;
+      align-items:center !important;
+      width:100% !important;
+      min-height:28mm !important;
+      max-height:28mm !important;
+      gap:5mm !important;
+      margin:0 !important;
+      padding:3.5mm 7mm !important;
+      border:0 !important;
+      border-radius:0 !important;
+      overflow:hidden !important;
+      background:#6B6BF2 !important;
+      color:#fff !important;
+    }
+
+    .kb-orcamento-faixa-institucional.sem-logo{
+      grid-template-columns:minmax(0, 1fr) !important;
+    }
+
+    .kb-orcamento-faixa-texto{
+      gap:1.2mm !important;
+      font-size:8.5pt !important;
+      line-height:1.2 !important;
+    }
+
+    .kb-orcamento-faixa-linha{
+      column-gap:1.5mm !important;
+      row-gap:.8mm !important;
+    }
+
+    .kb-orcamento-faixa-campo{
+      gap:1mm !important;
+      white-space:nowrap !important;
+    }
+
+    .kb-orcamento-faixa-logo{
+      width:100% !important;
+      max-width:72mm !important;
+      max-height:18mm !important;
+      object-fit:contain !important;
+      object-position:right center !important;
+    }
+
+    .kb-orcamento-galeria-nav,
+    .kb-orcamento-galeria-indicador{
+      display:none !important;
+    }
+
+    .kb-orcamento-complemento-final{
+      display:block !important;
+      width:100% !important;
+      margin:0 !important;
+      padding:0 !important;
+    }
+
+    .kb-orcamento-complemento-bloco{
+      display:flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+      width:100% !important;
+      height:191mm !important;
+      max-height:191mm !important;
+      margin:0 !important;
+      padding:0 !important;
+      border:0 !important;
+      border-radius:0 !important;
+      overflow:hidden !important;
+      background:#fff !important;
+      box-shadow:none !important;
+      break-before:page !important;
+      page-break-before:always !important;
+      break-inside:avoid !important;
+      page-break-inside:avoid !important;
+    }
+
+    .kb-orcamento-complemento-imagem{
+      display:block !important;
+      width:100% !important;
+      height:100% !important;
+      max-width:100% !important;
+      max-height:100% !important;
+      margin:0 !important;
+      object-fit:contain !important;
+      object-position:center center !important;
+      background:#fff !important;
+    }
+  `;
+
+  function escaparHtmlOrcamento(valor) {
+    return String(valor ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function aguardarCarregamentoImpressao(janelaImpressao, limiteMs = 8000) {
+    const documentoImpressao = janelaImpressao.document;
+    const imagens = Array.from(documentoImpressao.images || []);
+
+    const aguardarImagem = (imagem) => {
+      if (imagem.complete) return Promise.resolve();
+      return new Promise((resolve) => {
+        imagem.addEventListener("load", resolve, { once:true });
+        imagem.addEventListener("error", resolve, { once:true });
+      });
+    };
+
+    const aguardarRecursos = Promise.all([
+      ...imagens.map(aguardarImagem),
+      documentoImpressao.fonts?.ready?.catch?.(() => undefined) || Promise.resolve()
+    ]);
+    const limite = new Promise((resolve) => {
+      janelaImpressao.setTimeout(resolve, limiteMs);
+    });
+
+    return Promise.race([aguardarRecursos, limite]);
+  }
+
+  async function imprimirOrcamentoEmPaisagem() {
+    aplicarImagensExclusivasOrcamento();
+    aplicarComplementoFinalOrcamento();
+
+    const conteudo = document.getElementById("orcamentoCardConteudo");
+    if (!conteudo || !conteudo.querySelector(".kb-orcamento-item, .kb-orcamento-head")) {
+      window.alert("Aguarde o carregamento completo do orçamento antes de imprimir.");
+      return;
+    }
+
+    const janelaImpressao = window.open("", "_blank", "width=1400,height=900");
+    if (!janelaImpressao) {
+      window.alert("O navegador bloqueou a janela de impressão. Autorize pop-ups para esta página e tente novamente.");
+      return;
+    }
+
+    const recursosVisuais = Array.from(
+      document.querySelectorAll('style, link[rel="stylesheet"]')
+    ).map((recurso) => recurso.outerHTML).join("\n");
+
+    const conteudoImpressao = conteudo.cloneNode(true);
+    conteudoImpressao.querySelectorAll("style").forEach((estilo) => estilo.remove());
+
+    const idCard = Number(
+      ultimoPayloadOrcamento?.id_card || ultimoPayloadOrcamento?.card_id || 0
+    );
+    const titulo = idCard ? `Orçamento do card ${idCard}` : "Orçamento";
+    const documentoImpressao = janelaImpressao.document;
+
+    documentoImpressao.open();
+    documentoImpressao.write(`<!doctype html>
+      <html lang="pt-BR">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <base href="${escaparHtmlOrcamento(window.location.href)}">
+          <title>${escaparHtmlOrcamento(titulo)}</title>
+          ${recursosVisuais}
+          <style id="kb-orcamento-estilo-impressao-paisagem">
+            ${CSS_IMPRESSAO_ORCAMENTO}
+          </style>
+        </head>
+        <body>
+          ${conteudoImpressao.outerHTML}
+        </body>
+      </html>`);
+    documentoImpressao.close();
+
+    await aguardarCarregamentoImpressao(janelaImpressao);
+    janelaImpressao.focus();
+    janelaImpressao.print();
+  }
+
   const conteudoOrcamento = document.getElementById("orcamentoCardConteudo");
   if (conteudoOrcamento) {
     const observer = new MutationObserver((mutacoes) => {
@@ -5480,6 +5779,23 @@
       }
     });
     observer.observe(conteudoOrcamento, { childList: true, subtree: true });
+  }
+
+  const botaoImprimirOrcamento = document.getElementById("btnImprimirOrcamentoCard");
+  if (botaoImprimirOrcamento) {
+    /*
+     * O listener em captura assume o clique antes do manipulador legado do
+     * bundle externo. Isso garante uma única janela de impressão e mantém
+     * impressão física e "Salvar como PDF" no mesmo layout A4 paisagem.
+     */
+    botaoImprimirOrcamento.addEventListener("click", (evento) => {
+      evento.preventDefault();
+      evento.stopImmediatePropagation();
+      imprimirOrcamentoEmPaisagem().catch((erro) => {
+        console.error("[KANBAN][ORCAMENTO] Falha ao preparar impressão:", erro);
+        window.alert("Não foi possível preparar o orçamento para impressão.");
+      });
+    }, { capture:true });
   }
 
   window.fetch = async (...argumentos) => {
