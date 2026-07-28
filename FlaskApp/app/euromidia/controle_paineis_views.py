@@ -3488,16 +3488,15 @@ def lista_paineis():
         bisemanas_select = []
 
 
-    tipo_face_norm = func.upper(func.ltrim(func.rtrim(func.coalesce(DimFacesPaineis.Tipo, ""))))
     tipo_painel_norm = func.upper(func.ltrim(func.rtrim(func.coalesce(DimPaineisEuromidia.Tipo, ""))))
 
-    rn_painel_tipo = func.row_number().over(
-        partition_by=(DimPaineisEuromidia.CodPonto, tipo_painel_norm),
-        order_by=(DimPaineisEuromidia.DataAtualizacao.desc(), DimPaineisEuromidia.IDDimPaineisEuromidia.desc()),
-    ).label("rn")
-
-    sub_ultimo_painel_tipo = (
+    # A face já possui a chave estrangeira IDDimPaineisEuromidia. Portanto, a
+    # dimensão usada pela lista deve preservar cada ID para que a junção abaixo
+    # seja feita pela relação real entre as tabelas, sem tentar inferir o painel
+    # apenas pela combinação CodPonto + Tipo.
+    ultimo_painel = (
         db.session.query(
+            DimPaineisEuromidia.IDDimPaineisEuromidia.label("IDDimPaineisEuromidia"),
             DimPaineisEuromidia.CodPonto.label("CodPonto"),
             tipo_painel_norm.label("TipoNorm"),
             DimPaineisEuromidia.Tipo.label("Tipo"),
@@ -3518,15 +3517,8 @@ def lista_paineis():
             DimPaineisEuromidia.BitAluguel.label("BitAluguel"),
             DimPaineisEuromidia.BitIluminado.label("BitIluminado"),
             DimPaineisEuromidia.QuantidadeFaces.label("QuantidadeFaces"),
-            rn_painel_tipo,
         )
         .filter(DimPaineisEuromidia.CodPonto != None)
-        .subquery()
-    )
-
-    ultimo_painel = (
-        db.session.query(sub_ultimo_painel_tipo)
-        .filter(sub_ultimo_painel_tipo.c.rn == 1)
         .subquery()
     )
 
@@ -3638,8 +3630,22 @@ def lista_paineis():
                 filtro_ativo_cancelamento,
             )
 
+    # As opções de cidade vêm do cadastro de painéis. Antes elas nasciam dos
+    # itens de contrato do período, então uma cidade podia aparecer no filtro,
+    # mas somente os painéis com contrato naquela cidade eram retornados.
+    cidades_exibicao = (
+        db.session.query(func.trim(ultimo_painel.c.Cidade).label("Cidade"))
+        .filter(
+            ultimo_painel.c.Cidade != None,
+            func.trim(ultimo_painel.c.Cidade) != "",
+        )
+        .distinct()
+        .order_by(func.trim(ultimo_painel.c.Cidade).asc())
+        .all()
+    )
+    cidades_exibicao = [r[0] for r in cidades_exibicao if r and r[0]]
+
     if tudo:
-        cidades_exibicao = []
         tipos_documento = []
         vendedores_contrato = []
         marcas_exibidas = []
@@ -3657,19 +3663,6 @@ def lista_paineis():
 
         base_filtro_itens_periodo_sq = base_filtro_itens_periodo_q.subquery()
         ids_itens_periodo_select = select(base_filtro_itens_periodo_sq.c.ID)
-
-        cidades_exibicao = (
-            db.session.query(FatoControleContratosItensEuromidia.CidadeExibicao)
-            .filter(
-                FatoControleContratosItensEuromidia.CidadeExibicao != None,
-                FatoControleContratosItensEuromidia.CidadeExibicao != "",
-                FatoControleContratosItensEuromidia.IDFatoControleContratosItensEuromidia.in_(ids_itens_periodo_select),
-            )
-            .distinct()
-            .order_by(FatoControleContratosItensEuromidia.CidadeExibicao.asc())
-            .all()
-        )
-        cidades_exibicao = [r[0] for r in cidades_exibicao if r and r[0]]
 
         tipos_documento = (
             db.session.query(FatoControleContratosItensEuromidia.TipoDocumento)
@@ -3794,8 +3787,8 @@ def lista_paineis():
         .join(
             ultimo_painel,
             and_(
+                ultimo_painel.c.IDDimPaineisEuromidia == DimFacesPaineis.IDDimPaineisEuromidia,
                 ultimo_painel.c.CodPonto == DimFacesPaineis.CodPonto,
-                ultimo_painel.c.TipoNorm == tipo_face_norm,
             ),
         )
         .filter(DimFacesPaineis.CodFace != None, func.trim(DimFacesPaineis.CodFace) != "")
@@ -3833,6 +3826,22 @@ def lista_paineis():
 
     if ponto_ativo in ("0", "1"):
         base_q = base_q.filter(ultimo_painel.c.BitAtivo == (ponto_ativo == "1"))
+
+    # "Cidade" é atributo cadastral do painel. Ela deve filtrar a dimensão de
+    # painéis já relacionada à face, e não os itens de contrato. Um painel sem
+    # contrato/ocupação no período continua pertencendo à cidade e precisa ser
+    # exibido com ocupação zero.
+    if cidade_exibicao_list:
+        cidades_painel_norm = [
+            str(x).strip().upper()
+            for x in cidade_exibicao_list
+            if str(x).strip()
+        ]
+        if cidades_painel_norm:
+            cidade_painel_norm = func.upper(
+                func.ltrim(func.rtrim(func.coalesce(ultimo_painel.c.Cidade, "")))
+            )
+            base_q = base_q.filter(cidade_painel_norm.in_(cidades_painel_norm))
 
     busca_info = _parse_lista_tokens_busca(q)
     busca_erro = (busca_info.get("erro") or "").strip()
@@ -3882,7 +3891,7 @@ def lista_paineis():
         if filtros_busca:
             base_q = base_q.filter(or_(*filtros_busca))
 
-    if cidade_exibicao_list or tipo_documento_list or vendedor_list or marca_exibida_list:
+    if tipo_documento_list or vendedor_list or marca_exibida_list:
         marca_escolhida_sql = func.nullif(FatoControleContratosItensEuromidia.MarcaExibida, "")
 
         sub_faces = (
@@ -3895,9 +3904,6 @@ def lista_paineis():
             pares_faces=selected_face_pairs,
             codfaces_norm=selected_codfaces_norm,
         )
-
-        if cidade_exibicao_list:
-            sub_faces = sub_faces.filter(FatoControleContratosItensEuromidia.CidadeExibicao.in_(cidade_exibicao_list))
 
         if tipo_documento_list:
             sub_faces = sub_faces.filter(FatoControleContratosItensEuromidia.TipoDocumento.in_(tipo_documento_list))
@@ -3914,11 +3920,13 @@ def lista_paineis():
     # O período serve para calcular ocupação, reservas e disponibilidade; ele
     # não define quais painéis existem na lista. Assim, um painel ativo sem
     # contrato ou reserva no intervalo continua visível com ocupação igual a
-    # zero. Filtros explicitamente ligados aos contratos (cliente, vendedor,
-    # tipo de documento e cidade de exibição) continuam sendo aplicados acima.
+    # zero. O filtro de cidade usa a dimensão do painel; filtros explicitamente
+    # ligados aos contratos (vendedor, tipo de documento e marca) continuam
+    # sendo aplicados acima.
 
-    # A ocupação é calculada abaixo com contratos + reservas e depende do
-    # período/filtros atuais. Por isso, a paginação não pode acontecer nesta
+    # O percentual oficial é calculado abaixo pelas ocupações físicas de contrato.
+    # Reservas são mantidas somente na verificação de conflito/disponibilidade.
+    # Como o cálculo depende do período/filtros atuais, a paginação não pode acontecer nesta
     # consulta: se limitássemos aqui, ordenaríamos somente os registros da
     # página atual, e não todos os painéis do resultado filtrado.
     rows = (
@@ -4131,91 +4139,312 @@ def lista_paineis():
             if tp_up == "PAINEL DIGITAL" and (cp_int not in capacidade_digital_por_cp):
                 capacidade_digital_por_cp[cp_int] = int(CAPACIDADE_DIGITAL_FIXA)
 
+    # =========================================================
+    # OCUPAÇÃO OFICIAL DA LISTA: UMA LINHA POR OCUPAÇÃO FÍSICA
+    # =========================================================
+    # A grade já usa FatoOcupacaoPaineisEuromidia como autoridade física.
+    # A lista precisa usar exatamente a mesma granularidade. Consultar os itens
+    # comerciais diretamente volta a multiplicar uma única ocupação quando ela
+    # possui vários CNPJs/marcas vinculados ao mesmo grupo.
+    #
+    # Regra aplicada aqui:
+    # - 1 IDFatoOcupacaoPaineisEuromidia = 1 consumo físico de capacidade;
+    # - FatoVinculaMarcasOcupacao serve somente para filtros/rastreabilidade;
+    # - encontrar várias marcas vinculadas nunca cria novos slot-dias;
+    # - DataInicio/DataFim/Cota vêm da ocupação, iguais à grade.
+    ocupacoes_contratos = []
     ocupacoes = []
+
     if codpontos_pagina:
-        marca_escolhida_sql = func.nullif(FatoControleContratosItensEuromidia.MarcaExibida, "")
+        partes_sql_ocupacoes_lista = ["""
+            SELECT
+                 IDFatoOcupacaoPaineisEuromidia = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                ,IDItemRepresentante = COALESCE(
+                     TRY_CONVERT(int, item_representante.IDFatoControleContratosItensEuromidia),
+                     TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                 )
+                ,CodPonto = TRY_CONVERT(int, oc.CodPonto)
+                ,CodFace = LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), '')))
+                ,Cota = oc.Cota
+                ,DataInicio = TRY_CONVERT(date, oc.DataInicio)
+                ,DataFim = TRY_CONVERT(date, oc.DataFim)
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
+            OUTER APPLY
+            (
+                SELECT TOP (1)
+                    i_rep.IDFatoControleContratosItensEuromidia
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i_rep WITH (NOLOCK)
+                WHERE
+                       TRY_CONVERT(int, i_rep.IDFatoControleContratosItensEuromidia)
+                           = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                    OR EXISTS
+                    (
+                        SELECT 1
+                        FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_rep WITH (NOLOCK)
+                        WHERE TRY_CONVERT(int, vinc_rep.IDFatoOcupacaoPaineisEuromidia)
+                                  = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                          AND TRY_CONVERT(int, vinc_rep.IDFatoControleContratosItensEuromidia)
+                                  = TRY_CONVERT(int, i_rep.IDFatoControleContratosItensEuromidia)
+                    )
+                ORDER BY
+                     CASE
+                         WHEN TRY_CONVERT(int, i_rep.IDFatoControleContratosItensEuromidia)
+                                  = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                             THEN 0
+                         ELSE 1
+                      END
+                    ,LEN(COALESCE(i_rep.NumeroContrato, '')) DESC
+                    ,LEN(COALESCE(i_rep.NumeroPrevia, '')) DESC
+                    ,TRY_CONVERT(int, i_rep.IDFatoControleContratosItensEuromidia) DESC
+            ) AS item_representante
+            WHERE TRY_CONVERT(int, oc.CodPonto) IN :codpontos_ocupacao_lista
+              AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Origem), ''))))
+                    COLLATE Latin1_General_CI_AI = 'CONTRATO'
+              AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Status), ''))))
+                    COLLATE Latin1_General_CI_AI NOT IN ('CANCELADO', 'CANCELADA')
+              AND oc.CanceladoEm IS NULL
+              AND TRY_CONVERT(date, oc.DataInicio) IS NOT NULL
+              AND TRY_CONVERT(date, oc.DataFim) IS NOT NULL
+              AND TRY_CONVERT(date, oc.DataInicio) <= :dt_fim_ocupacao_lista
+              AND TRY_CONVERT(date, oc.DataFim) >= :dt_ini_ocupacao_lista
+        """]
 
-        rows_itens_q = (
-            db.session.query(
-                FatoControleContratosItensEuromidia.IDFatoControleContratosItensEuromidia,
-                FatoControleContratosItensEuromidia.CodPonto,
-                FatoControleContratosItensEuromidia.CodFace,
-                FatoControleContratosItensEuromidia.Cota,
-                FatoControleContratosItensEuromidia.DataInicioPrevisto,
-                FatoControleContratosItensEuromidia.DataTerminoPrevisto,
-                FatoControleContratosItensEuromidia.DataCancelamento,
-            )
-            .filter(
-                FatoControleContratosItensEuromidia.CodPonto.in_(codpontos_pagina),
-                filtro_periodo_itens_ocup,
-            )
-        )
-
-        rows_itens_q = _aplicar_filtro_faces_itens(
-            rows_itens_q,
-            pares_faces=selected_face_pairs,
-            codfaces_norm=selected_codfaces_norm,
-        )
+        params_ocupacoes_lista = {
+            "codpontos_ocupacao_lista": list(codpontos_pagina),
+            "dt_ini_ocupacao_lista": dt_ini_ocup,
+            "dt_fim_ocupacao_lista": dt_fim_ocup,
+        }
+        binds_ocupacoes_lista = [
+            bindparam("codpontos_ocupacao_lista", expanding=True),
+        ]
 
         if codfaces_pagina:
-            rows_itens_q = rows_itens_q.filter(FatoControleContratosItensEuromidia.CodFace.in_(codfaces_pagina))
+            partes_sql_ocupacoes_lista.append(
+                " AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), ''))) "
+                "COLLATE Latin1_General_CI_AI IN :codfaces_ocupacao_lista "
+            )
+            params_ocupacoes_lista["codfaces_ocupacao_lista"] = list(codfaces_pagina)
+            binds_ocupacoes_lista.append(bindparam("codfaces_ocupacao_lista", expanding=True))
 
-        if cidade_exibicao_list:
-            rows_itens_q = rows_itens_q.filter(FatoControleContratosItensEuromidia.CidadeExibicao.in_(cidade_exibicao_list))
+        # Os filtros comerciais localizam a ocupação por qualquer item vinculado,
+        # mas o SELECT continua devolvendo apenas a linha física de oc.
+        # Assim, por exemplo, filtrar NISSAN encontra o grupo BYD/NISSAN sem
+        # transformar as três marcas/empresas em três consumos de capacidade.
+        relacao_item_ocupacao = """
+            (
+                   TRY_CONVERT(int, item_filtro.IDFatoControleContratosItensEuromidia)
+                       = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                OR EXISTS
+                (
+                    SELECT 1
+                    FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_rel WITH (NOLOCK)
+                    WHERE TRY_CONVERT(int, vinc_rel.IDFatoOcupacaoPaineisEuromidia)
+                              = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                      AND TRY_CONVERT(int, vinc_rel.IDFatoControleContratosItensEuromidia)
+                              = TRY_CONVERT(int, item_filtro.IDFatoControleContratosItensEuromidia)
+                )
+            )
+        """
 
         if tipo_documento_list:
-            rows_itens_q = rows_itens_q.filter(FatoControleContratosItensEuromidia.TipoDocumento.in_(tipo_documento_list))
+            partes_sql_ocupacoes_lista.append(
+                " AND EXISTS ("
+                " SELECT 1"
+                " FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_filtro WITH (NOLOCK)"
+                f" WHERE {relacao_item_ocupacao}"
+                "   AND item_filtro.TipoDocumento IN :tipos_documento_ocupacao_lista"
+                " ) "
+            )
+            params_ocupacoes_lista["tipos_documento_ocupacao_lista"] = list(tipo_documento_list)
+            binds_ocupacoes_lista.append(bindparam("tipos_documento_ocupacao_lista", expanding=True))
 
         if vendedor_list:
-            rows_itens_q = rows_itens_q.filter(FatoControleContratosItensEuromidia.Vendedor.in_(vendedor_list))
+            partes_sql_ocupacoes_lista.append(
+                " AND ("
+                "       LTRIM(RTRIM(COALESCE(CONVERT(nvarchar(200), oc.Vendedor), '')))"
+                "           COLLATE Latin1_General_CI_AI IN :vendedores_ocupacao_lista"
+                "    OR EXISTS ("
+                "         SELECT 1"
+                "         FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_filtro WITH (NOLOCK)"
+                f"         WHERE {relacao_item_ocupacao}"
+                "           AND LTRIM(RTRIM(COALESCE(CONVERT(nvarchar(200), item_filtro.Vendedor), '')))"
+                "               COLLATE Latin1_General_CI_AI IN :vendedores_ocupacao_lista"
+                "       )"
+                " ) "
+            )
+            params_ocupacoes_lista["vendedores_ocupacao_lista"] = list(vendedor_list)
+            binds_ocupacoes_lista.append(bindparam("vendedores_ocupacao_lista", expanding=True))
 
         if marca_exibida_list:
-            rows_itens_q = rows_itens_q.filter(marca_escolhida_sql.in_(marca_exibida_list))
+            partes_sql_ocupacoes_lista.append(
+                " AND ("
+                "       LTRIM(RTRIM(COALESCE(CONVERT(nvarchar(200), oc.MarcaExibida), '')))"
+                "           COLLATE Latin1_General_CI_AI IN :marcas_ocupacao_lista"
+                "    OR EXISTS ("
+                "         SELECT 1"
+                "         FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_marca WITH (NOLOCK)"
+                "         LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_marca WITH (NOLOCK)"
+                "           ON TRY_CONVERT(int, item_marca.IDFatoControleContratosItensEuromidia)"
+                "              = TRY_CONVERT(int, vinc_marca.IDFatoControleContratosItensEuromidia)"
+                "         WHERE TRY_CONVERT(int, vinc_marca.IDFatoOcupacaoPaineisEuromidia)"
+                "                   = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)"
+                "           AND ("
+                "                  LTRIM(RTRIM(COALESCE(CONVERT(nvarchar(200), vinc_marca.Marca), '')))"
+                "                      COLLATE Latin1_General_CI_AI IN :marcas_ocupacao_lista"
+                "               OR LTRIM(RTRIM(COALESCE(CONVERT(nvarchar(200), item_marca.MarcaExibida), '')))"
+                "                      COLLATE Latin1_General_CI_AI IN :marcas_ocupacao_lista"
+                "           )"
+                "       )"
+                "    OR EXISTS ("
+                "         SELECT 1"
+                "         FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_origem_marca WITH (NOLOCK)"
+                "         WHERE TRY_CONVERT(int, item_origem_marca.IDFatoControleContratosItensEuromidia)"
+                "                   = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)"
+                "           AND LTRIM(RTRIM(COALESCE(CONVERT(nvarchar(200), item_origem_marca.MarcaExibida), '')))"
+                "                   COLLATE Latin1_General_CI_AI IN :marcas_ocupacao_lista"
+                "       )"
+                " ) "
+            )
+            params_ocupacoes_lista["marcas_ocupacao_lista"] = list(marca_exibida_list)
+            binds_ocupacoes_lista.append(bindparam("marcas_ocupacao_lista", expanding=True))
 
-        rows_itens = rows_itens_q.all()
+        partes_sql_ocupacoes_lista.append(
+            " ORDER BY TRY_CONVERT(int, oc.CodPonto), "
+            "LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), ''))), "
+            "TRY_CONVERT(date, oc.DataInicio), "
+            "TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia) "
+        )
 
-        ids_itens_ocupacao_vistos = set()
+        stmt_ocupacoes_lista = text("".join(partes_sql_ocupacoes_lista)).bindparams(
+            *binds_ocupacoes_lista
+        )
+        rows_ocupacoes_lista = db.session.execute(
+            stmt_ocupacoes_lista,
+            params_ocupacoes_lista,
+        ).mappings().all()
 
-        for id_item_ocup, cp, cf, cota, di, df_prev, dc in rows_itens:
-            idcad = None
+        # A grade prolonga a ocupação oficial somente quando existe uma reserva
+        # de preferência de renovação ligada ao item representante. A lista usa
+        # a mesma extensão para que o numerador seja idêntico nas duas telas.
+        mapa_fim_reserva_preferencia_lista = {}
+        ids_itens_representantes_lista = sorted(
+            {
+                int(row_ocup.get("IDItemRepresentante"))
+                for row_ocup in (rows_ocupacoes_lista or [])
+                if row_ocup.get("IDItemRepresentante") not in (None, "")
+            }
+        )
+
+        if ids_itens_representantes_lista:
+            stmt_fim_preferencia_lista = text("""
+                SELECT
+                     TRY_CONVERT(int, oc_res.[IDFatoControleContratosItemOrigem]) AS IDItemRepresentante
+                    ,MAX(TRY_CONVERT(date, oc_res.[DataFim])) AS DataFimReservaPreferencia
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc_res WITH (NOLOCK)
+                INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci_res WITH (NOLOCK)
+                    ON TRY_CONVERT(int, ci_res.[IDFatoControleContratosItensEuromidia])
+                         = TRY_CONVERT(int, oc_res.[IDFatoControleContratosItemOrigem])
+                   AND TRY_CONVERT(int, ci_res.[IDFatoControleContratoEuromidia])
+                         = TRY_CONVERT(int, oc_res.[IDFatoControleContratos])
+                WHERE TRY_CONVERT(int, oc_res.[IDFatoControleContratosItemOrigem])
+                          IN :ids_itens_representantes_lista
+                  AND UPPER(LTRIM(RTRIM(ISNULL(oc_res.[Origem], ''))))
+                        COLLATE Latin1_General_CI_AI = 'RESERVA'
+                  AND UPPER(LTRIM(RTRIM(ISNULL(oc_res.[Status], ''))))
+                        COLLATE Latin1_General_CI_AI = 'RESERVADO'
+                  AND oc_res.[CanceladoEm] IS NULL
+                  AND TRY_CONVERT(date, oc_res.[DataFim]) IS NOT NULL
+                  AND ci_res.[AtivoCancelamento] = 'A'
+                  AND ISNULL(TRY_CONVERT(int, ci_res.[BitAtivo]), 1) = 1
+                  AND (
+                        UPPER(LTRIM(RTRIM(ISNULL(ci_res.[InicioRenovacao], ''))))
+                            COLLATE Latin1_General_CI_AI = 'R'
+                     OR UPPER(LTRIM(RTRIM(ISNULL(ci_res.[TipoDocumento], ''))))
+                            COLLATE Latin1_General_CI_AI LIKE '%RENOVACAO%'
+                     OR UPPER(LTRIM(RTRIM(ISNULL(ci_res.[TipoDocumento], ''))))
+                            COLLATE Latin1_General_CI_AI LIKE '%RENOVAÇÃO%'
+                     OR UPPER(ISNULL(ci_res.[OBS], ''))
+                            COLLATE Latin1_General_CI_AI LIKE '%RENOVACAO_CAMPANHA%'
+                     OR UPPER(ISNULL(ci_res.[OBS], ''))
+                            COLLATE Latin1_General_CI_AI LIKE '%RENOVAÇÃO_CAMPANHA%'
+                  )
+                  AND (
+                        UPPER(LTRIM(RTRIM(ISNULL(oc_res.[TipoVinculoOrigem], ''))))
+                            COLLATE Latin1_General_CI_AI LIKE '%PREFERENCIA RENOVACAO CONTRATO%'
+                     OR UPPER(LTRIM(RTRIM(ISNULL(oc_res.[TipoVinculoOrigem], ''))))
+                            COLLATE Latin1_General_CI_AI LIKE '%PREFERÊNCIA RENOVAÇÃO CONTRATO%'
+                     OR UPPER(ISNULL(oc_res.[Observacao], ''))
+                            COLLATE Latin1_General_CI_AI LIKE '%PREFERENCIA RENOVACAO%'
+                     OR UPPER(ISNULL(oc_res.[Observacao], ''))
+                            COLLATE Latin1_General_CI_AI LIKE '%PREFERÊNCIA RENOVAÇÃO%'
+                     OR UPPER(ISNULL(oc_res.[Observacao], ''))
+                            COLLATE Latin1_General_CI_AI LIKE '%RENOVACAO_CAMPANHA%'
+                     OR UPPER(ISNULL(oc_res.[Observacao], ''))
+                            COLLATE Latin1_General_CI_AI LIKE '%RENOVAÇÃO_CAMPANHA%'
+                  )
+                GROUP BY TRY_CONVERT(int, oc_res.[IDFatoControleContratosItemOrigem])
+            """).bindparams(bindparam("ids_itens_representantes_lista", expanding=True))
+
+            rows_fim_preferencia_lista = db.session.execute(
+                stmt_fim_preferencia_lista,
+                {"ids_itens_representantes_lista": ids_itens_representantes_lista},
+            ).mappings().all()
+
+            mapa_fim_reserva_preferencia_lista = {
+                int(row_pref_lista["IDItemRepresentante"]): _coerce_to_date(
+                    row_pref_lista["DataFimReservaPreferencia"]
+                )
+                for row_pref_lista in (rows_fim_preferencia_lista or [])
+                if row_pref_lista.get("IDItemRepresentante") is not None
+                  and row_pref_lista.get("DataFimReservaPreferencia") is not None
+            }
+
+        ids_ocupacoes_lista_vistos = set()
+
+        for row_ocupacao_lista in (rows_ocupacoes_lista or []):
             try:
-                id_item_ocup_int = int(id_item_ocup or 0)
+                id_ocupacao_lista = int(row_ocupacao_lista.get("IDFatoOcupacaoPaineisEuromidia") or 0)
             except Exception:
-                id_item_ocup_int = 0
+                id_ocupacao_lista = 0
 
-            if id_item_ocup_int > 0:
-                if id_item_ocup_int in ids_itens_ocupacao_vistos:
+            # Defesa adicional contra eventual repetição de leitura. A chave oficial
+            # é o ID da ocupação física, nunca o ID de item comercial vinculado.
+            if id_ocupacao_lista > 0:
+                if id_ocupacao_lista in ids_ocupacoes_lista_vistos:
                     continue
-                ids_itens_ocupacao_vistos.add(id_item_ocup_int)
+                ids_ocupacoes_lista_vistos.add(id_ocupacao_lista)
 
-            if cp is None or di is None:
-                continue
+            try:
+                cp_int = int(row_ocupacao_lista.get("CodPonto"))
+            except Exception:
+                cp_int = None
 
-            cp_int = int(cp)
-            cf_norm = (str(cf) or "").strip()
-            if not cf_norm:
-                continue
+            cf_norm = (str(row_ocupacao_lista.get("CodFace") or "")).strip()
+            di_dt = _coerce_to_date(row_ocupacao_lista.get("DataInicio"))
+            df_ef = _coerce_to_date(row_ocupacao_lista.get("DataFim"))
 
-            df_ef = _fim_efetivo_item(df_prev, dc)
-            di_dt = _coerce_to_date(di)
+            try:
+                id_item_representante_lista = int(
+                    row_ocupacao_lista.get("IDItemRepresentante") or 0
+                )
+            except Exception:
+                id_item_representante_lista = 0
 
-            if di_dt is None or df_ef is None:
-                continue
+            df_preferencia_lista = mapa_fim_reserva_preferencia_lista.get(
+                id_item_representante_lista
+            )
+            if (
+                df_preferencia_lista is not None
+                and (df_ef is None or df_preferencia_lista > df_ef)
+            ):
+                df_ef = df_preferencia_lista
 
-            if df_ef < dt_ini_ocup:
+            if cp_int is None or not cf_norm or di_dt is None or df_ef is None:
                 continue
-            if di_dt > dt_fim_ocup:
-                continue
-            if df_ef < di_dt:
+            if df_ef < dt_ini_ocup or di_dt > dt_fim_ocup or df_ef < di_dt:
                 continue
 
             item_tp_up = tipo_por_face.get((cp_int, cf_norm))
-            if (not item_tp_up) and (idcad not in (None, "")):
-                try:
-                    item_tp_up = tipo_por_idcadastro.get(int(idcad))
-                except:
-                    item_tp_up = None
-
             if not item_tp_up:
                 continue
 
@@ -4224,11 +4453,22 @@ def lista_paineis():
                 if cf_norm not in faces_validas:
                     continue
 
-            ocupacoes.append((cp_int, cf_norm, cota, di_dt, df_ef, idcad))
+            ocupacoes_contratos.append(
+                (
+                    cp_int,
+                    cf_norm,
+                    row_ocupacao_lista.get("Cota"),
+                    di_dt,
+                    df_ef,
+                    None,
+                )
+            )
+
+        ocupacoes = list(ocupacoes_contratos)
 
 
-    # Reservas também ocupam slot na mesma regra da sql_periodo_grade.sql.
-    # A lista /paineis/ precisa somar CONTRATOS + RESERVAS, igual à grade/KPI.
+    # Reservas participam da disponibilidade visual e da detecção de conflito,
+    # porém não entram no numerador oficial do percentual, igual ao KPI da grade.
     try:
         if codpontos_pagina:
             partes_reserva_lista = ["""
@@ -4290,7 +4530,20 @@ def lista_paineis():
     except Exception:
         pass
 
+    # O percentual oficial precisa ser idêntico ao KPI da grade: somente as
+    # ocupações físicas de CONTRATO entram no numerador. Reservas continuam sendo
+    # avaliadas separadamente para conflito/disponibilidade visual, mas não podem
+    # aumentar o percentual oficial mostrado na lista.
     mapa_face = _calcular_ocupacao_e_conflitos_por_face(
+        ocupacoes=ocupacoes_contratos,
+        tipo_por_face=tipo_por_face,
+        tipo_por_idcadastro=tipo_por_idcadastro,
+        capacidade_digital_por_cp=capacidade_digital_por_cp,
+        dt_ini=dt_ini_ocup,
+        dt_fim=dt_fim_ocup,
+    )
+
+    mapa_face_com_reservas = _calcular_ocupacao_e_conflitos_por_face(
         ocupacoes=ocupacoes,
         tipo_por_face=tipo_por_face,
         tipo_por_idcadastro=tipo_por_idcadastro,
@@ -4298,6 +4551,47 @@ def lista_paineis():
         dt_ini=dt_ini_ocup,
         dt_fim=dt_fim_ocup,
     )
+
+    # Preserva o alerta de conflito causado por reserva sem contaminar os
+    # slot-dias oficiais. Para uma face que tenha somente reserva, cria-se uma
+    # entrada zerada de ocupação e transporta-se apenas o indicador de conflito.
+    for chave_face_reserva, info_face_reserva in (mapa_face_com_reservas or {}).items():
+        if chave_face_reserva not in mapa_face:
+            try:
+                cp_reserva, _cf_reserva, tipo_reserva = chave_face_reserva
+            except Exception:
+                continue
+
+            denom_reserva = 1
+            if tipo_reserva == "PAINEL DIGITAL":
+                denom_reserva = int(
+                    capacidade_digital_por_cp.get(cp_reserva)
+                    or CAPACIDADE_DIGITAL_FIXA
+                    or 16
+                )
+
+            try:
+                total_dias_reserva = int((dt_fim_ocup - dt_ini_ocup).days) + 1
+            except Exception:
+                total_dias_reserva = 1
+
+            mapa_face[chave_face_reserva] = {
+                "ocupadas": 0,
+                "denominador": max(1, int(denom_reserva)),
+                "conflitos": 0,
+                "pct_uso": 0.0,
+                "uso_medio": 0.0,
+                "uso_slots_dias": 0.0,
+                "total_dias": max(1, int(total_dias_reserva)),
+                "max_simult_sem_teto": 0.0,
+            }
+
+        mapa_face[chave_face_reserva]["conflitos"] = int(
+            info_face_reserva.get("conflitos") or 0
+        )
+        mapa_face[chave_face_reserva]["max_simult_sem_teto"] = float(
+            info_face_reserva.get("max_simult_sem_teto") or 0.0
+        )
 
     itens = []
     for r in rows:
@@ -5753,110 +6047,322 @@ def grade_painel(codponto: int):
         except:
             contratos_segmento_permitidos = []
 
-    fim_efetivo_sql = FatoControleContratosItensEuromidia.DataTerminoPrevisto
+    def _consultar_ocupacoes_contrato_grade(
+        aplicar_filtro_vendedor: bool = True,
+        aplicar_filtro_segmento: bool = True,
+    ):
+        """
+        Retorna UMA linha por ocupação física de contrato.
 
-    q_oc = (
-        db.session.query(
-            FatoControleContratosItensEuromidia.IDFatoControleContratosItensEuromidia,
-            FatoControleContratosItensEuromidia.IDFatoControleContratoEuromidia,
-            FatoControleContratosItensEuromidia.CodFace,
-            FatoControleContratosItensEuromidia.MarcaExibida,
-            FatoControleContratosItensEuromidia.Vendedor,
-            FatoControleContratosItensEuromidia.DataInicioPrevisto,
-            FatoControleContratosItensEuromidia.DataTerminoPrevisto,
-            sa_false().label("DataAuxiliarIgnorada"),
-            FatoControleContratosItensEuromidia.Cota,
-            FatoControleContratosItensEuromidia.NumeroContrato,
-            FatoControleContratosItensEuromidia.NumeroPrevia,
-            FatoControleContratosItensEuromidia.FaturamentoLiquidoFinalMensal,
-            FatoControleContratosItensEuromidia.TotalLiquidoContratoAGBRCTACORDO,
-            FatoControleContratosItensEuromidia.IDVendedor,
-        )
-        .filter(
-            FatoControleContratosItensEuromidia.CodPonto == codponto,
-            FatoControleContratosItensEuromidia.AtivoCancelamento == "A",
-            # Regra oficial para ocupar slot: AtivoCancelamento + CodPonto/CodFace + período.
-            # Não corto por BitAtivo aqui, senão a lista e a grade podem divergir
-            # dos contratos que realmente ocupam slot no período.
-            FatoControleContratosItensEuromidia.DataInicioPrevisto != None,
-            FatoControleContratosItensEuromidia.DataTerminoPrevisto != None,
-            FatoControleContratosItensEuromidia.DataInicioPrevisto < dt_fim_exclusivo,
-            fim_efetivo_sql >= dt_ini,
-        )
-    )
+        A autoridade da grade deixa de ser o item comercial isolado e passa a ser
+        FatoOcupacaoPaineisEuromidia. Isso é essencial para contratos compartilhados:
+        vários CNPJs/marcas/itens podem apontar para o mesmo
+        IDFatoOcupacaoPaineisEuromidia, mas devem consumir capacidade uma única vez.
 
-    if faces:
-        if tem_filtro_codface:
-            q_oc = q_oc.filter(FatoControleContratosItensEuromidia.CodFace.in_(faces))
-        else:
-            q_oc = q_oc.filter(
-                or_(
-                    FatoControleContratosItensEuromidia.CodFace.in_(faces),
-                    FatoControleContratosItensEuromidia.CodFace.is_(None),
+        FatoVinculaMarcasOcupacao continua sendo usada para filtros e rastreabilidade;
+        ela nunca gera uma segunda barra e nunca multiplica o percentual de ocupação.
+        """
+        partes_sql = [
+            """
+            SELECT
+                 IDItem = COALESCE(
+                     item_representante.IDFatoControleContratosItensEuromidia,
+                     TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem),
+                     TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                 )
+                ,IDContrato = COALESCE(
+                     TRY_CONVERT(int, oc.IDFatoControleContratos),
+                     item_representante.IDFatoControleContratoEuromidia
+                 )
+                ,CodFace = LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), '')))
+                ,MarcaExibida = COALESCE(
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(max), marcas_vinculadas.MarcasVinculadas))), ''),
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(200), oc.MarcaExibida))), ''),
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(200), item_representante.MarcaExibida))), '')
+                 )
+                ,Vendedor = COALESCE(
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(200), oc.Vendedor))), ''),
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(200), item_representante.Vendedor))), '')
+                 )
+                ,DataInicio = TRY_CONVERT(date, oc.DataInicio)
+                ,DataFim = TRY_CONVERT(date, oc.DataFim)
+                ,DataAuxiliarIgnorada = CAST(NULL AS date)
+                ,Cota = oc.Cota
+                ,NumeroContrato = COALESCE(
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(150), oc.NumeroContrato))), ''),
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(150), item_representante.NumeroContrato))), '')
+                 )
+                ,NumeroPrevia = COALESCE(
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(150), oc.NumeroPrevia))), ''),
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(150), item_representante.NumeroPrevia))), '')
+                 )
+                ,FaturamentoLiquidoFinalMensal = item_representante.FaturamentoLiquidoFinalMensal
+                ,TotalLiquidoContratoAGBRCTACORDO = item_representante.TotalLiquidoContratoAGBRCTACORDO
+                ,IDVendedor = COALESCE(
+                     TRY_CONVERT(int, oc.IDVendedor),
+                     TRY_CONVERT(int, item_representante.IDVendedor)
+                 )
+                ,LoopInicio = oc.LoopInicio
+                ,LoopFim = oc.LoopFim
+                ,TipoReserva = CAST(NULL AS int)
+                ,ExpiraEm = CAST(NULL AS datetime2(0))
+                ,IDFatoOcupacaoPaineisEuromidia = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
+            OUTER APPLY
+            (
+                SELECT TOP (1)
+                     i.IDFatoControleContratosItensEuromidia
+                    ,i.IDFatoControleContratoEuromidia
+                    ,i.MarcaExibida
+                    ,i.Vendedor
+                    ,i.NumeroContrato
+                    ,i.NumeroPrevia
+                    ,i.FaturamentoLiquidoFinalMensal
+                    ,i.TotalLiquidoContratoAGBRCTACORDO
+                    ,i.IDVendedor
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i WITH (NOLOCK)
+                WHERE
+                       TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                           = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                    OR EXISTS
+                    (
+                        SELECT 1
+                        FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_item WITH (NOLOCK)
+                        WHERE TRY_CONVERT(int, vinc_item.IDFatoOcupacaoPaineisEuromidia)
+                                  = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                          AND TRY_CONVERT(int, vinc_item.IDFatoControleContratosItensEuromidia)
+                                  = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                    )
+                ORDER BY
+                     CASE
+                         WHEN TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                                  = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                             THEN 0
+                         ELSE 1
+                      END
+                    ,LEN(COALESCE(i.NumeroContrato, '')) DESC
+                    ,LEN(COALESCE(i.NumeroPrevia, '')) DESC
+                    ,TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia) DESC
+            ) AS item_representante
+            OUTER APPLY
+            (
+                /*
+                  A barra continua representando uma única ocupação física.
+                  Aqui apenas consolido, em ordem determinística, todas as marcas
+                  distintas ligadas ao mesmo IDFatoOcupacaoPaineisEuromidia.
+                  O FOR XML PATH mantém compatibilidade com versões do SQL Server
+                  anteriores ao STRING_AGG e o .value() desfaz o escape do XML.
+                */
+                SELECT MarcasVinculadas =
+                    STUFF
+                    (
+                        (
+                            SELECT N' | ' + marcas_ordenadas.Marca
+                            FROM
+                            (
+                                SELECT
+                                     Marca = LTRIM(RTRIM(CONVERT(nvarchar(4000), vinc_marca_barra.Marca)))
+                                    ,Ordem = MIN(
+                                        TRY_CONVERT(
+                                            bigint,
+                                            vinc_marca_barra.IDFatoVinculaMarcasOcupacao
+                                        )
+                                    )
+                                FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_marca_barra WITH (NOLOCK)
+                                WHERE TRY_CONVERT(int, vinc_marca_barra.IDFatoOcupacaoPaineisEuromidia)
+                                          = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                                  AND NULLIF(
+                                        LTRIM(RTRIM(CONVERT(nvarchar(4000), vinc_marca_barra.Marca))),
+                                        ''
+                                      ) IS NOT NULL
+                                GROUP BY
+                                    LTRIM(RTRIM(CONVERT(nvarchar(4000), vinc_marca_barra.Marca)))
+                            ) AS marcas_ordenadas
+                            ORDER BY marcas_ordenadas.Ordem, marcas_ordenadas.Marca
+                            FOR XML PATH(''), TYPE
+                        ).value('.', 'nvarchar(max)'),
+                        1,
+                        3,
+                        N''
+                    )
+            ) AS marcas_vinculadas
+            WHERE TRY_CONVERT(int, oc.CodPonto) = :codponto
+              AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Origem), ''))))
+                    COLLATE Latin1_General_CI_AI = 'CONTRATO'
+              AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Status), ''))))
+                    COLLATE Latin1_General_CI_AI NOT IN ('CANCELADO', 'CANCELADA')
+              AND oc.CanceladoEm IS NULL
+              AND TRY_CONVERT(date, oc.DataInicio) IS NOT NULL
+              AND TRY_CONVERT(date, oc.DataFim) IS NOT NULL
+              AND TRY_CONVERT(date, oc.DataInicio) < :dt_fim_exclusivo
+              AND TRY_CONVERT(date, oc.DataFim) >= :dt_ini
+            """
+        ]
+
+        params_sql = {
+            "codponto": int(codponto),
+            "dt_ini": dt_ini,
+            "dt_fim_exclusivo": dt_fim_exclusivo,
+        }
+        binds_sql = []
+
+        if faces:
+            params_sql["faces_ocupacao"] = list(faces)
+            binds_sql.append(bindparam("faces_ocupacao", expanding=True))
+
+            if tem_filtro_codface:
+                partes_sql.append(
+                    " AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), ''))) IN :faces_ocupacao "
                 )
-            )
-
-    if filtro_cliente:
-        q_oc = q_oc.filter(FatoControleContratosItensEuromidia.MarcaExibida.like(f"%{filtro_cliente}%"))
-
-    # Base específica para montar o dropdown de vendedores da grade.
-    # Aqui eu congelo a consulta depois de aplicar período, CodPonto, CodFace e cliente,
-    # mas antes do filtro de vendedor. Assim, ao selecionar um vendedor, a lista não
-    # vira apenas o vendedor selecionado; ela continua mostrando os vendedores que têm
-    # ocupação no período carregado da grade.
-    q_oc_opcoes_vendedores = q_oc
-
-    if vendedores_selecionados or vendedores_termos_livres:
-        filtros_sql_vendedor = []
-
-        if vendedores_selecionados:
-            filtros_sql_vendedor.append(
-                FatoControleContratosItensEuromidia.Vendedor.in_(vendedores_selecionados)
-            )
-
-        for termo_v in (vendedores_termos_livres or []):
-            termo_v = (termo_v or "").strip()
-            if termo_v:
-                filtros_sql_vendedor.append(
-                    FatoControleContratosItensEuromidia.Vendedor.like(f"%{termo_v}%")
-                )
-
-        if filtros_sql_vendedor:
-            if len(filtros_sql_vendedor) == 1:
-                q_oc = q_oc.filter(filtros_sql_vendedor[0])
             else:
-                q_oc = q_oc.filter(or_(*filtros_sql_vendedor))
+                partes_sql.append(
+                    " AND (LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), ''))) IN :faces_ocupacao "
+                    "      OR NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), ''))), '') IS NULL) "
+                )
 
-    if contratos_segmento_permitidos is not None:
-        if contratos_segmento_permitidos:
-            q_oc = q_oc.filter(
-                FatoControleContratosItensEuromidia.IDFatoControleContratoEuromidia.in_(contratos_segmento_permitidos)
+        if filtro_cliente:
+            params_sql["cliente_ocupacao_like"] = f"%{filtro_cliente}%"
+            partes_sql.append(
+                """
+                AND
+                (
+                       COALESCE(CONVERT(nvarchar(200), oc.MarcaExibida), '')
+                           COLLATE Latin1_General_CI_AI LIKE :cliente_ocupacao_like
+                    OR COALESCE(CONVERT(nvarchar(200), item_representante.MarcaExibida), '')
+                           COLLATE Latin1_General_CI_AI LIKE :cliente_ocupacao_like
+                    OR EXISTS
+                    (
+                        SELECT 1
+                        FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_marca WITH (NOLOCK)
+                        LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_marca WITH (NOLOCK)
+                            ON TRY_CONVERT(int, item_marca.IDFatoControleContratosItensEuromidia)
+                               = TRY_CONVERT(int, vinc_marca.IDFatoControleContratosItensEuromidia)
+                        WHERE TRY_CONVERT(int, vinc_marca.IDFatoOcupacaoPaineisEuromidia)
+                                  = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                          AND
+                          (
+                                 COALESCE(CONVERT(nvarchar(200), vinc_marca.Marca), '')
+                                     COLLATE Latin1_General_CI_AI LIKE :cliente_ocupacao_like
+                              OR COALESCE(CONVERT(nvarchar(200), item_marca.MarcaExibida), '')
+                                     COLLATE Latin1_General_CI_AI LIKE :cliente_ocupacao_like
+                          )
+                    )
+                )
+                """
             )
-        else:
-            q_oc = q_oc.filter(sa_false())
 
-    # Base específica para o KPI da grade.
-    # Regra oficial: a ocupação da grade e da lista deve seguir a mesma base
-    # da query sql_periodo_grade.sql: AtivoCancelamento + CodPonto/CodFace + período.
-    # Não corto por BitAtivo aqui, porque isso fazia a lista/grade divergirem
-    # dos contratos que realmente ocupam slot no período.
-    q_oc_kpi_ocupacao = q_oc
+        if aplicar_filtro_vendedor and (vendedores_selecionados or vendedores_termos_livres):
+            filtros_vendedor_sql = []
 
-    rows_kpi_ocupacao = (
-        q_oc_kpi_ocupacao.order_by(
-            FatoControleContratosItensEuromidia.CodFace.asc(),
-            FatoControleContratosItensEuromidia.DataInicioPrevisto.asc(),
+            if vendedores_selecionados:
+                params_sql["vendedores_ocupacao_exatos"] = list(vendedores_selecionados)
+                binds_sql.append(bindparam("vendedores_ocupacao_exatos", expanding=True))
+                filtros_vendedor_sql.append(
+                    "LTRIM(RTRIM(COALESCE(CONVERT(nvarchar(200), oc.Vendedor), CONVERT(nvarchar(200), item_representante.Vendedor), ''))) "
+                    "COLLATE Latin1_General_CI_AI IN :vendedores_ocupacao_exatos"
+                )
+
+            for idx_v, termo_v in enumerate(vendedores_termos_livres or []):
+                termo_v = str(termo_v or "").strip()
+                if not termo_v:
+                    continue
+                chave_v = f"vendedor_ocupacao_like_{idx_v}"
+                params_sql[chave_v] = f"%{termo_v}%"
+                filtros_vendedor_sql.append(
+                    "COALESCE(CONVERT(nvarchar(200), oc.Vendedor), CONVERT(nvarchar(200), item_representante.Vendedor), '') "
+                    f"COLLATE Latin1_General_CI_AI LIKE :{chave_v}"
+                )
+
+            # Um grupo pode envolver itens de contratos relacionados. O filtro de
+            # vendedor deve localizar o grupo sem transformá-lo em várias barras.
+            filtros_vinculo_vendedor = []
+            if vendedores_selecionados:
+                filtros_vinculo_vendedor.append(
+                    "LTRIM(RTRIM(COALESCE(CONVERT(nvarchar(200), item_vendedor.Vendedor), ''))) "
+                    "COLLATE Latin1_General_CI_AI IN :vendedores_ocupacao_exatos"
+                )
+            for idx_v, termo_v in enumerate(vendedores_termos_livres or []):
+                termo_v = str(termo_v or "").strip()
+                if termo_v:
+                    filtros_vinculo_vendedor.append(
+                        "COALESCE(CONVERT(nvarchar(200), item_vendedor.Vendedor), '') "
+                        f"COLLATE Latin1_General_CI_AI LIKE :vendedor_ocupacao_like_{idx_v}"
+                    )
+
+            if filtros_vinculo_vendedor:
+                filtros_vendedor_sql.append(
+                    "EXISTS ("
+                    " SELECT 1"
+                    " FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_vendedor WITH (NOLOCK)"
+                    " INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_vendedor WITH (NOLOCK)"
+                    "   ON TRY_CONVERT(int, item_vendedor.IDFatoControleContratosItensEuromidia)"
+                    "      = TRY_CONVERT(int, vinc_vendedor.IDFatoControleContratosItensEuromidia)"
+                    " WHERE TRY_CONVERT(int, vinc_vendedor.IDFatoOcupacaoPaineisEuromidia)"
+                    "       = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)"
+                    "   AND (" + " OR ".join(filtros_vinculo_vendedor) + ")"
+                    ")"
+                )
+
+            if filtros_vendedor_sql:
+                partes_sql.append(" AND (" + " OR ".join(filtros_vendedor_sql) + ") ")
+
+        if aplicar_filtro_segmento and contratos_segmento_permitidos is not None:
+            if not contratos_segmento_permitidos:
+                return []
+
+            params_sql["contratos_segmento_ocupacao"] = [
+                int(x) for x in contratos_segmento_permitidos
+            ]
+            binds_sql.append(bindparam("contratos_segmento_ocupacao", expanding=True))
+            partes_sql.append(
+                """
+                AND
+                (
+                       TRY_CONVERT(int, oc.IDFatoControleContratos) IN :contratos_segmento_ocupacao
+                    OR TRY_CONVERT(int, item_representante.IDFatoControleContratoEuromidia) IN :contratos_segmento_ocupacao
+                    OR EXISTS
+                    (
+                        SELECT 1
+                        FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_segmento WITH (NOLOCK)
+                        WHERE TRY_CONVERT(int, vinc_segmento.IDFatoOcupacaoPaineisEuromidia)
+                                  = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                          AND TRY_CONVERT(int, vinc_segmento.IDFatoControleContratosEuromidia)
+                                  IN :contratos_segmento_ocupacao
+                    )
+                )
+                """
+            )
+
+        partes_sql.append(
+            " ORDER BY "
+            " LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), ''))) ASC,"
+            " TRY_CONVERT(date, oc.DataInicio) ASC,"
+            " TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia) ASC "
         )
-        .all()
+
+        stmt_ocupacoes = sql_text("".join(partes_sql))
+        if binds_sql:
+            stmt_ocupacoes = stmt_ocupacoes.bindparams(*binds_sql)
+
+        return db.session.execute(stmt_ocupacoes, params_sql).fetchall()
+
+    # O dropdown mantém a base do período/painel/face/cliente, mas não é reduzido
+    # pelo próprio filtro de vendedor nem pelo filtro de segmento, preservando o
+    # comportamento anterior da tela.
+    rows_opcoes_vendedores_contratos = _consultar_ocupacoes_contrato_grade(
+        aplicar_filtro_vendedor=False,
+        aplicar_filtro_segmento=False,
     )
 
-    rows = (
-        q_oc.order_by(
-            FatoControleContratosItensEuromidia.CodFace.asc(),
-            FatoControleContratosItensEuromidia.DataInicioPrevisto.asc(),
-        )
-        .all()
+    rows = _consultar_ocupacoes_contrato_grade(
+        aplicar_filtro_vendedor=True,
+        aplicar_filtro_segmento=True,
     )
+
+    # O KPI recebe exatamente as mesmas ocupações físicas exibidas na grade.
+    # Como cada IDFatoOcupacao aparece uma única vez, grupos com várias marcas
+    # consomem seus slot-dias uma única vez.
+    rows_kpi_ocupacao = list(rows or [])
 
     mapa_fim_reserva_preferencia_por_item = {}
     ids_itens_com_reserva_preferencia_grade = set()
@@ -6193,8 +6699,9 @@ def grade_painel(codponto: int):
         try:
             id_res_int = int(_id_res)
             id_item_reserva = -abs(id_res_int)
-        except:
-            id_item_reserva = -abs(hash(str(_id_res)))
+        except Exception:
+            id_res_int = abs(hash(str(_id_res)))
+            id_item_reserva = -abs(id_res_int)
 
         try:
             reserva_id_original_por_iditem[id_item_reserva] = int(_id_res)
@@ -6202,7 +6709,10 @@ def grade_painel(codponto: int):
             pass
 
         reserva_preferencia_visual_por_iditem[id_item_reserva] = bool(eh_preferencia_visual_reserva)
-        reserva_bloqueia_capacidade_por_iditem[id_item_reserva] = not bool(eh_preferencia_visual_reserva)
+        # TipoReserva=2 é uma reserva física de preferência e consome estoque.
+        # A preferência visual não pode ser tratada como uma simples medalha:
+        # ela ocupa seus slots durante todo o período futuro reservado.
+        reserva_bloqueia_capacidade_por_iditem[id_item_reserva] = True
         tipo_reserva_por_iditem_reserva[id_item_reserva] = tipo_reserva_int
         expira_em_por_iditem_reserva[id_item_reserva] = _expira_em_res
 
@@ -6239,6 +6749,7 @@ def grade_painel(codponto: int):
                 rr[13] if len(rr) > 13 else None,
                 tipo_reserva_int,
                 _expira_em_res,
+                id_res_int,
             )
         )
 
@@ -6589,21 +7100,11 @@ def grade_painel(codponto: int):
     opcoes_vendedores_grade_set = set()
 
     try:
-        rows_vendedores_grade_contratos = (
-            q_oc_opcoes_vendedores
-            .with_entities(
-                FatoControleContratosItensEuromidia.Vendedor,
-                FatoControleContratosItensEuromidia.IDVendedor,
+        for rv_grade in (rows_opcoes_vendedores_contratos or []):
+            nome_grade = _limpa_str(rv_grade[4] if len(rv_grade) > 4 else None)
+            id_vendedor_grade = _converter_id_inteiro_seguro(
+                rv_grade[13] if len(rv_grade) > 13 else None
             )
-            .filter(FatoControleContratosItensEuromidia.Vendedor != None)
-            .distinct()
-            .order_by(FatoControleContratosItensEuromidia.Vendedor.asc())
-            .all()
-        )
-
-        for rv_grade in (rows_vendedores_grade_contratos or []):
-            nome_grade = _limpa_str(rv_grade[0])
-            id_vendedor_grade = _converter_id_inteiro_seguro(rv_grade[1]) if len(rv_grade) > 1 else 0
 
             if nome_grade and _vendedor_esta_ativo_para_dropdown(id_vendedor_grade, nome_grade):
                 opcoes_vendedores_grade_set.add(nome_grade)
@@ -6978,6 +7479,10 @@ def grade_painel(codponto: int):
             loop_inicio_db = r[14] if len(r) > 14 else None
             loop_fim_db = r[15] if len(r) > 15 else None
             expira_em_item = r[17] if len(r) > 17 else None
+            try:
+                id_ocupacao_contrato = int(r[18]) if len(r) > 18 and r[18] is not None else None
+            except Exception:
+                id_ocupacao_contrato = None
 
             try:
                 bit_preferencia_item = int(mapa_bit_preferencia_por_item.get(int(_id_item), 0) or 0)
@@ -6994,16 +7499,10 @@ def grade_painel(codponto: int):
             except Exception:
                 eh_reserva_tmp = False
 
-            if not eh_reserva_tmp:
-                try:
-                    df_reserva_preferencia = mapa_fim_reserva_preferencia_por_item.get(int(_id_item))
-                except Exception:
-                    df_reserva_preferencia = None
-
-                df_reserva_preferencia = _coerce_to_date(df_reserva_preferencia)
-
-                if df_reserva_preferencia is not None and (df is None or df_reserva_preferencia > df):
-                    df = df_reserva_preferencia
+            # A ocupação termina na própria DataFim. A reserva de preferência é
+            # outro registro em FatoOcupacaoPaineisEuromidia e deve produzir uma
+            # faixa separada a partir de D+1. Nunca alongar a ocupação até o fim
+            # da preferência, pois isso funde as duas faixas e mascara a reserva.
 
             if df is None:
                 continue
@@ -7098,7 +7597,7 @@ def grade_painel(codponto: int):
                     "StatusDb": ("RESERVADO" if eh_reserva else None),
                     "OrigemDb": ("RESERVA" if eh_reserva else None),
                     "ReservaIDOriginal": id_reserva_original,
-                    "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
+                    "IDFatoOcupacaoPaineisEuromidia": (id_reserva_original if eh_reserva else id_ocupacao_contrato),
                     "TipoReserva": tipo_reserva_item,
                     "EhReservaManual": eh_reserva_manual,
                     "ExpiraEm": _coerce_to_datetime_grade(expira_em_item) if eh_reserva else None,
@@ -7534,6 +8033,10 @@ def grade_painel(codponto: int):
             loop_inicio_db = r[14] if len(r) > 14 else None
             loop_fim_db = r[15] if len(r) > 15 else None
             expira_em_item = r[17] if len(r) > 17 else None
+            try:
+                id_ocupacao_contrato = int(r[18]) if len(r) > 18 and r[18] is not None else None
+            except Exception:
+                id_ocupacao_contrato = None
 
             try:
                 bit_preferencia_item = int(mapa_bit_preferencia_por_item.get(int(_id_item), 0) or 0)
@@ -7550,16 +8053,9 @@ def grade_painel(codponto: int):
             except Exception:
                 eh_reserva_tmp = False
 
-            if not eh_reserva_tmp:
-                try:
-                    df_reserva_preferencia = mapa_fim_reserva_preferencia_por_item.get(int(_id_item))
-                except Exception:
-                    df_reserva_preferencia = None
-
-                df_reserva_preferencia = _coerce_to_date(df_reserva_preferencia)
-
-                if df_reserva_preferencia is not None and (df is None or df_reserva_preferencia > df):
-                    df = df_reserva_preferencia
+            # Mantém ocupação e preferência como períodos físicos distintos.
+            # A reserva futura é carregada pelas linhas com Origem=RESERVA,
+            # Status=RESERVADO e TipoReserva=2.
 
             if df is None:
                 continue
@@ -7621,7 +8117,7 @@ def grade_painel(codponto: int):
                     "StatusDb": ("RESERVADO" if eh_reserva else None),
                     "OrigemDb": ("RESERVA" if eh_reserva else None),
                     "ReservaIDOriginal": id_reserva_original,
-                    "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
+                    "IDFatoOcupacaoPaineisEuromidia": (id_reserva_original if eh_reserva else id_ocupacao_contrato),
                     "TipoReserva": tipo_reserva_item,
                     "EhReservaManual": eh_reserva_manual,
                     "ExpiraEm": _coerce_to_datetime_grade(expira_em_item) if eh_reserva else None,
@@ -7952,10 +8448,13 @@ def grade_painel(codponto: int):
         ocupacao_pct_calc = (float(slot_dias_ocupados) / float(capacidade_total_periodo)) * 100.0
         return float(ocupacao_pct_calc), int(round(slot_dias_ocupados, 0)), int(capacidade_total_periodo)
 
-    # O KPI oficial vem diretamente da sql_periodo_grade.sql.
-    # Não recalculo aqui em Python para não criar uma terceira regra diferente
-    # da lista e da query validada no banco.
-    kpi_ocupacao_oficial = None
+    # O result set financeiro da sql_periodo_grade.sql continua sendo preservado.
+    # Porém, o numerador e o percentual de ocupação precisam usar a mesma unidade
+    # física da grade: uma linha por IDFatoOcupacaoPaineisEuromidia. A SQL antiga
+    # partia dos itens comerciais e multiplicava grupos com várias marcas.
+    kpi_ocupacao_oficial = _calcular_kpi_ocupacao_por_slot_dia_oficial()
+    if kpi_ocupacao_oficial is not None:
+        ocupacao_pct, slots_ocupados, slots_total = kpi_ocupacao_oficial
 
     receita_periodo_sql = None
     custo_periodo_sql = None
@@ -9784,7 +10283,7 @@ def grade_painel_multi():
         for r in (rows or []):
             try:
                 chave = (
-                    r[0],
+                    (r[18] if len(r) > 18 and r[18] not in (None, "") else r[0]),
                     _normalizar_codface(r[2]),
                     _coerce_to_date(r[5]),
                     _coerce_to_date(r[6]),
@@ -9925,68 +10424,225 @@ def grade_painel_multi():
                 for lp in loops_permitidos_multi:
                     ocupacoes_por_slot[(f, lp)] = []
 
-        fim_efetivo_sql = func.coalesce(
-            FatoControleContratosItensEuromidia.DataCancelamento,
-            FatoControleContratosItensEuromidia.DataTerminoPrevisto,
-            date(9999, 12, 31),
-        )
-
-        q_itens = (
-            db.session.query(
-                FatoControleContratosItensEuromidia.IDFatoControleContratosItensEuromidia,
-                FatoControleContratosItensEuromidia.IDFatoControleContratoEuromidia,
-                FatoControleContratosItensEuromidia.CodFace,
-                FatoControleContratosItensEuromidia.MarcaExibida,
-                FatoControleContratosItensEuromidia.Vendedor,
-                FatoControleContratosItensEuromidia.DataInicioPrevisto,
-                FatoControleContratosItensEuromidia.DataTerminoPrevisto,
-                FatoControleContratosItensEuromidia.DataCancelamento,
-                FatoControleContratosItensEuromidia.Cota,
-                FatoControleContratosItensEuromidia.NumeroContrato,
-                FatoControleContratosItensEuromidia.NumeroPrevia,
-                FatoControleContratosItensEuromidia.CodPonto,
-                FatoControleContratosItensEuromidia.IDVendedor,
-            )
-            .filter(
-                FatoControleContratosItensEuromidia.CodPonto == int(codponto_local),
-                FatoControleContratosItensEuromidia.DataInicioPrevisto != None,
-                FatoControleContratosItensEuromidia.AtivoCancelamento == "A",
-                FatoControleContratosItensEuromidia.DataInicioPrevisto <= dt_fim,
-                fim_efetivo_sql >= dt_ini,
-            )
-        )
+        # Na grade multi, assim como na grade individual, a unidade física é a
+        # ocupação. Itens/marcas vinculados servem para filtros e detalhes, mas não
+        # podem criar barras nem slot-dias adicionais.
+        partes_sql_itens_multi = [
+            """
+            SELECT
+                 IDItem = COALESCE(
+                     item_representante.IDFatoControleContratosItensEuromidia,
+                     TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem),
+                     TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                 )
+                ,IDContrato = COALESCE(
+                     TRY_CONVERT(int, oc.IDFatoControleContratos),
+                     item_representante.IDFatoControleContratoEuromidia
+                 )
+                ,CodFace = LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), '')))
+                ,MarcaExibida = COALESCE(
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(max), marcas_vinculadas.MarcasVinculadas))), ''),
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(200), oc.MarcaExibida))), ''),
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(200), item_representante.MarcaExibida))), '')
+                 )
+                ,Vendedor = COALESCE(
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(200), oc.Vendedor))), ''),
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(200), item_representante.Vendedor))), '')
+                 )
+                ,DataInicio = TRY_CONVERT(date, oc.DataInicio)
+                ,DataFim = TRY_CONVERT(date, oc.DataFim)
+                ,DataCancelamento = CAST(NULL AS date)
+                ,Cota = oc.Cota
+                ,NumeroContrato = COALESCE(
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(150), oc.NumeroContrato))), ''),
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(150), item_representante.NumeroContrato))), '')
+                 )
+                ,NumeroPrevia = COALESCE(
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(150), oc.NumeroPrevia))), ''),
+                     NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(150), item_representante.NumeroPrevia))), '')
+                 )
+                ,CodPonto = TRY_CONVERT(int, oc.CodPonto)
+                ,IDVendedor = COALESCE(
+                     TRY_CONVERT(int, oc.IDVendedor),
+                     TRY_CONVERT(int, item_representante.IDVendedor)
+                 )
+                ,LoopInicio = oc.LoopInicio
+                ,LoopFim = oc.LoopFim
+                ,SpanQtd = TRY_CONVERT(int, oc.SpanQtd)
+                ,TipoReserva = CAST(NULL AS int)
+                ,ExpiraEm = CAST(NULL AS datetime2(0))
+                ,IDFatoOcupacaoPaineisEuromidia = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
+            OUTER APPLY
+            (
+                SELECT TOP (1)
+                     i.IDFatoControleContratosItensEuromidia
+                    ,i.IDFatoControleContratoEuromidia
+                    ,i.MarcaExibida
+                    ,i.Vendedor
+                    ,i.NumeroContrato
+                    ,i.NumeroPrevia
+                    ,i.IDVendedor
+                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i WITH (NOLOCK)
+                WHERE
+                       TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                           = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                    OR EXISTS
+                    (
+                        SELECT 1
+                        FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_item WITH (NOLOCK)
+                        WHERE TRY_CONVERT(int, vinc_item.IDFatoOcupacaoPaineisEuromidia)
+                                  = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                          AND TRY_CONVERT(int, vinc_item.IDFatoControleContratosItensEuromidia)
+                                  = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                    )
+                ORDER BY
+                     CASE
+                         WHEN TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                                  = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                             THEN 0
+                         ELSE 1
+                      END
+                    ,LEN(COALESCE(i.NumeroContrato, '')) DESC
+                    ,LEN(COALESCE(i.NumeroPrevia, '')) DESC
+                    ,TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia) DESC
+            ) AS item_representante
+            OUTER APPLY
+            (
+                /*
+                  A grade múltipla usa a mesma regra da grade individual:
+                  uma barra por ocupação física e todas as marcas vinculadas
+                  consolidadas somente no texto exibido.
+                */
+                SELECT MarcasVinculadas =
+                    STUFF
+                    (
+                        (
+                            SELECT N' | ' + marcas_ordenadas.Marca
+                            FROM
+                            (
+                                SELECT
+                                     Marca = LTRIM(RTRIM(CONVERT(nvarchar(4000), vinc_marca_barra.Marca)))
+                                    ,Ordem = MIN(
+                                        TRY_CONVERT(
+                                            bigint,
+                                            vinc_marca_barra.IDFatoVinculaMarcasOcupacao
+                                        )
+                                    )
+                                FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_marca_barra WITH (NOLOCK)
+                                WHERE TRY_CONVERT(int, vinc_marca_barra.IDFatoOcupacaoPaineisEuromidia)
+                                          = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                                  AND NULLIF(
+                                        LTRIM(RTRIM(CONVERT(nvarchar(4000), vinc_marca_barra.Marca))),
+                                        ''
+                                      ) IS NOT NULL
+                                GROUP BY
+                                    LTRIM(RTRIM(CONVERT(nvarchar(4000), vinc_marca_barra.Marca)))
+                            ) AS marcas_ordenadas
+                            ORDER BY marcas_ordenadas.Ordem, marcas_ordenadas.Marca
+                            FOR XML PATH(''), TYPE
+                        ).value('.', 'nvarchar(max)'),
+                        1,
+                        3,
+                        N''
+                    )
+            ) AS marcas_vinculadas
+            WHERE TRY_CONVERT(int, oc.CodPonto) = :codponto_multi
+              AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Origem), ''))))
+                    COLLATE Latin1_General_CI_AI = 'CONTRATO'
+              AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Status), ''))))
+                    COLLATE Latin1_General_CI_AI NOT IN ('CANCELADO', 'CANCELADA')
+              AND oc.CanceladoEm IS NULL
+              AND TRY_CONVERT(date, oc.DataInicio) IS NOT NULL
+              AND TRY_CONVERT(date, oc.DataFim) IS NOT NULL
+              AND TRY_CONVERT(date, oc.DataInicio) <= :dt_fim_multi
+              AND TRY_CONVERT(date, oc.DataFim) >= :dt_ini_multi
+            """
+        ]
+        params_itens_multi = {
+            "codponto_multi": int(codponto_local),
+            "dt_ini_multi": dt_ini,
+            "dt_fim_multi": dt_fim,
+        }
+        binds_itens_multi = []
 
         if faces:
-            q_itens = q_itens.filter(FatoControleContratosItensEuromidia.CodFace.in_(faces))
+            params_itens_multi["faces_multi"] = list(faces)
+            binds_itens_multi.append(bindparam("faces_multi", expanding=True))
+            partes_sql_itens_multi.append(
+                " AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), ''))) IN :faces_multi "
+            )
 
         if filtro_cliente:
-            padrao_cliente = f"%{filtro_cliente.upper()}%"
-            q_itens = q_itens.filter(
-                func.upper(func.coalesce(FatoControleContratosItensEuromidia.MarcaExibida, "")).like(padrao_cliente)
+            params_itens_multi["cliente_multi_like"] = f"%{filtro_cliente}%"
+            partes_sql_itens_multi.append(
+                """
+                AND
+                (
+                       COALESCE(CONVERT(nvarchar(200), oc.MarcaExibida), '')
+                           COLLATE Latin1_General_CI_AI LIKE :cliente_multi_like
+                    OR COALESCE(CONVERT(nvarchar(200), item_representante.MarcaExibida), '')
+                           COLLATE Latin1_General_CI_AI LIKE :cliente_multi_like
+                    OR EXISTS
+                    (
+                        SELECT 1
+                        FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_marca WITH (NOLOCK)
+                        LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_marca WITH (NOLOCK)
+                            ON TRY_CONVERT(int, item_marca.IDFatoControleContratosItensEuromidia)
+                               = TRY_CONVERT(int, vinc_marca.IDFatoControleContratosItensEuromidia)
+                        WHERE TRY_CONVERT(int, vinc_marca.IDFatoOcupacaoPaineisEuromidia)
+                                  = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                          AND
+                          (
+                                 COALESCE(CONVERT(nvarchar(200), vinc_marca.Marca), '')
+                                     COLLATE Latin1_General_CI_AI LIKE :cliente_multi_like
+                              OR COALESCE(CONVERT(nvarchar(200), item_marca.MarcaExibida), '')
+                                     COLLATE Latin1_General_CI_AI LIKE :cliente_multi_like
+                          )
+                    )
+                )
+                """
             )
 
         if vendedores_selecionados:
-            filtros_vend_or = []
-            for nome_vend in (vendedores_selecionados or []):
-                nome_up = _normalizar_texto(nome_vend).upper()
-                if not nome_up:
+            filtros_vendedor_multi = []
+            for idx_v, nome_vend in enumerate(vendedores_selecionados or []):
+                nome_vend = _normalizar_texto(nome_vend)
+                if not nome_vend:
                     continue
-                filtros_vend_or.append(
-                    func.upper(func.coalesce(FatoControleContratosItensEuromidia.Vendedor, "")).like(f"%{nome_up}%")
+                chave_v = f"vendedor_multi_like_{idx_v}"
+                params_itens_multi[chave_v] = f"%{nome_vend}%"
+                filtros_vendedor_multi.append(
+                    "COALESCE(CONVERT(nvarchar(200), oc.Vendedor), CONVERT(nvarchar(200), item_representante.Vendedor), '') "
+                    f"COLLATE Latin1_General_CI_AI LIKE :{chave_v}"
+                )
+                filtros_vendedor_multi.append(
+                    "EXISTS ("
+                    " SELECT 1"
+                    " FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_vendedor WITH (NOLOCK)"
+                    " INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_vendedor WITH (NOLOCK)"
+                    "   ON TRY_CONVERT(int, item_vendedor.IDFatoControleContratosItensEuromidia)"
+                    "      = TRY_CONVERT(int, vinc_vendedor.IDFatoControleContratosItensEuromidia)"
+                    " WHERE TRY_CONVERT(int, vinc_vendedor.IDFatoOcupacaoPaineisEuromidia)"
+                    "       = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)"
+                    "   AND COALESCE(CONVERT(nvarchar(200), item_vendedor.Vendedor), '')"
+                    f"       COLLATE Latin1_General_CI_AI LIKE :{chave_v}"
+                    ")"
                 )
 
-            if filtros_vend_or:
-                q_itens = q_itens.filter(or_(*filtros_vend_or))
+            if filtros_vendedor_multi:
+                partes_sql_itens_multi.append(" AND (" + " OR ".join(filtros_vendedor_multi) + ") ")
 
-        rows = (
-            q_itens
-            .order_by(
-                FatoControleContratosItensEuromidia.DataInicioPrevisto.asc(),
-                FatoControleContratosItensEuromidia.IDFatoControleContratosItensEuromidia.asc(),
-            )
-            .all()
+        partes_sql_itens_multi.append(
+            " ORDER BY TRY_CONVERT(date, oc.DataInicio) ASC, "
+            " TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia) ASC "
         )
 
+        stmt_itens_multi = text("".join(partes_sql_itens_multi))
+        if binds_itens_multi:
+            stmt_itens_multi = stmt_itens_multi.bindparams(*binds_itens_multi)
+
+        rows = db.session.execute(stmt_itens_multi, params_itens_multi).fetchall()
         rows = _deduplicar_rows_grade(rows)
 
         tipo_reserva_por_iditem_reserva_multi = {}
@@ -10160,6 +10816,7 @@ def grade_painel_multi():
                         span_qtd_res,
                         tipo_reserva_res,
                         expira_em_res,
+                        id_reserva_real,
                     )
                 )
 
@@ -10206,6 +10863,10 @@ def grade_painel_multi():
                 span_qtd_db = r[15] if len(r) > 15 else None
                 tipo_reserva_db = r[16] if len(r) > 16 else None
                 expira_em_item = r[17] if len(r) > 17 else None
+                try:
+                    id_ocupacao_contrato = int(r[18]) if len(r) > 18 and r[18] is not None else None
+                except Exception:
+                    id_ocupacao_contrato = None
 
                 try:
                     eh_reserva = int(_id_item) < 0
@@ -10294,7 +10955,7 @@ def grade_painel_multi():
                     "StatusDb": ("RESERVADO" if eh_reserva else None),
                     "OrigemDb": ("RESERVA" if eh_reserva else None),
                     "ReservaIDOriginal": id_reserva_original,
-                    "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
+                    "IDFatoOcupacaoPaineisEuromidia": (id_reserva_original if eh_reserva else id_ocupacao_contrato),
                     "TipoReserva": tipo_reserva_item,
                     "EhReservaManual": eh_reserva_manual,
                     "ExpiraEm": _coerce_to_datetime_grade(expira_em_item) if eh_reserva else None,
@@ -10562,7 +11223,7 @@ def grade_painel_multi():
                         "StatusDb": ("RESERVADO" if eh_reserva else None),
                         "OrigemDb": ("RESERVA" if eh_reserva else None),
                         "ReservaIDOriginal": id_reserva_original,
-                        "IDFatoOcupacaoPaineisEuromidia": id_reserva_original,
+                        "IDFatoOcupacaoPaineisEuromidia": (id_reserva_original if eh_reserva else id_ocupacao_contrato),
                         "TipoReserva": tipo_reserva_item,
                         "EhReservaManual": eh_reserva_manual,
                         "ExpiraEm": _coerce_to_datetime_grade(expira_em_item) if eh_reserva else None,
@@ -10628,6 +11289,11 @@ def grade_painel_multi():
                         dias_ocupados_slot = set()
 
                         for item_slot in itens_slot:
+                            # Reserva é compromisso visual/operacional, mas não integra o
+                            # percentual oficial de ocupação comercial do período.
+                            if bool(item_slot.get("EhReserva")):
+                                continue
+
                             data_inicio_item = _coerce_to_date(item_slot.get("DataInicio"))
                             data_fim_item = _coerce_to_date(item_slot.get("DataFim"))
 
@@ -10661,6 +11327,9 @@ def grade_painel_multi():
                     dias_ocupados_face = set()
 
                     for item_face in itens_face:
+                        if bool(item_face.get("EhReserva")):
+                            continue
+
                         data_inicio_item = _coerce_to_date(item_face.get("DataInicio"))
                         data_fim_item = _coerce_to_date(item_face.get("DataFim"))
 
@@ -23208,23 +23877,26 @@ def api_ocupacao_calendario():
             sql_existentes = text("""
                 SELECT
                      Origem = CAST('CONTRATO' AS varchar(20))
-                    ,IDItem = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
-                    ,DataInicio = TRY_CONVERT(date, i.DataInicioPrevisto)
-                    ,DataFim = COALESCE(TRY_CONVERT(date, i.DataCancelamento), TRY_CONVERT(date, i.DataTerminoPrevisto))
-                    ,Cota = i.Cota
-                    ,SpanQtd = CAST(NULL AS int)
-                    ,LoopInicio = CAST(NULL AS varchar(30))
-                    ,LoopFim = CAST(NULL AS varchar(30))
-                    ,OrdemData = COALESCE(TRY_CONVERT(datetime2, i.DataAtualizacao), SYSUTCDATETIME())
-                FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i WITH (NOLOCK)
-                WHERE i.CodPonto = :cod_ponto
-                  AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), i.CodFace), ''))) = :cod_face
-                  AND i.DataInicioPrevisto IS NOT NULL
-                  AND i.DataTerminoPrevisto IS NOT NULL
-                  AND i.AtivoCancelamento = 'A'
-                  AND ISNULL(TRY_CONVERT(int, i.BitAtivo), 1) = 1
-                  AND TRY_CONVERT(date, i.DataInicioPrevisto) <= :data_fim
-                  AND COALESCE(TRY_CONVERT(date, i.DataCancelamento), TRY_CONVERT(date, i.DataTerminoPrevisto)) >= :data_inicio
+                    ,IDItem = TRY_CONVERT(int, o.IDFatoOcupacaoPaineisEuromidia)
+                    ,DataInicio = TRY_CONVERT(date, o.DataInicio)
+                    ,DataFim = TRY_CONVERT(date, o.DataFim)
+                    ,Cota = o.Cota
+                    ,SpanQtd = TRY_CONVERT(int, o.SpanQtd)
+                    ,LoopInicio = LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), o.LoopInicio), '')))
+                    ,LoopFim = LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), o.LoopFim), '')))
+                    ,OrdemData = COALESCE(TRY_CONVERT(datetime2, o.CriadoEm), TRY_CONVERT(datetime2, o.DataAtualizacao), SYSUTCDATETIME())
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] o WITH (NOLOCK)
+                WHERE TRY_CONVERT(int, o.CodPonto) = :cod_ponto
+                  AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.CodFace), ''))) = :cod_face
+                  AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Origem), ''))))
+                        COLLATE Latin1_General_CI_AI = 'CONTRATO'
+                  AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Status), ''))))
+                        COLLATE Latin1_General_CI_AI NOT IN ('CANCELADO', 'CANCELADA')
+                  AND o.CanceladoEm IS NULL
+                  AND TRY_CONVERT(date, o.DataInicio) IS NOT NULL
+                  AND TRY_CONVERT(date, o.DataFim) IS NOT NULL
+                  AND TRY_CONVERT(date, o.DataInicio) <= :data_fim
+                  AND TRY_CONVERT(date, o.DataFim) >= :data_inicio
 
                 UNION ALL
 
@@ -23242,25 +23914,11 @@ def api_ocupacao_calendario():
                 WHERE o.CodPonto = :cod_ponto
                   AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.CodFace), ''))) = :cod_face
                   AND o.CanceladoEm IS NULL
-                  -- Não conto aqui ocupações de CONTRATO/LOCAÇÃO gravadas em FatoOcupacao,
-                  -- porque contratos já entram pelo FatoControleContratosItensEuromidia acima.
-                  -- Contar os dois duplicava a ocupação, gerava conflito falso e fazia a cota 1080
-                  -- parecer sem espaço mesmo com slots livres na grade.
+                  -- Contratos também vêm de FatoOcupacao, mas no bloco anterior com Origem=CONTRATO.
+                  -- Aqui entram somente reservas ativas. A separação por Origem evita duplicidade
+                  -- e mantém uma única unidade física por IDFatoOcupacaoPaineisEuromidia.
                   AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Origem), '')))) = 'RESERVA'
                   AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Status), '')))) = 'RESERVADO'
-          AND NOT (
-                UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(250), o.TipoVinculoOrigem), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERENCIA%'
-             OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(250), o.TipoVinculoOrigem), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERÊNCIA%'
-             OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(500), o.Observacao), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERENCIA%'
-             OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(500), o.Observacao), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERÊNCIA%'
-             OR EXISTS (
-                    SELECT 1
-                    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci_pref WITH (NOLOCK)
-                    WHERE TRY_CONVERT(int, ci_pref.[IDFatoControleContratosItensEuromidia]) = TRY_CONVERT(int, o.[IDFatoControleContratosItemOrigem])
-                      AND ISNULL(TRY_CONVERT(int, ci_pref.[BitPreferencia]), 0) = 1
-                      AND ISNULL(TRY_CONVERT(int, ci_pref.[BitAtivo]), 1) = 1
-                )
-          )
                   AND TRY_CONVERT(date, o.DataInicio) IS NOT NULL
                   AND TRY_CONVERT(date, o.DataFim) IS NOT NULL
                   AND TRY_CONVERT(date, o.DataInicio) <= :data_fim
@@ -23401,6 +24059,19 @@ def api_ocupacao_reserva_dados_modal():
     mes_ref = (request.args.get("mes_ref") or "").strip()
     cota = (request.args.get("cota") or "").strip()
 
+    # A pesquisa de empresas é feita diretamente no SQL Server.
+    # Isso evita depender de carregar toda a DimEmpresas no navegador.
+    q_empresa = (
+        request.args.get("q_empresa")
+        or request.args.get("q_cliente")
+        or ""
+    ).strip()[:160]
+    somente_empresas = (
+        str(request.args.get("somente_empresas") or "").strip().lower()
+        in {"1", "true", "sim", "yes"}
+    )
+    q_empresa_cnpj = re.sub(r"\D+", "", q_empresa)
+
     dt_ini = (request.args.get("dt_ini") or "").strip()
     dt_fim = (request.args.get("dt_fim") or "").strip()
 
@@ -23412,6 +24083,98 @@ def api_ocupacao_reserva_dados_modal():
             except Exception:
                 continue
         return []
+
+    sql_empresas = """
+        SELECT TOP (300)
+            e.IDEmpresa,
+            RazaoSocial = NULLIF(LTRIM(RTRIM(CAST(e.RazaoSocial AS nvarchar(300)))), ''),
+            NomeFantasia = NULLIF(LTRIM(RTRIM(CAST(e.NomeFantasia AS nvarchar(300)))), ''),
+            Nome = COALESCE(
+                NULLIF(LTRIM(RTRIM(CAST(e.RazaoSocial AS nvarchar(300)))), ''),
+                NULLIF(LTRIM(RTRIM(CAST(e.NomeFantasia AS nvarchar(300)))), ''),
+                CONCAT('Empresa ', CAST(e.IDEmpresa AS varchar(30)))
+            ),
+            CNPJ = NULLIF(LTRIM(RTRIM(CAST(e.CNPJ AS varchar(32)))), '')
+        FROM [Integracao].[Silver].[DimEmpresas] AS e
+        WHERE e.IDEmpresa IS NOT NULL
+          AND (
+                :q_empresa = ''
+                OR COALESCE(CAST(e.RazaoSocial AS nvarchar(300)), '')
+                       COLLATE Latin1_General_CI_AI LIKE :q_empresa_like
+                OR COALESCE(CAST(e.NomeFantasia AS nvarchar(300)), '')
+                       COLLATE Latin1_General_CI_AI LIKE :q_empresa_like
+                OR (
+                    :q_empresa_cnpj <> ''
+                    AND REPLACE(
+                            REPLACE(
+                                REPLACE(
+                                    REPLACE(
+                                        REPLACE(
+                                            REPLACE(COALESCE(CAST(e.CNPJ AS varchar(32)), ''), '.', ''),
+                                        '/', ''),
+                                    '-', ''),
+                                ' ', ''),
+                            '(', ''),
+                        ')', '') LIKE :q_empresa_cnpj_like
+                )
+              )
+        ORDER BY
+            CASE
+                WHEN :q_empresa <> ''
+                 AND COALESCE(CAST(e.RazaoSocial AS nvarchar(300)), '')
+                       COLLATE Latin1_General_CI_AI = :q_empresa THEN 0
+                WHEN :q_empresa <> ''
+                 AND COALESCE(CAST(e.NomeFantasia AS nvarchar(300)), '')
+                       COLLATE Latin1_General_CI_AI = :q_empresa THEN 1
+                WHEN :q_empresa_cnpj <> ''
+                 AND REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                REPLACE(
+                                    REPLACE(
+                                        REPLACE(COALESCE(CAST(e.CNPJ AS varchar(32)), ''), '.', ''),
+                                    '/', ''),
+                                '-', ''),
+                            ' ', ''),
+                        '(', ''),
+                    ')', '') = :q_empresa_cnpj THEN 2
+                WHEN :q_empresa <> ''
+                 AND COALESCE(CAST(e.RazaoSocial AS nvarchar(300)), '')
+                       COLLATE Latin1_General_CI_AI LIKE :q_empresa_prefixo THEN 3
+                WHEN :q_empresa <> ''
+                 AND COALESCE(CAST(e.NomeFantasia AS nvarchar(300)), '')
+                       COLLATE Latin1_General_CI_AI LIKE :q_empresa_prefixo THEN 4
+                ELSE 9
+            END,
+            COALESCE(
+                NULLIF(LTRIM(RTRIM(CAST(e.RazaoSocial AS nvarchar(300)))), ''),
+                NULLIF(LTRIM(RTRIM(CAST(e.NomeFantasia AS nvarchar(300)))), ''),
+                CONCAT('Empresa ', CAST(e.IDEmpresa AS varchar(30)))
+            ) ASC,
+            e.IDEmpresa ASC
+    """
+    empresas = [
+        dict(row)
+        for row in db.session.execute(
+            text(sql_empresas),
+            {
+                "q_empresa": q_empresa,
+                "q_empresa_like": f"%{q_empresa}%",
+                "q_empresa_prefixo": f"{q_empresa}%",
+                "q_empresa_cnpj": q_empresa_cnpj,
+                "q_empresa_cnpj_like": f"%{q_empresa_cnpj}%" if q_empresa_cnpj else "",
+            },
+        ).mappings().all()
+    ]
+
+    # Nas pesquisas feitas enquanto o usuário digita, devolvo apenas empresas.
+    # Assim a tela não recalcula ocupações, contratos e vendedores a cada tecla.
+    if somente_empresas:
+        return jsonify({
+            "ok": True,
+            "empresas": empresas,
+            "clientes": empresas,
+        })
 
     sql_ocupacoes = """
         SELECT
@@ -23430,16 +24193,13 @@ def api_ocupacao_reserva_dados_modal():
           AND Status IN ('ATIVO','RESERVADO')
         ORDER BY DataInicio
     """
-    ocupacoes = [dict(r._mapping) for r in db.session.execute(text(sql_ocupacoes), {"cod_face": cod_face, "cod_ponto": cod_ponto})]
-
-    sqls_empresas = [
-        """
-        SELECT DISTINCT IDEmpresa, RazaoSocial, CNPJ
-        FROM [Integracao].[Silver].[DimEmpresas] WHERE IDempresaProprietaria = 3
-        ORDER BY RazaoSocial
-        """
+    ocupacoes = [
+        dict(r._mapping)
+        for r in db.session.execute(
+            text(sql_ocupacoes),
+            {"cod_face": cod_face, "cod_ponto": cod_ponto},
+        )
     ]
-    empresas = executar_primeiro_sql_que_funciona(sqls_empresas, {})
 
     sqls_vendedores = [
         """
@@ -25558,19 +26318,6 @@ def _calcular_plano_encaixe_range_reserva_digital(
           -- parecer sem espaço mesmo com slots livres na grade.
           AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Origem), '')))) = 'RESERVA'
           AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), o.Status), '')))) = 'RESERVADO'
-          AND NOT (
-                UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(250), o.TipoVinculoOrigem), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERENCIA%'
-             OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(250), o.TipoVinculoOrigem), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERÊNCIA%'
-             OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(500), o.Observacao), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERENCIA%'
-             OR UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(500), o.Observacao), '')))) COLLATE Latin1_General_CI_AI LIKE '%PREFERÊNCIA%'
-             OR EXISTS (
-                    SELECT 1
-                    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci_pref WITH (NOLOCK)
-                    WHERE TRY_CONVERT(int, ci_pref.[IDFatoControleContratosItensEuromidia]) = TRY_CONVERT(int, o.[IDFatoControleContratosItemOrigem])
-                      AND ISNULL(TRY_CONVERT(int, ci_pref.[BitPreferencia]), 0) = 1
-                      AND ISNULL(TRY_CONVERT(int, ci_pref.[BitAtivo]), 1) = 1
-                )
-          )
           AND TRY_CONVERT(date, o.DataInicio) IS NOT NULL
           AND TRY_CONVERT(date, o.DataFim) IS NOT NULL
           AND TRY_CONVERT(date, o.DataInicio) <= :data_fim
@@ -25694,6 +26441,100 @@ def _request_origem_tela_reserva_ocupacao(payload: dict | None = None) -> bool:
         pass
 
     return False
+
+
+def _normalizar_token_operacao_reserva(valor) -> str:
+    """
+    Normaliza o identificador idempotente enviado pelo template.
+
+    O token não substitui o ID da reserva. Ele serve somente para reconhecer
+    uma repetição da mesma requisição quando o banco confirmou o COMMIT, mas a
+    resposta HTTP foi perdida pelo navegador/proxy.
+    """
+    token = str(valor or "").strip()
+    if not token:
+        return ""
+
+    if len(token) < 16 or len(token) > 100:
+        raise ValueError("token_operacao inválido.")
+
+    if re.fullmatch(r"[A-Za-z0-9_-]+", token) is None:
+        raise ValueError("token_operacao contém caracteres inválidos.")
+
+    return token
+
+
+def _buscar_reservas_por_token_operacao(token_operacao: str, criado_por) -> list[dict]:
+    """
+    Busca uma reserva já confirmada para a mesma tentativa de salvamento.
+
+    A consulta exige o mesmo usuário criador e o marcador completo do token.
+    Assim, uma repetição da requisição retorna a reserva existente em vez de
+    criar outra ocupação.
+    """
+    token = _normalizar_token_operacao_reserva(token_operacao)
+    if not token:
+        return []
+
+    marcador = f"Token Operacao: {token}"
+    rows = db.session.execute(
+        text("""
+            SELECT
+                 IDFatoOcupacaoPaineisEuromidia
+                ,CodFace
+                ,CodPonto
+                ,DataInicio
+                ,DataFim
+            FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
+            WHERE UPPER(LTRIM(RTRIM(COALESCE(Origem, '')))) = 'RESERVA'
+              AND UPPER(LTRIM(RTRIM(COALESCE(Status, '')))) = 'RESERVADO'
+              AND CanceladoEm IS NULL
+              AND ISNULL(CriadoPorIDUsuario, -1) = ISNULL(:criado_por, -1)
+              AND CHARINDEX(:marcador, COALESCE(TextoOriginal, '')) > 0
+            ORDER BY IDFatoOcupacaoPaineisEuromidia ASC;
+        """),
+        {
+            "criado_por": criado_por,
+            "marcador": marcador,
+        },
+    ).mappings().all()
+
+    return [dict(row) for row in rows]
+
+
+def _resposta_reserva_idempotente(rows_existentes: list[dict], token_operacao: str):
+    """Monta a mesma confirmação de sucesso para uma requisição repetida."""
+    ids = []
+    ids_por_codface = {}
+    cod_faces = []
+
+    for row in rows_existentes or []:
+        try:
+            id_reserva = int(row.get("IDFatoOcupacaoPaineisEuromidia"))
+        except Exception:
+            continue
+
+        cod_face = str(row.get("CodFace") or "").strip()
+        ids.append(id_reserva)
+        if cod_face:
+            ids_por_codface.setdefault(cod_face, []).append(id_reserva)
+            if cod_face not in cod_faces:
+                cod_faces.append(cod_face)
+
+    if not ids:
+        return None
+
+    return jsonify({
+        "ok": True,
+        "confirmado": True,
+        "requisicao_idempotente": True,
+        "token_operacao": token_operacao,
+        "id_fato_ocupacao_paineis_euromidia": ids[0],
+        "ids_fato_ocupacao_paineis_euromidia": ids,
+        "ids_por_codface": ids_por_codface,
+        "cod_faces": cod_faces,
+        "qtd_codfaces": len(cod_faces),
+    })
 
 
 def _buscar_ids_grupo_email_reserva_ocupacao(ids_fato_ocupacao, janela_segundos: int = 120) -> list[int]:
@@ -25921,6 +26762,15 @@ def api_ocupacao_reserva_criar():
     cod_ponto = (payload.get("cod_ponto") or request.form.get("cod_ponto") or "").strip()
     origem_tela_reserva_ocupacao = _request_origem_tela_reserva_ocupacao(payload)
 
+    token_operacao_raw = payload.get("token_operacao")
+    if token_operacao_raw is None:
+        token_operacao_raw = request.form.get("token_operacao")
+
+    try:
+        token_operacao = _normalizar_token_operacao_reserva(token_operacao_raw)
+    except ValueError as exc:
+        return jsonify({"ok": False, "erro": str(exc)}), 400
+
     def _normalizar_codfaces_payload_reserva():
         """
         Eu aceito uma ou várias CodFaces no mesmo POST.
@@ -25996,7 +26846,11 @@ def api_ocupacao_reserva_criar():
     if id_cliente_raw is None:
         id_cliente_raw = request.form.get("id_cliente")
 
-    cnpj_cliente = (payload.get("cnpj_cliente") or request.form.get("cnpj_cliente") or "").strip()
+    cnpj_cliente = re.sub(
+        r"\D+",
+        "",
+        str(payload.get("cnpj_cliente") or request.form.get("cnpj_cliente") or ""),
+    )
 
     id_vendedor_raw = payload.get("id_vendedor")
     if id_vendedor_raw is None:
@@ -26141,21 +26995,62 @@ def api_ocupacao_reserva_criar():
         except Exception:
             id_vendedor_int = None
 
-    if id_cliente_int is None and cnpj_cliente:
-        sql_cli = text("""
-            SELECT TOP 1 IDEmpresa
-            FROM [Integracao].[Silver].[DimEmpresas]
-            WHERE REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(CNPJ,''),'.',''),'-',''),'/',''),' ','')
-                = REPLACE(REPLACE(REPLACE(REPLACE(:cnpj,'.',''),'-',''),'/',''),' ','')
-        """)
-        idc = db.session.execute(sql_cli, {"cnpj": cnpj_cliente}).scalar()
-        try:
-            id_cliente_int = int(idc) if idc is not None else None
-        except Exception:
-            id_cliente_int = None
+    # A empresa sempre é resolvida diretamente na DimEmpresas e sem filtro por
+    # IDEmpresaProprietaria. As chaves são consultadas separadamente:
+    #
+    # 1. IDEmpresa usa igualdade direta e permite seek no índice/chave da tabela;
+    # 2. CNPJ normalizado só é consultado como fallback quando o ID não existe.
+    #
+    # Não combinar as duas condições com OR. O OR junto dos REPLACE do CNPJ pode
+    # obrigar o SQL Server a varrer toda a DimEmpresas mesmo quando IDEmpresa foi
+    # informado, mantendo a tela presa em "Salvando reservas...".
+    empresa_cliente = None
 
-    if id_cliente_int is None:
-        return jsonify({"ok": False, "erro": "Não foi possível resolver IDEmpresa (IDCliente). Envie id_cliente (IDEmpresa) ou cnpj_cliente válido."}), 400
+    if id_cliente_int is not None:
+        sql_empresa_cliente_por_id = text("""
+            SELECT TOP (1)
+                e.IDEmpresa,
+                CNPJ = NULLIF(LTRIM(RTRIM(CAST(e.CNPJ AS varchar(32)))), '')
+            FROM [Integracao].[Silver].[DimEmpresas] AS e
+            WHERE e.IDEmpresa = :id_empresa
+        """)
+        empresa_cliente = db.session.execute(
+            sql_empresa_cliente_por_id,
+            {"id_empresa": id_cliente_int},
+        ).mappings().first()
+
+    if empresa_cliente is None and cnpj_cliente:
+        sql_empresa_cliente_por_cnpj = text("""
+            SELECT TOP (1)
+                e.IDEmpresa,
+                CNPJ = NULLIF(LTRIM(RTRIM(CAST(e.CNPJ AS varchar(32)))), '')
+            FROM [Integracao].[Silver].[DimEmpresas] AS e
+            WHERE REPLACE(
+                    REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                REPLACE(
+                                    REPLACE(COALESCE(CAST(e.CNPJ AS varchar(32)), ''), '.', ''),
+                                '/', ''),
+                            '-', ''),
+                        ' ', ''),
+                    '(', ''),
+                ')', '') = :cnpj
+            ORDER BY e.IDEmpresa
+        """)
+        empresa_cliente = db.session.execute(
+            sql_empresa_cliente_por_cnpj,
+            {"cnpj": cnpj_cliente},
+        ).mappings().first()
+
+    if empresa_cliente is None:
+        return jsonify({
+            "ok": False,
+            "erro": "Empresa não encontrada na DimEmpresas. Selecione novamente a empresa pelo nome ou CNPJ.",
+        }), 400
+
+    id_cliente_int = int(empresa_cliente["IDEmpresa"])
+    cnpj_cliente = re.sub(r"\D+", "", str(empresa_cliente.get("CNPJ") or ""))
 
     def _normalizar_empresas_relacionadas_reserva(valor_bruto, marca_padrao: str):
         # Eu valido e normalizo as empresas relacionadas opcionais da reserva.
@@ -26250,6 +27145,69 @@ def api_ocupacao_reserva_criar():
 
     criado_por = _id_usuario_logado_carteira()
 
+    # Idempotência da criação:
+    #
+    # O SQL Server mantém um application lock por token até o COMMIT/ROLLBACK.
+    # Se o navegador repetir a mesma requisição porque perdeu a resposta HTTP,
+    # a segunda chamada aguarda a primeira terminar e, em seguida, encontra a
+    # reserva já gravada. Isso impede inserir uma segunda reserva para a mesma
+    # tentativa.
+    if token_operacao:
+        recurso_lock = f"EUROMIDIA_RESERVA:{token_operacao}"
+        try:
+            resultado_lock = db.session.execute(
+                text("""
+                    SET NOCOUNT ON;
+
+                    DECLARE @ResultadoLock int;
+
+                    EXEC @ResultadoLock = sys.sp_getapplock
+                         @Resource = :recurso_lock,
+                         @LockMode = 'Exclusive',
+                         @LockOwner = 'Transaction',
+                         @LockTimeout = 20000;
+
+                    SELECT @ResultadoLock AS ResultadoLock;
+                """),
+                {"recurso_lock": recurso_lock},
+            ).scalar()
+
+            try:
+                resultado_lock_int = int(resultado_lock)
+            except Exception:
+                resultado_lock_int = -999
+
+            if resultado_lock_int < 0:
+                db.session.rollback()
+                return jsonify({
+                    "ok": False,
+                    "erro": "A tentativa anterior ainda está sendo processada. Aguarde alguns segundos.",
+                    "token_operacao": token_operacao,
+                }), 503
+
+            reservas_existentes_token = _buscar_reservas_por_token_operacao(
+                token_operacao,
+                criado_por,
+            )
+            resposta_idempotente = _resposta_reserva_idempotente(
+                reservas_existentes_token,
+                token_operacao,
+            )
+            if resposta_idempotente is not None:
+                db.session.commit()
+                return resposta_idempotente
+
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception(
+                "RESERVA_IDEMPOTENCIA | falha ao adquirir/consultar token | token=%s",
+                token_operacao,
+            )
+            return jsonify({
+                "ok": False,
+                "erro": f"Não foi possível validar a tentativa de salvamento: {exc}",
+            }), 500
+
     # Regra única de validade da reserva:
     # - usa explicitamente o fuso de Campinas/São Paulo (America/Sao_Paulo);
     # - soma exatamente 48 horas em dias úteis de 24 horas;
@@ -26270,13 +27228,22 @@ def api_ocupacao_reserva_criar():
             )[:500],
         }), 500
 
-    def _montar_texto_original_reserva(id_usuario: int, empresas_relacionadas_normalizadas: list[dict]) -> str:
+    def _montar_texto_original_reserva(
+        id_usuario: int,
+        empresas_relacionadas_normalizadas: list[dict],
+        token_operacao_reserva: str = "",
+    ) -> str:
         """Eu monto um TextoOriginal legível, sem gravar dict/JSON."""
         id_usuario_txt = str(id_usuario) if id_usuario else "não identificado"
         partes = [
             "Reserva Criada",
             f"ID Usuário: {id_usuario_txt}",
         ]
+
+        if token_operacao_reserva:
+            # O token fica no início para nunca ser removido pelo limite de
+            # 1.000 caracteres quando existirem muitas empresas relacionadas.
+            partes.append(f"Token Operacao: {token_operacao_reserva}")
 
         if not empresas_relacionadas_normalizadas:
             partes.append("Empresas Relacionadas: Não informado")
@@ -26304,7 +27271,11 @@ def api_ocupacao_reserva_criar():
         partes.append("Empresas Relacionadas: " + "; ".join(itens_empresas))
         return " - ".join(partes)[:1000]
 
-    texto_original_reserva = _montar_texto_original_reserva(criado_por, empresas_relacionadas)
+    texto_original_reserva = _montar_texto_original_reserva(
+        criado_por,
+        empresas_relacionadas,
+        token_operacao,
+    )
 
 
     sql_cap = text("""
@@ -26731,6 +27702,9 @@ def api_ocupacao_reserva_criar():
 
     return jsonify({
         "ok": True,
+        "confirmado": True,
+        "requisicao_idempotente": False,
+        "token_operacao": token_operacao or None,
         "id_fato_ocupacao_paineis_euromidia": id_fato_ocupacao_int,
         "ids_fato_ocupacao_paineis_euromidia": ids_fato_ocupacao,
         "ids_por_codface": ids_por_codface,

@@ -32,7 +32,168 @@ TIMEZONE_SAO_PAULO = pendulum.timezone("America/Sao_Paulo")
 
 NOME_USUARIO_INTEGRACAO = "INTEGRACAO"
 HORAS_MINIMAS_RESERVA_ABERTA = 48
+DIAS_UTEIS_RESERVA_COMUM = 2
 DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM = 1
+UF_CALENDARIO_RESERVA = "SP"
+MUNICIPIO_CALENDARIO_RESERVA = "VALINHOS"
+CODIGO_IBGE_CALENDARIO_RESERVA = 3556206
+LIMITE_DIAS_CALENDARIO_PARA_BUSCA = 60
+
+
+def _sql_data_apos_dias_uteis(
+    expressao_data: str,
+    quantidade_dias_uteis: int,
+) -> str:
+    """
+    Monta uma expressão SQL Server que retorna a data do enésimo dia útil
+    posterior à data informada.
+
+    Um dia é útil quando:
+    - não é sábado nem domingo;
+    - não existe feriado/ponto facultativo ativo e não útil aplicável ao
+      Brasil, ao Estado de São Paulo ou ao Município de Valinhos.
+
+    A conta do dia da semana usa uma segunda-feira fixa (1900-01-01), portanto
+    não depende de SET DATEFIRST nem do idioma configurado na sessão SQL.
+    """
+    if quantidade_dias_uteis < 1:
+        raise ValueError("quantidade_dias_uteis deve ser maior ou igual a 1.")
+
+    return f"""
+(
+    SELECT MAX(dias_uteis.DataUtil)
+    FROM (
+        SELECT TOP ({quantidade_dias_uteis})
+               calendario.DataCalendario AS DataUtil
+        FROM (
+            SELECT TOP ({LIMITE_DIAS_CALENDARIO_PARA_BUSCA})
+                   ROW_NUMBER() OVER (ORDER BY objetos_a.object_id, objetos_b.object_id) AS Numero
+            FROM sys.all_objects AS objetos_a
+            CROSS JOIN sys.all_objects AS objetos_b
+        ) AS numeros
+        CROSS APPLY (
+            SELECT DATEADD(
+                       DAY,
+                       CAST(numeros.Numero AS int),
+                       CAST({expressao_data} AS date)
+                   ) AS DataCalendario
+        ) AS calendario
+        WHERE
+            DATEDIFF(
+                DAY,
+                CONVERT(date, '19000101', 112),
+                calendario.DataCalendario
+            ) % 7 BETWEEN 0 AND 4
+            AND NOT EXISTS (
+                SELECT 1
+                FROM [Integracao].[Silver].[FatoFeriados] AS feriado
+                WHERE
+                    feriado.Ativo = 1
+                    AND CAST(feriado.DataFeriado AS date) = calendario.DataCalendario
+                    AND COALESCE(
+                            feriado.ConsiderarComoDiaUtil,
+                            CASE
+                                WHEN ISNULL(feriado.EhFeriado, 0) = 1
+                                  OR ISNULL(feriado.EhPontoFacultativo, 0) = 1
+                                    THEN 0
+                                ELSE 1
+                            END
+                        ) = 0
+                    AND (
+                        UPPER(LTRIM(RTRIM(ISNULL(feriado.TipoFeriado, N''))))
+                            COLLATE Latin1_General_CI_AI = N'NACIONAL'
+                        OR UPPER(LTRIM(RTRIM(ISNULL(feriado.Abrangencia, N''))))
+                            COLLATE Latin1_General_CI_AI IN (N'BRASIL', N'NACIONAL')
+                        OR (
+                            (
+                                UPPER(LTRIM(RTRIM(ISNULL(feriado.TipoFeriado, N''))))
+                                    COLLATE Latin1_General_CI_AI = N'ESTADUAL'
+                                OR UPPER(LTRIM(RTRIM(ISNULL(feriado.Abrangencia, N''))))
+                                    COLLATE Latin1_General_CI_AI = N'ESTADO'
+                            )
+                            AND UPPER(LTRIM(RTRIM(ISNULL(feriado.UF, N''))))
+                                COLLATE Latin1_General_CI_AI = N'{UF_CALENDARIO_RESERVA}'
+                        )
+                        OR (
+                            UPPER(LTRIM(RTRIM(ISNULL(feriado.Abrangencia, N''))))
+                                COLLATE Latin1_General_CI_AI = N'MUNICIPIO'
+                            AND UPPER(LTRIM(RTRIM(ISNULL(feriado.UF, N''))))
+                                COLLATE Latin1_General_CI_AI = N'{UF_CALENDARIO_RESERVA}'
+                            AND (
+                                TRY_CONVERT(bigint, feriado.CodigoIBGE)
+                                    = {CODIGO_IBGE_CALENDARIO_RESERVA}
+                                OR UPPER(LTRIM(RTRIM(ISNULL(feriado.Municipio, N''))))
+                                    COLLATE Latin1_General_CI_AI
+                                    = N'{MUNICIPIO_CALENDARIO_RESERVA}'
+                            )
+                        )
+                    )
+            )
+        ORDER BY
+            calendario.DataCalendario
+    ) AS dias_uteis
+)
+"""
+
+
+def _sql_data_hora_apos_dias_uteis(
+    expressao_data_hora: str,
+    quantidade_dias_uteis: int,
+) -> str:
+    """
+    Retorna o enésimo dia útil posterior preservando o horário original.
+
+    Exemplo: sexta-feira às 14:30 + 2 dias úteis = terça-feira às 14:30,
+    desde que segunda-feira não seja feriado.
+    """
+    data_limite = _sql_data_apos_dias_uteis(
+        expressao_data_hora,
+        quantidade_dias_uteis,
+    )
+
+    return f"""
+DATEADD(
+    MILLISECOND,
+    DATEDIFF(
+        MILLISECOND,
+        CAST({expressao_data_hora} AS date),
+        {expressao_data_hora}
+    ),
+    CAST({data_limite} AS datetime2)
+)
+"""
+
+
+SQL_DATA_HORA_LIMITE_RESERVA_COMUM = _sql_data_hora_apos_dias_uteis(
+    "reserva.CriadoEm",
+    DIAS_UTEIS_RESERVA_COMUM,
+)
+
+SQL_DATA_CANCELAMENTO_PREFERENCIA_VENCIDA = _sql_data_apos_dias_uteis(
+    "reserva.DataFim",
+    1,
+)
+
+SQL_DATA_CANCELAMENTO_PREFERENCIA_ORIGEM_NAO_RENOVADA = (
+    _sql_data_apos_dias_uteis(
+        "ocupacao_origem.DataFim",
+        DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM + 1,
+    )
+)
+
+SQL_DATA_LIMITE_RENOVACAO_OCUPACAO_ORIGEM_AMOSTRA = (
+    _sql_data_apos_dias_uteis(
+        "ocupacao_origem_amostra.DataFim",
+        DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM,
+    )
+)
+
+SQL_DATA_CANCELAMENTO_PREFERENCIA_ORIGEM_AMOSTRA = (
+    _sql_data_apos_dias_uteis(
+        "ocupacao_origem_amostra.DataFim",
+        DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM + 1,
+    )
+)
 
 
 SQL_BUSCAR_USUARIO_INTEGRACAO = """
@@ -86,7 +247,8 @@ SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA = f"""
 (
     {SQL_CONDICAO_RESERVA_PREFERENCIA}
     AND reserva.DataFim IS NOT NULL
-    AND CAST(reserva.DataFim AS date) < CAST(SYSDATETIME() AS date)
+    AND {SQL_DATA_CANCELAMENTO_PREFERENCIA_VENCIDA}
+        <= CAST(SYSDATETIME() AS date)
 )
 """
 
@@ -103,11 +265,8 @@ SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA = f"""
             ocupacao_origem.IDFatoOcupacaoPaineisEuromidia = reserva.IDFatoOcupacaoOrigem
             AND ocupacao_origem.IDFatoControleContratosItemOrigem = reserva.IDFatoControleContratosItemOrigem
             AND ocupacao_origem.DataFim IS NOT NULL
-            AND DATEADD(
-                    DAY,
-                    {DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM},
-                    CAST(ocupacao_origem.DataFim AS date)
-                ) < CAST(SYSDATETIME() AS date)
+            AND {SQL_DATA_CANCELAMENTO_PREFERENCIA_ORIGEM_NAO_RENOVADA}
+                <= CAST(SYSDATETIME() AS date)
     )
 )
 """
@@ -134,7 +293,7 @@ SQL_CONDICAO_RESERVA_COMUM_MAIS_DE_48H = f"""
 (
     NOT {SQL_CONDICAO_RESERVA_PREFERENCIA}
     AND reserva.CriadoEm IS NOT NULL
-    AND reserva.CriadoEm <= DATEADD(HOUR, -{HORAS_MINIMAS_RESERVA_ABERTA}, SYSDATETIME())
+    AND {SQL_DATA_HORA_LIMITE_RESERVA_COMUM} <= SYSDATETIME()
 )
 """
 
@@ -163,10 +322,10 @@ END
 SQL_OBSERVACAO_CANCELAMENTO = f"""
 CASE
     WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
-        THEN N'Reserva de preferência de renovação cancelada automaticamente no primeiro dia após o fim da DataFim da própria reserva.'
+        THEN N'Reserva de preferência de renovação cancelada automaticamente no primeiro dia útil após a DataFim da própria reserva.'
     WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA}
-        THEN N'Reserva de preferência de renovação cancelada automaticamente porque a ocupação origem não foi renovada após o prazo de 1 dia do fim da ocupação origem.'
-    ELSE N'Reserva comum cancelada automaticamente após mais de 48 horas aberta.'
+        THEN N'Reserva de preferência de renovação cancelada automaticamente porque a ocupação origem não foi renovada após o prazo de 1 dia útil completo.'
+    ELSE N'Reserva comum cancelada automaticamente após 2 dias úteis (48 horas úteis), mantendo o horário de criação.'
 END
 """
 
@@ -256,11 +415,14 @@ SELECT TOP (30)
        ocupacao_origem_amostra.IDFatoOcupacaoPaineisEuromidia AS IDOcupacaoOrigemRegraCancelamento,
        ocupacao_origem_amostra.DataInicio AS DataInicioOcupacaoOrigem,
        ocupacao_origem_amostra.DataFim AS DataFimOcupacaoOrigem,
-       DATEADD(
-           DAY,
-           {DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM},
-           CAST(ocupacao_origem_amostra.DataFim AS date)
-       ) AS DataLimiteRenovacaoOcupacaoOrigem,
+       {SQL_DATA_LIMITE_RENOVACAO_OCUPACAO_ORIGEM_AMOSTRA}
+           AS DataLimiteRenovacaoOcupacaoOrigem,
+       {SQL_DATA_CANCELAMENTO_PREFERENCIA_ORIGEM_AMOSTRA}
+           AS DataCancelamentoPreferenciaOcupacaoOrigem,
+       {SQL_DATA_CANCELAMENTO_PREFERENCIA_VENCIDA}
+           AS DataCancelamentoPreferenciaPelaPropriaDataFim,
+       {SQL_DATA_HORA_LIMITE_RESERVA_COMUM}
+           AS DataHoraLimiteReservaComum,
        reserva.DataFim AS DataFimRegraCancelamento,
        {SQL_MOTIVO_CANCELAMENTO} AS MotivoCancelamento,
        CAST(DATEDIFF(MINUTE, reserva.CriadoEm, SYSDATETIME()) / 60.0 AS DECIMAL(18, 2)) AS HorasDesdeCriacao
@@ -327,11 +489,14 @@ SELECT TOP (30)
        ocupacao_origem_amostra.IDFatoOcupacaoPaineisEuromidia AS IDOcupacaoOrigemRegraCancelamento,
        ocupacao_origem_amostra.DataInicio AS DataInicioOcupacaoOrigem,
        ocupacao_origem_amostra.DataFim AS DataFimOcupacaoOrigem,
-       DATEADD(
-           DAY,
-           {DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM},
-           CAST(ocupacao_origem_amostra.DataFim AS date)
-       ) AS DataLimiteRenovacaoOcupacaoOrigem,
+       {SQL_DATA_LIMITE_RENOVACAO_OCUPACAO_ORIGEM_AMOSTRA}
+           AS DataLimiteRenovacaoOcupacaoOrigem,
+       {SQL_DATA_CANCELAMENTO_PREFERENCIA_ORIGEM_AMOSTRA}
+           AS DataCancelamentoPreferenciaOcupacaoOrigem,
+       {SQL_DATA_CANCELAMENTO_PREFERENCIA_VENCIDA}
+           AS DataCancelamentoPreferenciaPelaPropriaDataFim,
+       {SQL_DATA_HORA_LIMITE_RESERVA_COMUM}
+           AS DataHoraLimiteReservaComum,
        reserva.DataFim AS DataFimRegraCancelamento,
        CAST(DATEDIFF(MINUTE, reserva.CriadoEm, SYSDATETIME()) / 60.0 AS DECIMAL(18, 2)) AS HorasDesdeCriacao
 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
@@ -387,11 +552,10 @@ SELECT TOP (30)
        reserva.IDFatoOcupacaoOrigem,
        ocupacao_origem_amostra.DataInicio AS DataInicioOcupacaoOrigem,
        ocupacao_origem_amostra.DataFim AS DataFimOcupacaoOrigem,
-       DATEADD(
-           DAY,
-           {DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM},
-           CAST(ocupacao_origem_amostra.DataFim AS date)
-       ) AS DataLimiteRenovacaoOcupacaoOrigem
+       {SQL_DATA_LIMITE_RENOVACAO_OCUPACAO_ORIGEM_AMOSTRA}
+           AS DataLimiteRenovacaoOcupacaoOrigem,
+       {SQL_DATA_CANCELAMENTO_PREFERENCIA_ORIGEM_AMOSTRA}
+           AS DataCancelamentoPreferenciaOcupacaoOrigem
 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
 OUTER APPLY (
     SELECT TOP (1)
@@ -430,9 +594,14 @@ WHERE
 SQL_OBTER_DATA_HORA_SQL_SERVER = f"""
 SELECT
     SYSDATETIME() AS DataExecucaoSqlServer,
-    DATEADD(HOUR, -{HORAS_MINIMAS_RESERVA_ABERTA}, SYSDATETIME()) AS LimiteCriacaoReservaComum,
     CAST(SYSDATETIME() AS date) AS DataReferenciaCancelamentoPreferencia,
-    {DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM} AS DiasToleranciaRenovacaoAposFimOcupacaoOrigem;
+    {HORAS_MINIMAS_RESERVA_ABERTA} AS HorasUteisPrazoReservaComum,
+    {DIAS_UTEIS_RESERVA_COMUM} AS DiasUteisPrazoReservaComum,
+    {DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM}
+        AS DiasUteisToleranciaRenovacaoAposFimOcupacaoOrigem,
+    N'{UF_CALENDARIO_RESERVA}' AS UFCalendario,
+    N'{MUNICIPIO_CALENDARIO_RESERVA}' AS MunicipioCalendario,
+    {CODIGO_IBGE_CALENDARIO_RESERVA} AS CodigoIBGECalendario;
 """
 
 
@@ -455,10 +624,16 @@ Cancela quando:
 
 - `Origem = 'RESERVA'`
 - `CriadoEm IS NOT NULL`
-- `CriadoEm <= DATEADD(HOUR, -48, SYSDATETIME())`
+- atingiu 2 dias úteis (48 horas úteis) depois de `CriadoEm`, preservando o horário
 - `CanceladoEm IS NULL`
 - `Status` diferente de `CANCELADO`
 - não é reserva de preferência de renovação.
+
+Exemplo:
+
+- criada na sexta-feira às 14:30
+- se segunda-feira for útil, vence na terça-feira às 14:30
+- se segunda-feira for feriado não útil, vence na quarta-feira às 14:30.
 
 ### 2. Reserva de preferência de renovação
 
@@ -470,19 +645,20 @@ A preferência é identificada principalmente pela própria ocupação/reserva:
 Como fallback de compatibilidade, também entra na exceção se o item vinculado diretamente por
 `IDFatoControleContratosItemOrigem` tiver `BitPreferencia = 1` e `BitAtivo = 1`.
 
-Essa reserva não é cancelada pela regra de 48 horas.
+Essa reserva não é cancelada pela regra de 48 horas úteis.
 
 Ela é cancelada em duas situações:
 
 #### 2.1. Validade/período da própria reserva vencido
 
-`CAST(reserva.DataFim AS date) < CAST(SYSDATETIME() AS date)`
+A reserva é cancelada no primeiro dia útil posterior a `reserva.DataFim`.
 
 Exemplo:
 
-- `reserva.DataFim = 2026-06-02`
-- em `2026-06-02`, não cancela
-- em `2026-06-03`, cancela
+- `reserva.DataFim` em uma sexta-feira
+- sábado e domingo não cancelam
+- na segunda-feira cancela, se não houver feriado
+- se segunda-feira for feriado não útil, cancela na terça-feira.
 
 #### 2.2. Ocupação origem não renovada no prazo
 
@@ -490,15 +666,35 @@ Quando a reserva foi criada por uma ocupação origem, o DAG usa:
 
 `reserva.IDFatoOcupacaoOrigem = ocupacao_origem.IDFatoOcupacaoPaineisEuromidia`
 
-A reserva é cancelada se passou 1 dia depois da `DataFim` da ocupação origem vinculada pelo mesmo `IDFatoControleContratosItemOrigem`.
+A ocupação origem possui 1 dia útil completo de tolerância depois de sua
+`DataFim`. A preferência é cancelada no dia útil seguinte ao encerramento dessa
+tolerância, sempre vinculada pelo mesmo `IDFatoControleContratosItemOrigem`.
 
 Exemplo:
 
-- `ocupacao_origem.DataFim = 2026-06-15`
-- prazo para renovar: `2026-06-16`
-- em `2026-06-17`, cancela a reserva de preferência vinculada ao mesmo item de contrato.
+- `ocupacao_origem.DataFim` em uma sexta-feira
+- segunda-feira é o dia útil de tolerância, se não for feriado
+- terça-feira é a data de cancelamento
+- se segunda-feira for feriado não útil, terça-feira será a tolerância e
+  quarta-feira será a data de cancelamento.
 
 Se `reserva.DataFim` estiver nula em uma preferência e a ocupação origem ainda não tiver vencido o prazo de renovação, o DAG protege a reserva e não cancela automaticamente.
+
+## Calendário de dias úteis
+
+O DAG consulta `Integracao.Silver.FatoFeriados`.
+
+São considerados:
+
+- feriados nacionais;
+- feriados estaduais de São Paulo;
+- feriados e pontos facultativos de Valinhos/SP;
+- somente registros ativos;
+- `ConsiderarComoDiaUtil = 1` mantém a data como útil;
+- `ConsiderarComoDiaUtil = 0` retira a data da contagem.
+
+Sábado e domingo nunca entram na contagem. O cálculo do dia da semana não
+depende de `SET DATEFIRST` nem do idioma da sessão SQL Server.
 
 ## Segurança / idempotência
 
@@ -545,7 +741,7 @@ def _normalizar_linhas_para_log(linhas: list[dict[str, Any]]) -> list[dict[str, 
 
 @dag(
     dag_id=NOME_DAG,
-    description="Cancela reservas comuns em 48h e cancela preferências vencidas ou sem renovação da ocupação origem após 1 dia.",
+    description="Cancela reservas comuns após 2 dias úteis e preferências conforme DataFim e tolerância útil da ocupação origem.",
     schedule="*/8 * * * *",
     start_date=pendulum.datetime(2026, 5, 13, 0, 0, tz=TIMEZONE_SAO_PAULO),
     catchup=False,
@@ -574,11 +770,11 @@ def pipeline_cancela_reserva():
         Cancela reservas conforme a regra de negócio.
 
         Regra final:
-        - reserva comum: cancela após 48 horas de criação;
-        - reserva com TipoVinculoOrigem = PREFERENCIA RENOVAÇÃO CONTRATO: não cancela por 48 horas;
-        - reserva de preferência: cancela no primeiro dia após reserva.DataFim;
-        - reserva de preferência criada por ocupação origem: cancela se passar 1 dia após a DataFim da ocupação origem e não houver renovação;
-        - se vence hoje, ainda não cancela hoje, porque a comparação é feita por data.
+        - reserva comum: cancela após 2 dias úteis (48 horas úteis), mantendo o horário de criação;
+        - reserva com TipoVinculoOrigem = PREFERENCIA RENOVAÇÃO CONTRATO: não cancela pela regra de 48 horas úteis;
+        - reserva de preferência: cancela no primeiro dia útil após reserva.DataFim;
+        - reserva de preferência criada por ocupação origem: concede 1 dia útil completo de tolerância e cancela no próximo dia útil sem renovação;
+        - sábado, domingo e feriados não úteis de Brasil/SP/Valinhos não entram na contagem.
         """
         hook_sql_server = HookSqlServer(conn_id=CONN_ID_SQL_SERVER)
         engine = hook_sql_server.obter_engine()
@@ -604,7 +800,6 @@ def pipeline_cancela_reserva():
             ).mappings().first()
 
             data_execucao_sql_server = datas_execucao["DataExecucaoSqlServer"]
-            limite_criacao_reserva_comum = datas_execucao["LimiteCriacaoReservaComum"]
             data_referencia_cancelamento_preferencia = datas_execucao[
                 "DataReferenciaCancelamentoPreferencia"
             ]
@@ -710,15 +905,19 @@ def pipeline_cancela_reserva():
         resumo = {
             "dag": NOME_DAG,
             "regra": (
-                "Reserva comum cancela após 48h. "
-                "Reserva com TipoVinculoOrigem=PREFERENCIA RENOVAÇÃO CONTRATO não cancela por 48h. "
-                "Reserva de preferência cancela após reserva.DataFim ou quando a ocupação origem não for renovada "
-                "após 1 dia do fim da ocupação origem."
+                "Reserva comum cancela após 2 dias úteis (48 horas úteis). "
+                "Reserva com TipoVinculoOrigem=PREFERENCIA RENOVAÇÃO CONTRATO não cancela pela regra de 48 horas úteis. "
+                "Reserva de preferência cancela no primeiro dia útil após reserva.DataFim ou quando a ocupação origem "
+                "não for renovada depois de 1 dia útil completo de tolerância."
             ),
             "usuario_integracao": nome_usuario_encontrado,
             "id_usuario_integracao": id_usuario_integracao,
             "horas_minimas_reserva_aberta": HORAS_MINIMAS_RESERVA_ABERTA,
+            "dias_uteis_reserva_comum": DIAS_UTEIS_RESERVA_COMUM,
             "dias_tolerancia_renovacao_apos_fim_ocupacao_origem": DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM,
+            "uf_calendario_reserva": UF_CALENDARIO_RESERVA,
+            "municipio_calendario_reserva": MUNICIPIO_CALENDARIO_RESERVA,
+            "codigo_ibge_calendario_reserva": CODIGO_IBGE_CALENDARIO_RESERVA,
             "total_elegivel_antes": total_elegivel_antes,
             "total_reserva_comum_elegivel": total_reserva_comum_elegivel,
             "total_preferencia_protegida": total_preferencia_protegida,
@@ -731,11 +930,6 @@ def pipeline_cancela_reserva():
                 data_execucao_sql_server.isoformat()
                 if hasattr(data_execucao_sql_server, "isoformat")
                 else str(data_execucao_sql_server)
-            ),
-            "limite_criacao_reserva_comum": (
-                limite_criacao_reserva_comum.isoformat()
-                if hasattr(limite_criacao_reserva_comum, "isoformat")
-                else str(limite_criacao_reserva_comum)
             ),
             "data_referencia_cancelamento_preferencia": (
                 data_referencia_cancelamento_preferencia.isoformat()

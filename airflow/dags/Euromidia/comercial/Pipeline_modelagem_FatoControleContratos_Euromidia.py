@@ -3,11 +3,14 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import subprocess
 from datetime import date, datetime
+from itertools import combinations
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 import pandas as pd
@@ -266,7 +269,15 @@ def lista_unica_preservando_ordem(valores: list[str]) -> list[str]:
     return saida
 
 
-ORDEM_COLUNAS_SAIDA = lista_unica_preservando_ordem(list(mapeamento_colunas.values()) + ["OBS"])
+ORDEM_COLUNAS_SAIDA = lista_unica_preservando_ordem(
+    list(mapeamento_colunas.values())
+    + [
+        "OBS",
+        "ChaveOcupacaoOrigem",
+        "BitOcupacaoCompartilhada",
+        "ReferenciaOcupacaoEmComum",
+    ]
+)
 
 schema_overrides: dict[str, Any] = {}  
 
@@ -659,6 +670,231 @@ def parse_cnpj_pandas(valor: Any) -> str | None:
     return digitos or None
 
 
+
+def extrair_referencias_ocupacao(valor: Any) -> set[str]:
+    """Extrai referências de contrato/prévia para comparar ocupações compartilhadas.
+
+    A função preserva referências técnicas geradas pelo próprio ETL (HASHC-/HASHP-)
+    e separa referências compostas por hífen, ponto e vírgula, barra vertical ou
+    quebra de linha. O resultado é usado somente para identificar grupos visuais;
+    os valores originais continuam preservados nas tabelas de contratos e itens.
+    """
+    texto = limpar_texto_valor(valor)
+    if texto is None:
+        return set()
+
+    texto_normalizado = texto.strip().upper()
+    if texto_normalizado in {"", "0", "-", "NAN", "NONE", "NULL"}:
+        return set()
+
+    if texto_normalizado.startswith(("HASHC-", "HASHP-")):
+        return {re.sub(r"\s+", "", texto_normalizado)}
+
+    texto_normalizado = (
+        texto_normalizado
+        .replace("–", "-")
+        .replace("—", "-")
+    )
+
+    partes = re.split(r"\s*-\s*|;|\||\n|\r", texto_normalizado)
+    referencias: set[str] = set()
+
+    for parte in partes:
+        referencia = parte.strip()
+        if not referencia:
+            continue
+
+        referencia = re.sub(r"^(\d+)\.0$", r"\1", referencia)
+        referencia = re.sub(r"\s+", "", referencia)
+
+        if referencia not in {"", "0", "-", "NAN", "NONE", "NULL"}:
+            referencias.add(referencia)
+
+    return referencias
+
+
+def identificar_ocupacoes_compartilhadas(df: pd.DataFrame) -> pd.DataFrame:
+    """Marca linhas comerciais distintas que representam uma única barra visual.
+
+    Uma comparação somente ocorre quando as linhas têm exatamente a mesma base
+    física da ocupação: lançamento, ponto, face, cota, início e término. Dentro
+    desse grupo físico, as linhas são ligadas quando o conjunto de referências de
+    uma linha é subconjunto próprio do conjunto de outra linha.
+
+    O DataFrame não perde linhas. Cada item permanece independente e recebe apenas:
+    - ChaveOcupacaoOrigem: chave determinística compartilhada pelo grupo;
+    - BitOcupacaoCompartilhada: 1 para os membros do grupo;
+    - ReferenciaOcupacaoEmComum: JSON compacto com as referências do grupo.
+    """
+    df_out = df.copy()
+
+    colunas_necessarias = [
+        "DataLancamento",
+        "Cota",
+        "CodPonto",
+        "CodFace",
+        "NumeroContrato",
+        "NumeroPrevia",
+        "DataInicioPrevisto",
+        "DataTerminoPrevisto",
+    ]
+    faltantes = [coluna for coluna in colunas_necessarias if coluna not in df_out.columns]
+    if faltantes:
+        raise ValueError(
+            "Faltam colunas para identificar ocupações compartilhadas: "
+            + ", ".join(faltantes)
+        )
+
+    df_out["ChaveOcupacaoOrigem"] = None
+    df_out["BitOcupacaoCompartilhada"] = 0
+    df_out["ReferenciaOcupacaoEmComum"] = None
+
+    df_out["_OCUP_DATA_LANCAMENTO"] = df_out["DataLancamento"].map(_norm_date)
+    df_out["_OCUP_COD_PONTO"] = df_out["CodPonto"].map(_norm_text)
+    df_out["_OCUP_COD_FACE"] = df_out["CodFace"].map(_norm_text)
+    df_out["_OCUP_COTA"] = df_out["Cota"].map(_norm_text)
+    df_out["_OCUP_DATA_INICIO"] = df_out["DataInicioPrevisto"].map(_norm_date)
+    df_out["_OCUP_DATA_FIM"] = df_out["DataTerminoPrevisto"].map(_norm_date)
+
+    df_out["_OCUP_CONTRATOS_SET"] = df_out["NumeroContrato"].map(
+        extrair_referencias_ocupacao
+    )
+    df_out["_OCUP_PREVIAS_SET"] = df_out["NumeroPrevia"].map(
+        extrair_referencias_ocupacao
+    )
+    df_out["_OCUP_REFERENCIAS_SET"] = [
+        contratos | previas
+        for contratos, previas in zip(
+            df_out["_OCUP_CONTRATOS_SET"],
+            df_out["_OCUP_PREVIAS_SET"],
+        )
+    ]
+
+    colunas_grupo_fisico = [
+        "_OCUP_DATA_LANCAMENTO",
+        "_OCUP_COD_PONTO",
+        "_OCUP_COD_FACE",
+        "_OCUP_COTA",
+        "_OCUP_DATA_INICIO",
+        "_OCUP_DATA_FIM",
+    ]
+
+    mascara_valida = (
+        df_out["_OCUP_DATA_LANCAMENTO"].ne("SEM")
+        & df_out["_OCUP_COD_PONTO"].ne("SEM")
+        & df_out["_OCUP_COD_FACE"].ne("SEM")
+        & df_out["_OCUP_COTA"].ne("SEM")
+        & df_out["_OCUP_DATA_INICIO"].ne("SEM")
+        & df_out["_OCUP_DATA_FIM"].ne("SEM")
+        & df_out["_OCUP_REFERENCIAS_SET"].map(bool)
+    )
+
+    quantidade_grupos = 0
+    quantidade_linhas = 0
+
+    for chave_fisica, grupo_base in df_out.loc[mascara_valida].groupby(
+        colunas_grupo_fisico,
+        dropna=False,
+        sort=False,
+    ):
+        indices = sorted(grupo_base.index.tolist())
+        if len(indices) < 2:
+            continue
+
+        parent = {indice: indice for indice in indices}
+
+        def encontrar(indice: Any) -> Any:
+            if parent[indice] != indice:
+                parent[indice] = encontrar(parent[indice])
+            return parent[indice]
+
+        def unir(indice_a: Any, indice_b: Any) -> None:
+            raiz_a = encontrar(indice_a)
+            raiz_b = encontrar(indice_b)
+            if raiz_a != raiz_b:
+                parent[raiz_b] = raiz_a
+
+        for indice_a, indice_b in combinations(indices, 2):
+            referencias_a = df_out.at[indice_a, "_OCUP_REFERENCIAS_SET"]
+            referencias_b = df_out.at[indice_b, "_OCUP_REFERENCIAS_SET"]
+
+            if referencias_a < referencias_b or referencias_b < referencias_a:
+                unir(indice_a, indice_b)
+
+        componentes: dict[Any, list[Any]] = {}
+        for indice in indices:
+            componentes.setdefault(encontrar(indice), []).append(indice)
+
+        for membros in componentes.values():
+            membros = sorted(membros)
+            if len(membros) < 2:
+                continue
+
+            existe_ligacao_valida = False
+            for indice_a, indice_b in combinations(membros, 2):
+                referencias_a = df_out.at[indice_a, "_OCUP_REFERENCIAS_SET"]
+                referencias_b = df_out.at[indice_b, "_OCUP_REFERENCIAS_SET"]
+                if referencias_a < referencias_b or referencias_b < referencias_a:
+                    existe_ligacao_valida = True
+                    break
+
+            if not existe_ligacao_valida:
+                continue
+
+            referencias_grupo = sorted(
+                set().union(
+                    *(df_out.at[indice, "_OCUP_REFERENCIAS_SET"] for indice in membros)
+                )
+            )
+            referencias_json = json.dumps(
+                referencias_grupo,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+
+            conjuntos_membros = [
+                sorted(df_out.at[indice, "_OCUP_REFERENCIAS_SET"])
+                for indice in membros
+            ]
+            conjunto_ancora = min(
+                conjuntos_membros,
+                key=lambda referencias: (len(referencias), referencias),
+            )
+            ancora_json = json.dumps(
+                conjunto_ancora,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+
+            assinatura = "|".join(
+                [*(str(parte) for parte in chave_fisica), ancora_json]
+            )
+            chave_ocupacao = "OCUP-" + hashlib.sha256(
+                assinatura.encode("utf-8")
+            ).hexdigest().upper()[:40]
+
+            df_out.loc[membros, "ChaveOcupacaoOrigem"] = chave_ocupacao
+            df_out.loc[membros, "BitOcupacaoCompartilhada"] = 1
+            df_out.loc[membros, "ReferenciaOcupacaoEmComum"] = referencias_json[:500]
+
+            quantidade_grupos += 1
+            quantidade_linhas += len(membros)
+
+    colunas_tecnicas = [
+        coluna
+        for coluna in df_out.columns
+        if coluna.startswith("_OCUP_")
+    ]
+    df_out = df_out.drop(columns=colunas_tecnicas, errors="ignore")
+
+    logger.info(
+        "Ocupações compartilhadas identificadas | grupos=%s | linhas_relacionadas=%s",
+        quantidade_grupos,
+        quantidade_linhas,
+    )
+
+    return df_out
+
 def localizar_caminho_excel_controle_contratos() -> Path:
     """Localiza o arquivo original do controle de contratos dentro do container."""
     nome_arquivo_excel = NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS
@@ -837,6 +1073,7 @@ def tratar_dataframe_ctr_pandas(df_original: pd.DataFrame) -> pd.DataFrame:
             df[coluna] = df[coluna].map(limpar_texto_valor)
 
     df = aplicar_hash_contrato_e_previa(df)
+    df = identificar_ocupacoes_compartilhadas(df)
     df = garantir_colunas_saida(df)
 
     return df
@@ -2035,6 +2272,9 @@ THEN INSERT (
 """
 
 MERGE_ITENS_SQL = r"""
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
 ;WITH Itens AS (
     SELECT
           TRY_CONVERT(date, [DataLancamento]) AS [DataLancamento]
@@ -2115,6 +2355,9 @@ MERGE_ITENS_SQL = r"""
         , TRY_CONVERT(decimal(19,2), REPLACE(REPLACE([Faturamento],'.',''),',','.')) AS [Faturamento]
         , TRY_CONVERT(date, [DataCancelamento]) AS [DataCancelamento]
         , LEFT(TRY_CONVERT(nvarchar(300), [OBS]), 150) AS [OBS]
+        , LEFT(TRY_CONVERT(varchar(100), [ChaveOcupacaoOrigem]), 100) AS [ChaveOcupacaoOrigem]
+        , ISNULL(TRY_CONVERT(bit, [BitOcupacaoCompartilhada]), 0) AS [BitOcupacaoCompartilhada]
+        , LEFT(TRY_CONVERT(nvarchar(500), [ReferenciaOcupacaoEmComum]), 500) AS [ReferenciaOcupacaoEmComum]
     FROM [Integracao].[dbo].[df_fatocontrolecontratos]
 ),
 Final AS (
@@ -2196,6 +2439,9 @@ Final AS (
       , [Faturamento]
       , [DataCancelamento]
       , [OBS]
+      , [ChaveOcupacaoOrigem]
+      , [BitOcupacaoCompartilhada]
+      , [ReferenciaOcupacaoEmComum]
     FROM Itens
 ),
 Fonte AS (
@@ -2265,16 +2511,157 @@ Fonte AS (
         , MAX(f.Faturamento) AS Faturamento
         , MAX(f.DataCancelamento) AS DataCancelamento
         , MAX(f.OBS) AS OBS
+        , MAX(f.ChaveOcupacaoOrigem) AS ChaveOcupacaoOrigem
+        , CAST(MAX(CONVERT(tinyint, f.BitOcupacaoCompartilhada)) AS bit) AS BitOcupacaoCompartilhada
+        , MAX(f.ReferenciaOcupacaoEmComum) AS ReferenciaOcupacaoEmComum
     FROM Final f
     GROUP BY f.Referencia
 )
-MERGE INTO [Silver].[FatoControleContratosItensEuromidia] AS T
+MERGE INTO [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS T
 USING Fonte AS S
     ON T.Referencia = S.Referencia
-WHEN MATCHED THEN
+WHEN MATCHED
+    AND EXISTS
+    (
+        SELECT
+              S.NumeroContrato
+            , S.NumeroPrevia
+            , S.CNPJ
+            , S.CodPonto
+            , S.CodFace
+            , S.DataLancamento
+            , S.Cota
+            , S.CidadeExibicao
+            , S.Tipo
+            , S.Origem
+            , S.EmpresaEuro
+            , S.CnpjExibibora
+            , S.TipoDocumento
+            , S.RazaoSocial
+            , S.CPF
+            , S.MarcaExibida
+            , S.Vendedor
+            , S.SDR
+            , S.Agencia
+            , S.CnpjAgencia
+            , S.Bureau
+            , S.CnpjBureau
+            , S.Intermediario
+            , S.CnpjIntermediario
+            , S.DataAssinaturaRenovacao
+            , S.IDTrimestre
+            , S.TexmpoExposicao
+            , S.DataInicioPrevisto
+            , S.DataTerminoPrevisto
+            , S.InicioRenovacao
+            , S.FaturamentoBrutoMensal
+            , S.PercentualPermuta
+            , S.CotaOportunidade
+            , S.ValorPermuta
+            , S.FaturamentoLiquidoPermuta
+            , S.NumeroParcelas
+            , S.DataInicioVencimento
+            , S.TotalBrutoContrato
+            , S.TotalLiquidoContratoAGBRCTACORDO
+            , S.TotalLiquidoContratoAGBRVENDGERCOOR
+            , S.PercentualAgencia
+            , S.ValorMensalAgencia
+            , S.PercentualBureau
+            , S.ValorBureauMensal
+            , S.PercentualCartaAcordo
+            , S.ValorCartaAcordoMensal
+            , S.ValorOutrasComissoes
+            , S.FaturamentoLiquidoMensal
+            , S.PercentualComissaoVendedor
+            , S.ValorVendedor
+            , S.ValorVendedorTotal
+            , S.PercentualComissaoCoordenacao
+            , S.ValorCoordenador
+            , S.ValorCoordenadorTotal
+            , S.PercentualComissaoGerencia
+            , S.ValorGerencia
+            , S.ValorGerenciaTotal
+            , S.AtivoCancelamento
+            , S.FaturamentoLiquidoFinalMensal
+            , S.ComissaoGerenciaNordeste
+            , S.Faturamento
+            , S.DataCancelamento
+            , S.OBS
+            , S.ChaveOcupacaoOrigem
+            , S.BitOcupacaoCompartilhada
+            , S.ReferenciaOcupacaoEmComum
+        EXCEPT
+        SELECT
+              T.NumeroContrato
+            , T.NumeroPrevia
+            , T.CNPJ
+            , T.CodPonto
+            , T.CodFace
+            , T.DataLancamento
+            , T.Cota
+            , T.CidadeExibicao
+            , T.Tipo
+            , T.Origem
+            , T.EmpresaEuro
+            , T.CnpjExibibora
+            , T.TipoDocumento
+            , T.RazaoSocial
+            , T.CPF
+            , T.MarcaExibida
+            , T.Vendedor
+            , T.SDR
+            , T.Agencia
+            , T.CnpjAgencia
+            , T.Bureau
+            , T.CnpjBureau
+            , T.Intermediario
+            , T.CnpjIntermediario
+            , T.DataAssinaturaRenovacao
+            , T.IDTrimestre
+            , T.TexmpoExposicao
+            , T.DataInicioPrevisto
+            , T.DataTerminoPrevisto
+            , T.InicioRenovacao
+            , T.FaturamentoBrutoMensal
+            , T.PercentualPermuta
+            , T.CotaOportunidade
+            , T.ValorPermuta
+            , T.FaturamentoLiquidoPermuta
+            , T.NumeroParcelas
+            , T.DataInicioVencimento
+            , T.TotalBrutoContrato
+            , T.TotalLiquidoContratoAGBRCTACORDO
+            , T.TotalLiquidoContratoAGBRVENDGERCOOR
+            , T.PercentualAgencia
+            , T.ValorMensalAgencia
+            , T.PercentualBureau
+            , T.ValorBureauMensal
+            , T.PercentualCartaAcordo
+            , T.ValorCartaAcordoMensal
+            , T.ValorOutrasComissoes
+            , T.FaturamentoLiquidoMensal
+            , T.PercentualComissaoVendedor
+            , T.ValorVendedor
+            , T.ValorVendedorTotal
+            , T.PercentualComissaoCoordenacao
+            , T.ValorCoordenador
+            , T.ValorCoordenadorTotal
+            , T.PercentualComissaoGerencia
+            , T.ValorGerencia
+            , T.ValorGerenciaTotal
+            , T.AtivoCancelamento
+            , T.FaturamentoLiquidoFinalMensal
+            , T.ComissaoGerenciaNordeste
+            , T.Faturamento
+            , T.DataCancelamento
+            , T.OBS
+            , T.ChaveOcupacaoOrigem
+            , T.BitOcupacaoCompartilhada
+            , T.ReferenciaOcupacaoEmComum
+    )
+THEN
     UPDATE SET
           T.DataAtualizacao = GETDATE()
-        , T.IDFatoControleContratoEuromidia = S.IDFatoControleContratoEuromidia
         , T.NumeroContrato = S.NumeroContrato
         , T.NumeroPrevia = S.NumeroPrevia
         , T.CNPJ = S.CNPJ
@@ -2338,6 +2725,9 @@ WHEN MATCHED THEN
         , T.Faturamento = S.Faturamento
         , T.DataCancelamento = S.DataCancelamento
         , T.OBS = S.OBS
+        , T.ChaveOcupacaoOrigem = S.ChaveOcupacaoOrigem
+        , T.BitOcupacaoCompartilhada = S.BitOcupacaoCompartilhada
+        , T.ReferenciaOcupacaoEmComum = S.ReferenciaOcupacaoEmComum
 WHEN NOT MATCHED BY TARGET THEN
     INSERT (
           [IDFatoControleContratoEuromidia]
@@ -2405,6 +2795,9 @@ WHEN NOT MATCHED BY TARGET THEN
         , [Faturamento]
         , [DataCancelamento]
         , [OBS]
+        , [ChaveOcupacaoOrigem]
+        , [BitOcupacaoCompartilhada]
+        , [ReferenciaOcupacaoEmComum]
     )
     VALUES (
           S.IDFatoControleContratoEuromidia
@@ -2472,6 +2865,9 @@ WHEN NOT MATCHED BY TARGET THEN
         , S.Faturamento
         , S.DataCancelamento
         , S.OBS
+        , S.ChaveOcupacaoOrigem
+        , S.BitOcupacaoCompartilhada
+        , S.ReferenciaOcupacaoEmComum
     );
 """
 
@@ -2574,6 +2970,59 @@ SET
 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item;
 """
 
+GARANTIR_ESTRUTURA_OCUPACAO_COMPARTILHADA_SQL = r"""
+SET NOCOUNT ON;
+
+IF COL_LENGTH('Integracao.Silver.FatoControleContratosItensEuromidia', 'ChaveOcupacaoOrigem') IS NULL
+BEGIN
+    ALTER TABLE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+    ADD [ChaveOcupacaoOrigem] varchar(100) NULL;
+END;
+
+IF COL_LENGTH('Integracao.Silver.FatoControleContratosItensEuromidia', 'BitOcupacaoCompartilhada') IS NULL
+BEGIN
+    ALTER TABLE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+    ADD [BitOcupacaoCompartilhada] bit NOT NULL
+        CONSTRAINT [DF_FCTI_BitOcupacaoCompartilhada] DEFAULT (0) WITH VALUES;
+END;
+
+IF COL_LENGTH('Integracao.Silver.FatoControleContratosItensEuromidia', 'ReferenciaOcupacaoEmComum') IS NULL
+BEGIN
+    ALTER TABLE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+    ADD [ReferenciaOcupacaoEmComum] nvarchar(500) NULL;
+END;
+
+IF OBJECT_ID(N'Integracao.Silver.FatoVinculaMarcasOcupacao', N'U') IS NULL
+BEGIN
+    CREATE TABLE [Integracao].[Silver].[FatoVinculaMarcasOcupacao]
+    (
+        [IDFatoVinculaMarcasOcupacao] int IDENTITY(1,1) NOT NULL,
+        [IDFatoOcupacaoPaineisEuromidia] int NULL,
+        [IDEmpresa] int NULL,
+        [IDFatoControleContratosEuromidia] int NULL,
+        [IDFatoControleContratosItensEuromidia] int NULL,
+        [IDDimPaineisEuromidia] int NULL,
+        [IDDimFacesPaineis] int NULL,
+        [ReferenciaContrato] nvarchar(100) NULL,
+        [ReferenciaLogycWare] nvarchar(100) NULL,
+        [Marca] nvarchar(100) NULL,
+        [DataAtualizado] datetime NOT NULL
+            CONSTRAINT [DF_FatoVinculaMarcasOcupacao_DataAtualizado] DEFAULT (GETDATE()),
+        CONSTRAINT [PK_FatoVinculaMarcasOcupacao]
+            PRIMARY KEY CLUSTERED ([IDFatoVinculaMarcasOcupacao])
+    );
+END;
+
+IF COL_LENGTH('Integracao.Silver.FatoVinculaMarcasOcupacao', 'IDFatoControleContratosItensEuromidia') IS NULL
+BEGIN
+    ALTER TABLE [Integracao].[Silver].[FatoVinculaMarcasOcupacao]
+    ADD [IDFatoControleContratosItensEuromidia] int NULL;
+END;
+
+
+"""
+
+
 UPDATE_OCUPACAO_SQL = r"""
 SET NOCOUNT ON;
 
@@ -2594,7 +3043,12 @@ SET NOCOUNT ON;
 FonteBase AS (
     SELECT
         DataAtualizacao = CAST(GETDATE() AS datetime2(0)),
-        Referencia = i.Referencia,
+        Referencia = CASE
+                        WHEN ISNULL(i.BitOcupacaoCompartilhada, 0) = 1
+                             AND NULLIF(LTRIM(RTRIM(i.ChaveOcupacaoOrigem)), '') IS NOT NULL
+                            THEN i.ChaveOcupacaoOrigem
+                        ELSE i.Referencia
+                     END,
         CodPonto = i.CodPonto,
         CodFace = LEFT(LTRIM(RTRIM(i.CodFace)), 100),
         IDPainelEuromidia = COALESCE(i.IDPainelEuromidia, fr.IDDimPaineisEuromidia),
@@ -2619,6 +3073,11 @@ FonteBase AS (
         NumeroContrato = LEFT(i.NumeroContrato, 150),
         NumeroPrevia = LEFT(i.NumeroPrevia, 150),
         TextoOriginal = CONCAT(
+            CASE
+                WHEN ISNULL(i.BitOcupacaoCompartilhada, 0) = 1
+                    THEN 'OCUPAÇÃO COMPARTILHADA | '
+                ELSE ''
+            END,
             'CONTRATO:', COALESCE(i.NumeroContrato,''),
             ' | PRÉVIA:', COALESCE(i.NumeroPrevia,''),
             ' | PONTO:', COALESCE(CONVERT(varchar(30), i.CodPonto), ''),
@@ -2639,9 +3098,35 @@ FonteBase AS (
                  WHEN COALESCE(i.DataCancelamento, i.DataTerminoPrevisto) < i.DataInicioPrevisto THEN NULL
                  ELSE DATEDIFF(day, i.DataInicioPrevisto, COALESCE(i.DataCancelamento, i.DataTerminoPrevisto)) + 1
                END,
+        IDFatoControleContratosItemOrigem = i.IDFatoControleContratosItensEuromidia,
+        TipoVinculoOrigem = CAST(
+            CASE
+                WHEN ISNULL(i.BitOcupacaoCompartilhada, 0) = 1
+                    THEN 'CONTRATO_COMPARTILHADO'
+                ELSE 'CONTRATO'
+            END AS varchar(30)
+        ),
+        BitEmpresasRelacionadas = CAST(
+            CASE
+                WHEN ISNULL(i.BitOcupacaoCompartilhada, 0) = 1 THEN 1
+                ELSE 0
+            END AS bit
+        ),
         rn = ROW_NUMBER() OVER (
-                PARTITION BY i.Referencia
-                ORDER BY i.DataAtualizacao DESC, i.IDFatoControleContratosItensEuromidia DESC
+                PARTITION BY
+                    CASE
+                        WHEN ISNULL(i.BitOcupacaoCompartilhada, 0) = 1
+                             AND NULLIF(LTRIM(RTRIM(i.ChaveOcupacaoOrigem)), '') IS NOT NULL
+                            THEN i.ChaveOcupacaoOrigem
+                        ELSE i.Referencia
+                    END
+                ORDER BY
+                    CASE WHEN ISNULL(i.BitOcupacaoCompartilhada, 0) = 1 THEN 0 ELSE 1 END,
+                    LEN(COALESCE(i.ReferenciaOcupacaoEmComum, '')) DESC,
+                    LEN(COALESCE(i.NumeroPrevia, '')) DESC,
+                    LEN(COALESCE(i.NumeroContrato, '')) DESC,
+                    i.DataAtualizacao DESC,
+                    i.IDFatoControleContratosItensEuromidia DESC
              )
     FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
     LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS c
@@ -2686,7 +3171,10 @@ FonteFinal AS (
         CanceladoEm,
         CanceladoPorIDUsuario,
         Observacao,
-        Dias
+        Dias,
+        IDFatoControleContratosItemOrigem,
+        TipoVinculoOrigem,
+        BitEmpresasRelacionadas
     FROM FonteBase
     WHERE rn = 1
 )
@@ -2721,7 +3209,10 @@ WHEN MATCHED THEN
         T.CanceladoEm = S.CanceladoEm,
         T.CanceladoPorIDUsuario = S.CanceladoPorIDUsuario,
         T.Observacao = S.Observacao,
-        T.Dias = S.Dias
+        T.Dias = S.Dias,
+        T.IDFatoControleContratosItemOrigem = S.IDFatoControleContratosItemOrigem,
+        T.TipoVinculoOrigem = S.TipoVinculoOrigem,
+        T.BitEmpresasRelacionadas = S.BitEmpresasRelacionadas
 
 WHEN NOT MATCHED BY TARGET THEN
     INSERT (
@@ -2752,7 +3243,10 @@ WHEN NOT MATCHED BY TARGET THEN
         CanceladoEm,
         CanceladoPorIDUsuario,
         Observacao,
-        Dias
+        Dias,
+        IDFatoControleContratosItemOrigem,
+        TipoVinculoOrigem,
+        BitEmpresasRelacionadas
     )
     VALUES (
         S.DataAtualizacao,
@@ -2782,7 +3276,10 @@ WHEN NOT MATCHED BY TARGET THEN
         S.CanceladoEm,
         S.CanceladoPorIDUsuario,
         S.Observacao,
-        S.Dias
+        S.Dias,
+        S.IDFatoControleContratosItemOrigem,
+        S.TipoVinculoOrigem,
+        S.BitEmpresasRelacionadas
     )
 
 WHEN NOT MATCHED BY SOURCE
@@ -2800,6 +3297,201 @@ THEN UPDATE SET
         ),
         500
     );
+"""
+
+
+UPSERT_VINCULOS_MARCAS_OCUPACAO_SQL = r"""
+SET NOCOUNT ON;
+
+;WITH VinculosDuplicados AS
+(
+    SELECT
+        IDFatoVinculaMarcasOcupacao,
+        rn = ROW_NUMBER() OVER
+        (
+            PARTITION BY
+                IDFatoOcupacaoPaineisEuromidia,
+                IDFatoControleContratosItensEuromidia
+            ORDER BY
+                DataAtualizado DESC,
+                IDFatoVinculaMarcasOcupacao DESC
+        )
+    FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao]
+    WHERE IDFatoControleContratosItensEuromidia IS NOT NULL
+)
+DELETE FROM VinculosDuplicados
+WHERE rn > 1;
+
+;WITH FonteBase AS
+(
+    SELECT
+        o.IDFatoOcupacaoPaineisEuromidia,
+        IDEmpresa = COALESCE(c.IDEmpresa, empresa_resolvida.IDEmpresa),
+        IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia,
+        IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia,
+        IDDimPaineisEuromidia = COALESCE(
+            i.IDPainelEuromidia,
+            face_resolvida.IDDimPaineisEuromidia,
+            painel_resolvido.IDDimPaineisEuromidia
+        ),
+        IDDimFacesPaineis = COALESCE(
+            i.IDDimFacesPaineis,
+            face_resolvida.IDDimFacesPaineis
+        ),
+        ReferenciaContrato = LEFT(
+            CONCAT(
+                N'{"valor":"',
+                STRING_ESCAPE(COALESCE(CONVERT(nvarchar(150), i.NumeroContrato), N''), 'json'),
+                N'"}'
+            ),
+            100
+        ),
+        ReferenciaLogycWare = LEFT(
+            CONCAT(
+                N'{"valor":"',
+                STRING_ESCAPE(COALESCE(CONVERT(nvarchar(150), i.NumeroPrevia), N''), 'json'),
+                N'"}'
+            ),
+            100
+        ),
+        Marca = LEFT(i.MarcaExibida, 100),
+        rn = ROW_NUMBER() OVER
+        (
+            PARTITION BY
+                o.IDFatoOcupacaoPaineisEuromidia,
+                i.IDFatoControleContratosItensEuromidia
+            ORDER BY
+                COALESCE(c.IDEmpresa, empresa_resolvida.IDEmpresa) DESC,
+                COALESCE(i.IDDimFacesPaineis, face_resolvida.IDDimFacesPaineis) DESC
+        )
+    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
+    INNER JOIN [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS o
+        ON o.Referencia = i.ChaveOcupacaoOrigem
+       AND o.Origem = 'CONTRATO'
+    LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS c
+        ON c.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+    OUTER APPLY
+    (
+        SELECT TOP (1)
+            e.IDEmpresa
+        FROM [Integracao].[Silver].[DimEmpresas] AS e
+        WHERE
+            REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(e.CNPJ, ''), '.', ''), '-', ''), '/', ''), ' ', '')
+            = REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(i.CNPJ, ''), '.', ''), '-', ''), '/', ''), ' ', '')
+        ORDER BY
+            CASE WHEN e.IDEmpresaProprietaria = 3 THEN 0 ELSE 1 END,
+            e.IDEmpresa DESC
+    ) AS empresa_resolvida
+    OUTER APPLY
+    (
+        SELECT TOP (1)
+            f.IDDimFacesPaineis,
+            f.IDDimPaineisEuromidia
+        FROM [Integracao].[Silver].[DimFacesPaineis] AS f
+        WHERE
+            TRY_CONVERT(int, f.CodPonto) = TRY_CONVERT(int, i.CodPonto)
+            AND UPPER(LTRIM(RTRIM(f.CodFace))) = UPPER(LTRIM(RTRIM(i.CodFace)))
+        ORDER BY f.IDDimFacesPaineis DESC
+    ) AS face_resolvida
+    OUTER APPLY
+    (
+        SELECT TOP (1)
+            p.IDDimPaineisEuromidia
+        FROM [Integracao].[Silver].[DimPaineisEuromidia] AS p
+        WHERE TRY_CONVERT(int, p.CodPonto) = TRY_CONVERT(int, i.CodPonto)
+        ORDER BY p.IDDimPaineisEuromidia DESC
+    ) AS painel_resolvido
+    WHERE
+        ISNULL(i.BitOcupacaoCompartilhada, 0) = 1
+        AND NULLIF(LTRIM(RTRIM(i.ChaveOcupacaoOrigem)), '') IS NOT NULL
+),
+Fonte AS
+(
+    SELECT
+        IDFatoOcupacaoPaineisEuromidia,
+        IDEmpresa,
+        IDFatoControleContratosEuromidia,
+        IDFatoControleContratosItensEuromidia,
+        IDDimPaineisEuromidia,
+        IDDimFacesPaineis,
+        ReferenciaContrato,
+        ReferenciaLogycWare,
+        Marca
+    FROM FonteBase
+    WHERE rn = 1
+)
+MERGE [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS T
+USING Fonte AS S
+    ON T.IDFatoOcupacaoPaineisEuromidia = S.IDFatoOcupacaoPaineisEuromidia
+   AND T.IDFatoControleContratosItensEuromidia = S.IDFatoControleContratosItensEuromidia
+WHEN MATCHED THEN
+    UPDATE SET
+        T.IDEmpresa = S.IDEmpresa,
+        T.IDFatoControleContratosEuromidia = S.IDFatoControleContratosEuromidia,
+        T.IDDimPaineisEuromidia = S.IDDimPaineisEuromidia,
+        T.IDDimFacesPaineis = S.IDDimFacesPaineis,
+        T.ReferenciaContrato = S.ReferenciaContrato,
+        T.ReferenciaLogycWare = S.ReferenciaLogycWare,
+        T.Marca = S.Marca,
+        T.DataAtualizado = GETDATE()
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT
+    (
+        IDFatoOcupacaoPaineisEuromidia,
+        IDEmpresa,
+        IDFatoControleContratosEuromidia,
+        IDFatoControleContratosItensEuromidia,
+        IDDimPaineisEuromidia,
+        IDDimFacesPaineis,
+        ReferenciaContrato,
+        ReferenciaLogycWare,
+        Marca,
+        DataAtualizado
+    )
+    VALUES
+    (
+        S.IDFatoOcupacaoPaineisEuromidia,
+        S.IDEmpresa,
+        S.IDFatoControleContratosEuromidia,
+        S.IDFatoControleContratosItensEuromidia,
+        S.IDDimPaineisEuromidia,
+        S.IDDimFacesPaineis,
+        S.ReferenciaContrato,
+        S.ReferenciaLogycWare,
+        S.Marca,
+        GETDATE()
+    );
+
+DELETE vinculo
+FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinculo
+INNER JOIN [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS ocupacao
+    ON ocupacao.IDFatoOcupacaoPaineisEuromidia = vinculo.IDFatoOcupacaoPaineisEuromidia
+WHERE
+    ocupacao.Origem = 'CONTRATO'
+    AND NOT EXISTS
+    (
+        SELECT 1
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
+        WHERE
+            item.IDFatoControleContratosItensEuromidia = vinculo.IDFatoControleContratosItensEuromidia
+            AND ISNULL(item.BitOcupacaoCompartilhada, 0) = 1
+            AND item.ChaveOcupacaoOrigem = ocupacao.Referencia
+    );
+
+UPDATE ocupacao
+SET
+    ocupacao.BitEmpresasRelacionadas = CASE
+        WHEN EXISTS
+        (
+            SELECT 1
+            FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinculo
+            WHERE vinculo.IDFatoOcupacaoPaineisEuromidia = ocupacao.IDFatoOcupacaoPaineisEuromidia
+        ) THEN 1
+        ELSE 0
+    END,
+    ocupacao.DataAtualizacao = CAST(GETDATE() AS datetime2(0))
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS ocupacao
+WHERE ocupacao.Origem = 'CONTRATO';
 """
 
 
@@ -2930,6 +3622,7 @@ def executar_sql_auditado(
     ignorar_erro_permissao_execute: bool = False,
 ) -> dict[str, Any]:
     """Executa SQL com auditoria estruturada e amostra opcional."""
+    inicio_execucao = perf_counter()
     resumo = criar_resumo_auditoria(
         nome_amigavel=nome_amigavel,
         descricao_etapa=descricao_etapa,
@@ -2937,7 +3630,7 @@ def executar_sql_auditado(
         destino_dados=destino_dados,
     )
 
-    engine = obter_engine_sql_server()
+    engine: Engine | None = None
 
     try:
         resumo.status = "RUNNING"
@@ -2951,10 +3644,41 @@ def executar_sql_auditado(
         logger.info("Origem: %s | Destino: %s", origem_dados, destino_dados)
         logger.info("SQL execução - prévia normalizada: %s", " ".join(sql_execucao.split())[:1500])
 
+        logger.info(
+            "Obtendo engine SQL Server | etapa=%s | conn_id=%s",
+            nome_amigavel,
+            CONN_ID_SQL_SERVER,
+        )
+        engine = obter_engine_sql_server()
+        logger.info("Engine SQL Server obtida | etapa=%s", nome_amigavel)
+
         with engine.begin() as conn:
+            contexto_conexao = conn.exec_driver_sql(
+                """
+                SELECT
+                    @@SPID AS session_id,
+                    DB_NAME() AS banco_atual;
+                """
+            ).mappings().one()
+
+            resumo.metricas_extras["session_id_sql_server"] = contexto_conexao["session_id"]
+            resumo.metricas_extras["banco_sql_server"] = contexto_conexao["banco_atual"]
+
+            logger.info(
+                "Conexão SQL Server aberta | etapa=%s | session_id=%s | banco=%s",
+                nome_amigavel,
+                contexto_conexao["session_id"],
+                contexto_conexao["banco_atual"],
+            )
             conn.exec_driver_sql(sql_execucao)
 
-        logger.info("SQL principal executado com sucesso | etapa=%s", nome_amigavel)
+        duracao_segundos = perf_counter() - inicio_execucao
+        resumo.metricas_extras["duracao_sql_segundos"] = round(duracao_segundos, 3)
+        logger.info(
+            "SQL principal executado com sucesso | etapa=%s | duração=%.3fs",
+            nome_amigavel,
+            duracao_segundos,
+        )
 
         resumo.status = "SUCCESS"
         adicionar_validacao(
@@ -2989,6 +3713,16 @@ def executar_sql_auditado(
         }
     except Exception as erro:
         mensagem_erro = str(erro)
+        duracao_segundos = perf_counter() - inicio_execucao
+        resumo.metricas_extras["duracao_ate_erro_segundos"] = round(duracao_segundos, 3)
+
+        logger.exception(
+            "FALHA ETAPA SQL | etapa=%s | tipo_erro=%s | duração=%.3fs | erro=%s",
+            nome_amigavel,
+            type(erro).__name__,
+            duracao_segundos,
+            mensagem_erro,
+        )
 
         erro_permissao_execute = (
             "EXECUTE permission was denied" in mensagem_erro
@@ -3031,7 +3765,8 @@ def executar_sql_auditado(
         publicar_resumo_auditoria(resumo)
         raise
     finally:
-        engine.dispose()
+        if engine is not None:
+            engine.dispose()
 
 
 @dag(
@@ -3786,6 +4521,9 @@ def pipeline_controle_contratos_euromidia():
                         "CodFace",
                         "DataInicioPrevisto",
                         "DataTerminoPrevisto",
+                        "ChaveOcupacaoOrigem",
+                        "BitOcupacaoCompartilhada",
+                        "ReferenciaOcupacaoEmComum",
                     ],
                 ),
                 limite=10,
@@ -3802,6 +4540,36 @@ def pipeline_controle_contratos_euromidia():
             registrar_erro_no_resumo(resumo, erro)
             publicar_resumo_auditoria(resumo)
             raise
+
+    @task(task_id="garantir_estrutura_ocupacao_compartilhada")
+    def garantir_estrutura_ocupacao_compartilhada() -> dict[str, Any]:
+        return executar_sql_auditado(
+            nome_amigavel="Garantir estrutura das ocupações compartilhadas",
+            descricao_etapa=(
+                "Garante as colunas técnicas dos itens e a tabela ponte entre ocupação, empresa, "
+                "contrato, item, painel, face e marca."
+            ),
+            sql_execucao=GARANTIR_ESTRUTURA_OCUPACAO_COMPARTILHADA_SQL,
+            sql_amostra="""
+                SELECT TOP 5
+                    IDFatoVinculaMarcasOcupacao,
+                    IDFatoOcupacaoPaineisEuromidia,
+                    IDEmpresa,
+                    IDFatoControleContratosEuromidia,
+                    IDFatoControleContratosItensEuromidia,
+                    IDDimPaineisEuromidia,
+                    IDDimFacesPaineis,
+                    Marca,
+                    DataAtualizado
+                FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao]
+                ORDER BY IDFatoVinculaMarcasOcupacao DESC
+            """,
+            origem_dados="Metadados do SQL Server",
+            destino_dados=(
+                "[Integracao].[Silver].[FatoControleContratosItensEuromidia] + "
+                "[Integracao].[Silver].[FatoVinculaMarcasOcupacao]"
+            ),
+        )
 
     @task(task_id="merge_contratos")
     def merge_contratos() -> dict[str, Any]:
@@ -3853,6 +4621,9 @@ def pipeline_controle_contratos_euromidia():
                     DataInicioPrevisto,
                     DataTerminoPrevisto,
                     FaturamentoBrutoMensal,
+                    ChaveOcupacaoOrigem,
+                    BitOcupacaoCompartilhada,
+                    ReferenciaOcupacaoEmComum,
                     DataAtualizacao
                 FROM [Silver].[FatoControleContratosItensEuromidia]
                 ORDER BY DataAtualizacao DESC, Referencia DESC
@@ -4028,12 +4799,55 @@ def pipeline_controle_contratos_euromidia():
                     Vendedor,
                     NumeroContrato,
                     NumeroPrevia,
+                    BitEmpresasRelacionadas,
+                    IDFatoControleContratosItemOrigem,
+                    TipoVinculoOrigem,
                     DataAtualizacao
                 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
                 ORDER BY DataAtualizacao DESC, Referencia DESC
             """,
             origem_dados="[Integracao].[Silver].[FatoControleContratosItensEuromidia]",
             destino_dados="[Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]",
+        )
+
+    @task(task_id="upsert_vinculos_marcas_ocupacao")
+    def upsert_vinculos_marcas_ocupacao() -> dict[str, Any]:
+        return executar_sql_auditado(
+            nome_amigavel="MERGE vínculos das ocupações compartilhadas",
+            descricao_etapa=(
+                "Relaciona cada item comercial identificado como parte da mesma barra visual ao único "
+                "ID de ocupação criado para o grupo, preservando empresa, contrato, item, painel, face, "
+                "marca e as referências originais em JSON."
+            ),
+            sql_execucao=UPSERT_VINCULOS_MARCAS_OCUPACAO_SQL,
+            sql_amostra="""
+                SELECT TOP 20
+                    v.IDFatoVinculaMarcasOcupacao,
+                    v.IDFatoOcupacaoPaineisEuromidia,
+                    o.Referencia AS ChaveOcupacao,
+                    v.IDEmpresa,
+                    v.IDFatoControleContratosEuromidia,
+                    v.IDFatoControleContratosItensEuromidia,
+                    v.IDDimPaineisEuromidia,
+                    v.IDDimFacesPaineis,
+                    v.ReferenciaContrato,
+                    v.ReferenciaLogycWare,
+                    v.Marca,
+                    v.DataAtualizado
+                FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS v
+                INNER JOIN [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS o
+                    ON o.IDFatoOcupacaoPaineisEuromidia = v.IDFatoOcupacaoPaineisEuromidia
+                ORDER BY v.DataAtualizado DESC, v.IDFatoVinculaMarcasOcupacao DESC
+            """,
+            origem_dados=(
+                "[Integracao].[Silver].[FatoControleContratosItensEuromidia] + "
+                "[Integracao].[Silver].[FatoControleContratosEuromidia] + "
+                "[Integracao].[Silver].[DimEmpresas] + "
+                "[Integracao].[Silver].[DimPaineisEuromidia] + "
+                "[Integracao].[Silver].[DimFacesPaineis] + "
+                "[Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]"
+            ),
+            destino_dados="[Integracao].[Silver].[FatoVinculaMarcasOcupacao]",
         )
 
     @task(task_id="update_bit_ativo_itens")
@@ -4069,6 +4883,7 @@ def pipeline_controle_contratos_euromidia():
     info_download = baixar_arquivo_sharepoint()
     info_csv = gerar_csv_ctr(info_download)
     stage = carregar_stage(info_csv)
+    estrutura_ocupacao_compartilhada = garantir_estrutura_ocupacao_compartilhada()
     contratos = merge_contratos()
     itens = merge_itens()
     fk = update_fk_contratos_itens()
@@ -4078,6 +4893,7 @@ def pipeline_controle_contratos_euromidia():
     face = update_id_face()
     calendario = upsert_dim_calendario()
     ocupacao = upsert_ocupacao()
+    vinculos_marcas_ocupacao = upsert_vinculos_marcas_ocupacao()
     bit_ativo_itens = update_bit_ativo_itens()
 
     prioridade_reservas = TriggerDagRunOperator(
@@ -4101,6 +4917,7 @@ def pipeline_controle_contratos_euromidia():
         >> info_download
         >> info_csv
         >> stage
+        >> estrutura_ocupacao_compartilhada
         >> contratos
         >> itens
         >> fk
@@ -4110,10 +4927,10 @@ def pipeline_controle_contratos_euromidia():
         >> face
         >> calendario
         >> ocupacao
+        >> vinculos_marcas_ocupacao
         >> bit_ativo_itens
         >> prioridade_reservas
     )
 
 
 dag = pipeline_controle_contratos_euromidia()
-

@@ -892,12 +892,14 @@
   let estadosCards = new Map();
   let timerBuscaFace = null;
   let timerFiltrosFace = null;
+  let salvamentoEmAndamento = false;
   let dadosReservaGlobal = {
     id_cliente: "",
     id_vendedor: "",
     marca_exibida: "",
     observacao: "",
     clientes: [],
+    clientes_iniciais: [],
     vendedores: [],
     dados_carregados: false
   };
@@ -1697,7 +1699,10 @@
       fp_fim: null,
       cap_total_default: ehDigital(copia) ? 16 : 1,
       card_msg: "",
-      card_msg_ok: true
+      card_msg_ok: true,
+      token_operacao: "",
+      token_operacao_assinatura: "",
+      reserva_salva: false
     };
   }
 
@@ -1872,9 +1877,14 @@
     const botao = cfg.botao;
     if(!input || !lista || !botao) return;
 
+    let timerBuscaServidor = null;
+    let sequenciaBuscaServidor = 0;
+
     function render(){
       const termo = normalizar(input.value);
-      const itens = (cfg.getLista() || []).filter(function(item){ return !termo || normalizar(cfg.getLabel(item)).includes(termo); });
+      const itens = (cfg.getLista() || []).filter(function(item){
+        return !termo || normalizar(cfg.getLabel(item)).includes(termo);
+      });
       lista.innerHTML = "";
 
       if(!itens.length){
@@ -1900,12 +1910,41 @@
       abrirLista(lista);
     }
 
+    function pesquisarERenderizar(){
+      if(typeof cfg.buscarServidor !== "function"){
+        render();
+        return;
+      }
+
+      clearTimeout(timerBuscaServidor);
+      const termoDigitado = texto(input.value).trim();
+      const minhaSequencia = ++sequenciaBuscaServidor;
+
+      timerBuscaServidor = setTimeout(async function(){
+        try{
+          await cfg.buscarServidor(termoDigitado);
+        }catch(e){
+          console.error("[reserva] Falha ao pesquisar empresa no servidor:", e);
+        }
+
+        if(minhaSequencia === sequenciaBuscaServidor){
+          render();
+        }
+      }, 250);
+    }
+
     input.addEventListener("input", function(){
       cfg.onInputLivre(input.value);
       atualizarBloqueioSeletorFaces();
-      render();
+      pesquisarERenderizar();
     });
-    input.addEventListener("focus", render);
+    input.addEventListener("focus", function(){
+      if(typeof cfg.buscarServidor === "function" && texto(input.value).trim().length >= 2){
+        pesquisarERenderizar();
+      }else{
+        render();
+      }
+    });
     botao.addEventListener("click", render);
   }
 
@@ -1916,6 +1955,29 @@
       botao: elBtnClienteGlobal,
       getLista:function(){ return dadosReservaGlobal.clientes; },
       getLabel:labelEmpresa,
+      buscarServidor:async function(termo){
+        const busca = texto(termo).trim();
+
+        if(busca.length < 2){
+          dadosReservaGlobal.clientes = dadosReservaGlobal.clientes_iniciais.slice();
+          return;
+        }
+
+        const qs = new URLSearchParams();
+        qs.set("somente_empresas", "1");
+        qs.set("q_empresa", busca);
+
+        const resp = await fetch(URL_DADOS_MODAL + "?" + qs.toString(), {
+          credentials:"same-origin"
+        });
+        const data = await resp.json().catch(function(){ return null; });
+
+        if(!resp.ok || !data || !data.ok){
+          throw new Error((data && data.erro) || "Pesquisa de empresas falhou.");
+        }
+
+        dadosReservaGlobal.clientes = data.clientes || data.empresas || [];
+      },
       onInputLivre:function(){ dadosReservaGlobal.id_cliente = ""; },
       onSelect:function(item, input){
         dadosReservaGlobal.id_cliente = getEmpresaId(item);
@@ -1963,6 +2025,7 @@
       }
 
       dadosReservaGlobal.clientes = data.clientes || data.empresas || [];
+      dadosReservaGlobal.clientes_iniciais = dadosReservaGlobal.clientes.slice();
       dadosReservaGlobal.vendedores = data.vendedores || [];
       dadosReservaGlobal.dados_carregados = true;
       preencherInputGlobalPorValor();
@@ -2224,12 +2287,28 @@
     }
   }
 
+  function gerarTokenOperacaoReserva(){
+    if(window.crypto && typeof window.crypto.randomUUID === "function"){
+      return "reserva_" + window.crypto.randomUUID().replace(/-/g, "");
+    }
+
+    if(window.crypto && typeof window.crypto.getRandomValues === "function"){
+      const bytes = new Uint8Array(16);
+      window.crypto.getRandomValues(bytes);
+      return "reserva_" + Array.from(bytes).map(function(valor){
+        return valor.toString(16).padStart(2, "0");
+      }).join("");
+    }
+
+    return "reserva_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 18);
+  }
+
   function montarPayload(estado){
     const contrato = estado.contratosMap.get(texto(estado.id_contrato));
     const idFatoControle = contrato ? numeroInteiroOuVazio(contrato.IDFatoControleContratosEuromidia) : "";
-
-    return {
+    const payload = {
       csrf_token: getCsrfToken(),
+      origem_tela: "reserva-ocupacao",
       cod_ponto: codPonto(estado.face),
       cod_face: codFace(estado.face),
       cota: ehDigital(estado.face) ? cotaFace(estado.face) : "",
@@ -2243,6 +2322,105 @@
       numero_previa: contrato ? texto(contrato.NumeroPrevia) : texto(estado.numero_previa),
       marca_exibida: texto(dadosReservaGlobal.marca_exibida),
       observacao: texto(dadosReservaGlobal.observacao)
+    };
+
+    const assinatura = [
+      payload.cod_ponto,
+      payload.cod_face,
+      payload.cota,
+      payload.data_inicio,
+      payload.data_fim,
+      payload.id_cliente,
+      payload.id_vendedor,
+      payload.id_fato_controle_contratos,
+      payload.numero_contrato,
+      payload.numero_previa,
+      payload.marca_exibida,
+      payload.observacao
+    ].join("|");
+
+    if(!estado.token_operacao || estado.token_operacao_assinatura !== assinatura){
+      estado.token_operacao = gerarTokenOperacaoReserva();
+      estado.token_operacao_assinatura = assinatura;
+      estado.reserva_salva = false;
+    }
+
+    payload.token_operacao = estado.token_operacao;
+    return payload;
+  }
+
+  function esperar(ms){
+    return new Promise(function(resolve){ window.setTimeout(resolve, ms); });
+  }
+
+  async function executarPostReserva(payload){
+    try{
+      const resp = await fetch(URL_CRIAR, {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "X-CSRFToken": getCsrfToken(),
+          "X-Origem-Tela": "reserva-ocupacao"
+        },
+        credentials:"same-origin",
+        body: JSON.stringify(payload)
+      });
+
+      const corpo = await resp.text();
+      let data = null;
+      if(corpo){
+        try{
+          data = JSON.parse(corpo);
+        }catch(e){
+          data = null;
+        }
+      }
+
+      if(resp.ok && data && data.ok){
+        return {ok:true, data:data, ambiguo:false};
+      }
+
+      const erroApi = data && data.erro ? texto(data.erro) : "";
+      const falhaConclusiva = !!erroApi && resp.status >= 400 && resp.status < 500;
+      return {
+        ok:false,
+        data:data,
+        ambiguo:!falhaConclusiva,
+        erro:erroApi || ("Resposta inválida do servidor (HTTP " + resp.status + ").")
+      };
+    }catch(e){
+      return {
+        ok:false,
+        data:null,
+        ambiguo:true,
+        erro:"A conexão foi interrompida antes da confirmação do servidor."
+      };
+    }
+  }
+
+  async function enviarReservaComRecuperacao(payload){
+    const primeiraResposta = await executarPostReserva(payload);
+    if(primeiraResposta.ok || !primeiraResposta.ambiguo) return primeiraResposta;
+
+    /*
+     * Se o proxy perder a resposta depois do COMMIT, repito a mesma operação
+     * com o mesmo token. O backend trata esse token como idempotente: encontra
+     * a reserva já gravada e retorna sucesso sem inserir outra linha.
+     */
+    await esperar(800);
+    const segundaResposta = await executarPostReserva(payload);
+    if(segundaResposta.ok){
+      segundaResposta.recuperada = true;
+      return segundaResposta;
+    }
+
+    if(!segundaResposta.ambiguo) return segundaResposta;
+
+    return {
+      ok:false,
+      data:null,
+      ambiguo:true,
+      erro:"O servidor não confirmou o resultado da operação. Não envie novamente antes de verificar a lista de reservas."
     };
   }
 
@@ -2262,6 +2440,8 @@
   async function salvarReserva(ev){
     ev.preventDefault();
 
+    if(salvamentoEmAndamento) return;
+
     const erroGlobal = erroDadosReservaGlobal();
     if(erroGlobal){
       setMsgDadosGlobal("Preencha os dados fixos da reserva antes de salvar: " + erroGlobal + ".", false);
@@ -2270,9 +2450,18 @@
       return;
     }
 
-    const estados = Array.from(estadosCards.values());
-    if(!estados.length){
+    const todosEstados = Array.from(estadosCards.values());
+    if(!todosEstados.length){
       setMsg("Selecione pelo menos uma face válida.", false);
+      return;
+    }
+
+    const estados = todosEstados.filter(function(estado){ return !estado.reserva_salva; });
+    if(!estados.length){
+      setMsg(todosEstados.length + (todosEstados.length === 1 ? " reserva salva com sucesso." : " reservas salvas com sucesso."), true);
+      setProgresso("Faces salvas: " + todosEstados.map(function(estado){ return codFace(estado.face); }).join(", "));
+      elBtnSalvar.disabled = true;
+      elBtnSalvar.textContent = "Reservas salvas";
       return;
     }
 
@@ -2286,7 +2475,11 @@
       }
     }
 
+    salvamentoEmAndamento = true;
+    let salvamentoConcluido = false;
+    let resultadoIndeterminado = false;
     elBtnSalvar.disabled = true;
+    elBtnSalvar.textContent = "Salvando...";
     setMsg("Salvando reservas...", true);
     setProgresso("0 de " + estados.length + " reservas enviadas.");
 
@@ -2299,34 +2492,45 @@
         setProgresso("Salvando " + (i + 1) + " de " + estados.length + ": " + codFace(estado.face) + "...");
         setCardMsg(estado, "Enviando reserva desta face...", true);
 
-        const resp = await fetch(URL_CRIAR, {
-          method:"POST",
-          headers:{
-            "Content-Type":"application/json",
-            "X-CSRFToken": getCsrfToken()
-          },
-          credentials:"same-origin",
-          body: JSON.stringify(payload)
-        });
-        const data = await resp.json().catch(function(){ return null; });
-        if(!resp.ok || !data || !data.ok){
-          const erro = (data && data.erro) || "Erro ao salvar reserva.";
+        const resultado = await enviarReservaComRecuperacao(payload);
+        if(!resultado.ok){
+          const erro = resultado.erro || "Não foi possível confirmar o salvamento da reserva.";
+          resultadoIndeterminado = !!resultado.ambiguo;
           setCardMsg(estado, erro, false);
           setMsg("Falha na face " + codFace(estado.face) + ": " + erro, false);
-          setProgresso(salvas.length + " reserva(s) foram salva(s) antes da falha.");
+          setProgresso(
+            resultadoIndeterminado
+              ? "Resultado não confirmado. Verifique a lista de reservas antes de tentar novamente."
+              : salvas.length + " reserva(s) foram salva(s) antes da falha."
+          );
           return;
         }
+
+        estado.reserva_salva = true;
         salvas.push(codFace(estado.face));
-        setCardMsg(estado, "Reserva salva com sucesso.", true);
+        setCardMsg(
+          estado,
+          resultado.recuperada
+            ? "Reserva salva com sucesso. A confirmação foi recuperada após a resposta original ser interrompida."
+            : "Reserva salva com sucesso.",
+          true
+        );
       }
 
-      setMsg(salvas.length + (salvas.length === 1 ? " reserva salva com sucesso." : " reservas salvas com sucesso."), true);
-      setProgresso("Faces salvas: " + salvas.join(", "));
+      salvamentoConcluido = todosEstados.every(function(estado){ return estado.reserva_salva; });
+      const facesSalvas = todosEstados.filter(function(estado){ return estado.reserva_salva; });
+      setMsg(facesSalvas.length + (facesSalvas.length === 1 ? " reserva salva com sucesso." : " reservas salvas com sucesso."), true);
+      setProgresso("Faces salvas: " + facesSalvas.map(function(estado){ return codFace(estado.face); }).join(", "));
     }catch(e){
-      setMsg("Erro de comunicação ao salvar reservas.", false);
-      setProgresso(salvas.length + " reserva(s) foram salva(s) antes do erro de comunicação.");
+      resultadoIndeterminado = true;
+      setMsg("A comunicação foi interrompida e o resultado não pôde ser confirmado.", false);
+      setProgresso("Verifique a lista de reservas antes de tentar novamente.");
     }finally{
-      elBtnSalvar.disabled = false;
+      salvamentoEmAndamento = false;
+      elBtnSalvar.disabled = salvamentoConcluido || resultadoIndeterminado;
+      elBtnSalvar.textContent = salvamentoConcluido
+        ? "Reservas salvas"
+        : (resultadoIndeterminado ? "Verifique a reserva" : "Salvar Reservas");
     }
   }
 

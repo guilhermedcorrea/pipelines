@@ -2510,15 +2510,16 @@
 
                   {#
                     Chave visual da barra.
-                    Antes a grade usava o ID do cabeçalho do contrato como chave. Isso podia
-                    juntar barras diferentes do mesmo contrato/cabeçalho ou esconder itens
-                    distintos na mesma face. A chave agora prioriza o ID do item da grade e
-                    mantém DiaInicio/DiaFim/SpanOffset para não juntar fragmentos criados pelo
-                    encaixe visual da grade digital.
+                    Para contrato, a identidade física é o IDFatoOcupacaoPaineisEuromidia.
+                    Os vários itens/marcas vinculados permanecem disponíveis para detalhes,
+                    mas não podem criar barras independentes. DiaInicio/DiaFim/SpanOffset
+                    continuam na chave para preservar os fragmentos do encaixe visual.
                   #}
                   {% set chave = None %}
                   {% if eh_reserva_item and reserva_id_chave %}
                     {% set chave = 'RESERVA|' ~ (reserva_id_chave|string) ~ '|OFF:' ~ (_off_item|string) ~ '|DI:' ~ (dia_ini|string) ~ '|DF:' ~ (dia_fim|string) %}
+                  {% elif it.IDFatoOcupacaoPaineisEuromidia is defined and it.IDFatoOcupacaoPaineisEuromidia not in (none, '') %}
+                    {% set chave = 'OCUPACAO|' ~ (it.IDFatoOcupacaoPaineisEuromidia|string) ~ '|OFF:' ~ (_off_item|string) ~ '|DI:' ~ (dia_ini|string) ~ '|DF:' ~ (dia_fim|string) %}
                   {% elif it.ID is defined and it.ID not in (none, '') %}
                     {% set chave = 'ITEM|' ~ (it.ID|string) ~ '|OFF:' ~ (_off_item|string) ~ '|DI:' ~ (dia_ini|string) ~ '|DF:' ~ (dia_fim|string) %}
                   {% elif contrato_txt %}

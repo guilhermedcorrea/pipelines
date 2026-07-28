@@ -1,51 +1,678 @@
 {% extends "euromidia/base_euromidia.html" %}
 
-{% block content %}
+{% block title %}Reserva Ocupação{% endblock %}
 
+{% block content %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 
-
 <style>
-  .reserva-page{
-    width: 100%;
-    max-width: none;
-    margin: 0;
-    padding: 18px 22px;
+  .reserva-ocupacao-page,
+  .reserva-ocupacao-page *{
+    box-sizing:border-box;
   }
 
-  .reserva-card{
-    width: 100%;
-    max-width: none;
+  .reserva-ocupacao-page{
+    width:100%;
+    max-width:none;
+    min-width:0;
+    margin:0;
+    padding:clamp(10px, 1.35vw, 24px);
+    overflow-x:hidden;
   }
 
-  @media (max-width: 900px){
-    .reserva-page{ padding: 14px 14px; }
+  .reserva-ocupacao-page form,
+  .reserva-ocupacao-page > div,
+  .reserva-ocupacao-stack,
+  #cardsReservasFaces{
+    width:100%;
+    max-width:none;
+    min-width:0;
+  }
+
+  .reserva-ocupacao-stack{
+    display:flex;
+    flex-direction:column;
+    gap:clamp(10px, 1vw, 16px);
+  }
+
+  .reserva-ocupacao-card{
+    width:100%;
+    max-width:none;
+    min-width:0;
+    border:1px solid var(--border);
+    border-radius:16px;
+    background:#fff;
+    padding:clamp(12px, 1.1vw, 18px);
+    box-shadow:0 8px 24px rgba(15,23,42,.06);
+  }
+
+  .reserva-ocupacao-card.is-face-card{
+    border-left:5px solid #166534;
+  }
+
+  .reserva-ocupacao-card.is-face-pendente{
+    border-left-color:#94a3b8;
   }
 
   .reserva-grid-2{
     display:grid;
-    grid-template-columns: 1fr 1fr;
-    gap:12px;
-    align-items:end;
+    grid-template-columns:minmax(280px, 1fr) minmax(180px, 320px);
+    gap:clamp(10px, 1vw, 16px);
+    align-items:start;
+    width:100%;
+    min-width:0;
   }
 
   .reserva-grid-3{
     display:grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns:repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+    gap:clamp(10px, 1vw, 16px);
+    align-items:start;
+    width:100%;
+    min-width:0;
+  }
+
+  .reserva-grid-4{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+    gap:clamp(10px, 1vw, 16px);
+    align-items:start;
+    width:100%;
+    min-width:0;
+  }
+
+  .reserva-filtros-faces-grid{
+    display:grid;
+    grid-template-columns:minmax(180px, 260px) minmax(180px, 260px) minmax(320px, 1fr) minmax(160px, 220px);
+    gap:clamp(10px, 1vw, 16px);
+    align-items:start;
+    width:100%;
+    min-width:0;
+  }
+
+  .reserva-filtros-faces-grid > div{
+    min-width:0;
+  }
+
+  .reserva-grid-2 > div,
+  .reserva-grid-3 > div,
+  .reserva-grid-4 > div{
+    min-width:0;
+    align-self:start;
+  }
+
+  @media (max-width:720px){
+    .reserva-ocupacao-page{
+      padding:10px;
+    }
+
+    .reserva-grid-2,
+    .reserva-grid-3,
+    .reserva-grid-4,
+    .reserva-filtros-faces-grid{
+      grid-template-columns:1fr;
+    }
+  }
+
+  @media (min-width:1600px){
+    .reserva-grid-2{
+      grid-template-columns:minmax(520px, 1fr) minmax(220px, 360px);
+    }
+
+    .reserva-grid-4{
+      grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
+    }
+  }
+
+  .campo-label{
+    font-weight:900;
+    display:block;
+    margin-bottom:6px;
+    line-height:1.25;
+    min-height:18px;
+  }
+
+  .reserva-grid-2 .form-control,
+  .reserva-grid-3 .form-control,
+  .reserva-grid-4 .form-control,
+  .reserva-grid-2 .kb-input,
+  .reserva-grid-3 .kb-input,
+  .reserva-grid-4 .kb-input,
+  .reserva-face-contador{
+    min-height:48px;
+    display:flex;
+    align-items:center;
+  }
+
+  .reserva-grid-2 input.form-control,
+  .reserva-grid-3 input.form-control,
+  .reserva-grid-4 input.form-control,
+  .reserva-grid-2 select.form-control,
+  .reserva-grid-3 select.form-control,
+  .reserva-grid-4 select.form-control,
+  .reserva-ocupacao-page textarea.form-control{
+    width:100%;
+    max-width:100%;
+  }
+
+  .reserva-ocupacao-page textarea.form-control{
+    resize:vertical;
+  }
+
+  .hint{
+    margin-top:6px;
+    opacity:.75;
+    font-weight:700;
+    font-size:12px;
+  }
+
+  .msg{
+    font-weight:900;
+    min-height:22px;
+  }
+
+  .msg.ok{color:#166534;}
+  .msg.err{color:#b00020;}
+
+  .kb-combobox{
+    position:relative;
+    display:block;
+    width:100%;
+  }
+
+  .kb-input,
+  .kb-combobox-input{
+    width:100%;
+    min-height:40px;
+    padding:9px 52px 9px 11px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:#fff;
+    font-weight:800;
+    outline:none;
+  }
+
+  .kb-input:focus,
+  .kb-combobox-input:focus{
+    box-shadow:0 0 0 3px rgba(37,99,235,.10);
+  }
+
+  .kb-combobox-toggle{
+    position:absolute;
+    top:0;
+    right:0;
+    width:42px;
+    min-width:42px;
+    height:40px;
+    border:1px solid var(--border);
+    border-radius:0 12px 12px 0;
+    background:#f8fafc;
+    font-weight:900;
+    cursor:pointer;
+  }
+
+  .kb-combobox-lista{
+    position:absolute;
+    left:0;
+    right:0;
+    top:calc(100% + 6px);
+    z-index:10000;
+    max-height:340px;
+    overflow:auto;
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:14px;
+    box-shadow:0 16px 35px rgba(15,23,42,.16);
+  }
+
+  .kb-combobox-item{
+    position:relative;
+    padding:11px 52px 11px 13px;
+    border-bottom:1px solid rgba(0,0,0,.06);
+    cursor:pointer;
+  }
+
+  .kb-combobox-item:hover{background:#f8fafc;}
+  .kb-combobox-item:last-child{border-bottom:none;}
+  .kb-combobox-item.is-selected{background:rgba(22,101,52,.08);}
+
+  .kb-combobox-item .top{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:14px;
+    font-weight:1000;
+    color:#0f172a;
+    min-width:0;
+    flex-wrap:wrap;
+  }
+
+  .kb-combobox-item .sub{
+    display:block;
+    margin-top:4px;
+    font-size:12px;
+    font-weight:800;
+    color:#475569;
+    line-height:1.35;
+  }
+
+  .kb-face-check{
+    position:absolute;
+    right:12px;
+    top:11px;
+    width:28px;
+    height:28px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:999px;
+    border:1px solid rgba(22,101,52,.25);
+    background:#f8fafc;
+    color:#166534;
+    font-weight:1000;
+    line-height:1;
+  }
+
+  .kb-combobox-item.is-selected .kb-face-check{
+    background:rgba(22,101,52,.12);
+    border-color:rgba(22,101,52,.40);
+  }
+
+  .tag-digital,
+  .tag-analogico,
+  .tag-selecionado,
+  .tag-pendente{
+    display:inline-flex;
+    align-items:center;
+    border-radius:999px;
+    padding:3px 7px;
+    font-size:10px;
+    font-weight:1000;
+  }
+
+  .tag-digital{background:rgba(22,101,52,.10);color:#166534;}
+  .tag-analogico{background:rgba(71,85,105,.12);color:#475569;}
+  .tag-selecionado{background:rgba(37,99,235,.10);color:#1d4ed8;}
+  .tag-pendente{background:rgba(148,163,184,.18);color:#475569;}
+
+  .kb-select-hidden{
+    position:absolute;
+    left:-99999px;
+    width:1px;
+    height:1px;
+    opacity:0;
+    pointer-events:none;
+  }
+
+  .reserva-face-contador{
+    min-height:40px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:#f8fafc;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:9px 12px;
+    font-weight:1000;
+    color:#0f172a;
+  }
+
+
+  .kb-combobox.is-bloqueado .kb-input,
+  .kb-combobox.is-bloqueado .kb-combobox-toggle{
+    background:#f8fafc;
+    color:#64748b;
+    opacity:1;
+    cursor:not-allowed;
+  }
+
+  .kb-combobox.is-bloqueado{
+    opacity:.96;
+  }
+
+  .dd{
+    position:relative;
+    width:100%;
+    min-width:0;
+  }
+
+  .dd-summary{
+    min-height:48px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:#fff;
+    padding:9px 12px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    cursor:pointer;
+    font-weight:900;
+    list-style:none;
+    user-select:none;
+  }
+
+  .dd-summary::-webkit-details-marker{
+    display:none;
+  }
+
+  .dd-label{
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .dd-caret{
+    font-weight:1000;
+    opacity:.75;
+  }
+
+  .dd[open] .dd-caret{
+    transform:rotate(180deg);
+  }
+
+  .dd-panel{
+    position:absolute;
+    left:0;
+    right:0;
+    top:calc(100% + 6px);
+    z-index:10050;
+    max-height:360px;
+    overflow:auto;
+    border:1px solid var(--border);
+    border-radius:14px;
+    background:#fff;
+    box-shadow:0 16px 35px rgba(15,23,42,.16);
+    padding:10px;
+  }
+
+  .dd-search{
+    width:100%;
+    min-height:38px;
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:8px 10px;
+    outline:none;
+    font-weight:800;
+  }
+
+  .dd-search:focus{
+    box-shadow:0 0 0 3px rgba(37,99,235,.10);
+  }
+
+  .dd-hint{
+    margin:7px 0 8px;
+    font-size:12px;
+    font-weight:800;
+    color:#64748b;
+  }
+
+  .dd-item{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    min-height:34px;
+    padding:7px 8px;
+    border-radius:10px;
+    font-weight:850;
+    cursor:pointer;
+  }
+
+  .dd-item:hover{
+    background:#f8fafc;
+  }
+
+  .dd-item input{
+    width:16px;
+    height:16px;
+    flex:0 0 auto;
+  }
+
+  .dd-vazio{
+    padding:10px 8px;
+    color:#64748b;
+    font-weight:900;
+  }
+
+  .dd.is-bloqueado .dd-summary{
+    background:#f8fafc;
+    color:#64748b;
+    opacity:1;
+    cursor:not-allowed;
+  }
+
+  .dd.is-bloqueado .dd-panel{
+    display:none;
+  }
+
+  .hint.is-bloqueio-face{
+    color:#b45309;
+    opacity:1;
+  }
+
+  .reserva-face-vazio{
+    border:1px dashed var(--border);
+    border-radius:14px;
+    padding:16px;
+    background:#f8fafc;
+    font-weight:900;
+    color:#475569;
+  }
+
+  .reserva-face-lista-selecionadas{
+    margin-top:14px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    width:100%;
+    min-width:0;
+  }
+
+  .reserva-face-linha{
+    width:100%;
+    min-width:0;
+    border:1px solid var(--border);
+    border-left:5px solid #166534;
+    border-radius:14px;
+    background:#fff;
+    padding:12px;
+    box-shadow:0 4px 14px rgba(15,23,42,.05);
+  }
+
+  .reserva-face-linha-top{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
     gap:12px;
-    align-items:end;
+    flex-wrap:wrap;
+    margin-bottom:10px;
   }
 
-  @media (max-width: 900px){
-    .reserva-grid-2{ grid-template-columns: 1fr; }
-    .reserva-grid-3{ grid-template-columns: 1fr; }
+  .reserva-face-linha-titulo{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    font-weight:1000;
+    color:#0f172a;
+    font-size:15px;
   }
 
-  /* ✅ marca visual nos dias ocupados (continua existindo) */
-  .flatpickr-day.ocupado{
-    position: relative;
+  .reserva-face-linha-resumo{
+    margin-top:4px;
+    font-size:12px;
+    line-height:1.35;
+    font-weight:800;
+    color:#475569;
   }
+
+  .reserva-face-controles{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+    gap:10px;
+    align-items:start;
+    width:100%;
+    min-width:0;
+  }
+
+  .reserva-face-controles > div{
+    min-width:0;
+  }
+
+  .reserva-face-remover-compacto{
+    border:1px solid rgba(185,28,28,.25);
+    background:rgba(185,28,28,.06);
+    color:#991b1b;
+    border-radius:10px;
+    padding:7px 10px;
+    font-weight:1000;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+
+  .reserva-face-remover-compacto:hover{
+    background:rgba(185,28,28,.10);
+  }
+
+  .kb-face-actions{
+    position:absolute;
+    right:10px;
+    top:10px;
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+
+  .kb-face-action{
+    width:28px;
+    height:28px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:999px;
+    border:1px solid rgba(22,101,52,.25);
+    background:#f8fafc;
+    color:#166534;
+    font-weight:1000;
+    line-height:1;
+    cursor:pointer;
+  }
+
+  .kb-face-action.is-remove{
+    border-color:rgba(185,28,28,.28);
+    background:rgba(185,28,28,.06);
+    color:#991b1b;
+  }
+
+  .kb-face-action:hover{
+    filter:brightness(.98);
+  }
+
+  .reserva-card-top{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:14px;
+  }
+
+  .reserva-card-titulo{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    font-weight:1000;
+    color:#0f172a;
+    font-size:17px;
+  }
+
+  .reserva-card-resumo{
+    margin-top:5px;
+    font-size:12px;
+    line-height:1.35;
+    font-weight:800;
+    color:#475569;
+  }
+
+  .reserva-face-remover{
+    border:1px solid rgba(185,28,28,.25);
+    background:rgba(185,28,28,.06);
+    color:#991b1b;
+    border-radius:10px;
+    padding:7px 10px;
+    font-weight:1000;
+    cursor:pointer;
+  }
+
+  .reserva-progresso-salvamento{
+    margin-top:8px;
+    font-size:12px;
+    font-weight:800;
+    color:#475569;
+  }
+
+  .card-msg{
+    margin-top:10px;
+    font-size:12px;
+    font-weight:900;
+  }
+
+  .card-msg.ok{color:#166534;}
+  .card-msg.err{color:#b00020;}
+
+  .reserva-ocupacao-card.is-face-pendente input:disabled,
+  .reserva-ocupacao-card.is-face-pendente textarea:disabled,
+  .reserva-ocupacao-card.is-face-pendente button:disabled{
+    background:#f8fafc;
+    color:#64748b;
+    opacity:1;
+    cursor:not-allowed;
+  }
+
+  /* =========================================================
+     Calendário de disponibilidade da reserva
+     - mostra badge 0/1, 6/16 etc.
+     - mantém número do dia visível
+     - dias sem capacidade ficam desabilitados pelo JS
+     ========================================================= */
+  .flatpickr-day{
+    position:relative;
+    line-height:1 !important;
+    padding-top:6px !important;
+  }
+
+  .flatpickr-day.has-badge{
+    display:flex !important;
+    flex-direction:column !important;
+    justify-content:flex-start !important;
+    align-items:center !important;
+    min-height:52px !important;
+    height:auto !important;
+    padding-bottom:6px !important;
+  }
+
+  .flatpickr-day .day-badge{
+    position:static !important;
+    margin-top:4px !important;
+    font-size:12px;
+    font-weight:900;
+    line-height:1;
+    padding:4px 6px;
+    border-radius:8px;
+    color:#fff;
+    white-space:nowrap;
+    pointer-events:none;
+    box-shadow:0 4px 10px rgba(0,0,0,.12);
+  }
+
+  .flatpickr-day.badge-green .day-badge{background:#178a3a;}
+  .flatpickr-day.badge-yellow .day-badge{background:#d39a00;}
+  .flatpickr-day.badge-red .day-badge{background:#b00020;}
+  .flatpickr-day.badge-gray .day-badge{background:#6b7280;}
+
+  .flatpickr-day.ocupado{position:relative;}
   .flatpickr-day.ocupado::after{
     content:"";
     position:absolute;
@@ -56,646 +683,294 @@
     height:6px;
     border-radius:999px;
     background:#b00020;
-    z-index: 3; /* ✅ garante que a bolinha não brigue com o badge */
-  }
-  .flatpickr-day.flatpickr-disabled.ocupado{
-    opacity: 1;
-    color: #b00020;
-    text-decoration: line-through;
+    z-index:3;
   }
 
-  .hint{
-    margin-top:6px;
-    opacity:.75;
-    font-weight:700;
-    font-size:12px;
+  .flatpickr-day.flatpickr-disabled.ocupado,
+  .flatpickr-day.flatpickr-disabled.badge-red,
+  .flatpickr-day.flatpickr-disabled.badge-gray{
+    opacity:1;
+    color:#b00020;
+    text-decoration:line-through;
   }
 
-  /* =========================================================
-     ✅ NOVO: badge tipo “6/16” dentro do calendário (igual seu print)
-     ✅ FIX: garantir que o NÚMERO DO DIA apareça
-     ========================================================= */
-
-  /* ✅ o flatpickr usa line-height centralizado; isso some com o número quando você coloca badge.
-     Então ajustamos o layout do dia para suportar o badge sem tampar o texto do dia. */
-  .flatpickr-day{
-    position: relative;         /* pra ancorar badge e bolinha */
-    line-height: 1 !important;  /* ✅ evita o texto ficar "no meio" e sumir */
-    padding-top: 8px !important;/* ✅ reserva espaço pro número (e bolinha) */
-  }
-
-  .flatpickr-day.has-badge{
-    padding-bottom: 26px !important; /* ✅ mais espaço pro badge sem tampar o número */
-  }
-
-  .flatpickr-day .day-badge{
-    position: absolute;
-    left: 50%;
-    bottom: 4px;                /* ✅ desce o badge pra não cobrir o número */
-    transform: translateX(-50%);
-    font-size: 12px;
-    font-weight: 900;
-    line-height: 1;
-    padding: 4px 6px;
-    border-radius: 8px;
-    color: #fff;
-    white-space: nowrap;
-    pointer-events: none;
-    box-shadow: 0 4px 10px rgba(0,0,0,.12);
-    z-index: 2;                 /* ✅ abaixo da bolinha (z=3), acima do fundo */
-  }
-
-  /* ✅ cores do badge (sem depender de variáveis externas) */
-  .flatpickr-day.badge-green .day-badge{ background: #178a3a; }
-  .flatpickr-day.badge-yellow .day-badge{ background: #d39a00; }
-  .flatpickr-day.badge-red .day-badge{ background: #b00020; }
-  .flatpickr-day.badge-gray .day-badge{ background: #6b7280; } /* ✅ indisponível */
-
-  /* ✅ tooltip igualzinho: "PARCIAL — 12/16 disponíveis" */
   .fp-tooltip{
-    position: fixed;              /* ✅ era absolute; fixed evita recorte */
-    z-index: 2147483647;          /* ✅ sempre na frente */
-    background: #fff;
-    border: 1px solid rgba(0,0,0,.10);
-    border-radius: 12px;
-    box-shadow: 0 12px 30px rgba(0,0,0,.18);
-    padding: 10px 12px;
-    font-weight: 900;
-    font-size: 13px;
-    color: #111;
-    pointer-events: none;
-    display: none;
-    min-width: 240px;
+    position:fixed;
+    z-index:2147483647;
+    background:#fff;
+    border:1px solid rgba(0,0,0,.10);
+    border-radius:12px;
+    box-shadow:0 12px 30px rgba(0,0,0,.18);
+    padding:10px 12px;
+    font-weight:900;
+    font-size:13px;
+    color:#111;
+    pointer-events:none;
+    display:none;
+    min-width:240px;
   }
+
   .fp-tooltip .tag{
     display:inline-block;
-    padding: 4px 8px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 1000;
-    margin-right: 8px;
-    vertical-align: middle;
-  }
-  .fp-tooltip .tag.parcial{ background: rgba(211,154,0,.12); color: #d39a00; }
-  .fp-tooltip .tag.livre  { background: rgba(23,138,58,.12); color: #178a3a; }
-  .fp-tooltip .tag.cheio  { background: rgba(176,0,32,.12); color: #b00020; }
-  .fp-tooltip .tag.indisp { background: rgba(107,114,128,.12); color: #6b7280; }
-  .fp-tooltip .muted{
-    font-weight: 800;
-    opacity: .75;
-  }
-
-  /* =========================================================
-     ✅ NOVO: "select pesquisável" (sem libs externas)
-     ========================================================= */
-  .select-search{
-    position: relative;
-  }
-  .select-search .ss-input{
-    width:100%;
-    height: 38px;
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background:#fff;
-    font-weight: 800;
-    outline: none;
-  }
-  .select-search .ss-input:focus{
-    box-shadow: 0 0 0 3px rgba(0,0,0,.06);
-  }
-  .select-search select.ss-select{
-    position:absolute;
-    left:-99999px;
-    top:auto;
-    width:1px;
-    height:1px;
-    opacity:0;
-    pointer-events:none;
-  }
-
-  .select-search .ss-dropdown{
-    position:absolute;
-    left:0;
-    right:0;
-    top: calc(100% + 6px);
-    z-index: 9999;
-    background:#fff;
-    border:1px solid var(--border);
-    border-radius: 12px;
-    box-shadow: 0 10px 25px rgba(0,0,0,.12);
-    max-height: 280px;
-    overflow:auto;
-    display:none;
-  }
-  .select-search.open .ss-dropdown{ display:block; }
-
-  .select-search .ss-item{
-    padding: 10px 12px;
-    border-bottom:1px solid rgba(0,0,0,.06);
-    cursor:pointer;
-    font-weight:800;
-    font-size:13px;
-    line-height: 1.25;
-  }
-  .select-search .ss-item:last-child{ border-bottom:none; }
-  .select-search .ss-item:hover{
-    background: rgba(0,0,0,.04);
-  }
-  .select-search .ss-item .sub{
-    display:block;
-    margin-top:4px;
-    opacity:.72;
-    font-weight:800;
-    font-size:12px;
-  }
-  .select-search .ss-empty{
-    padding: 10px 12px;
-    opacity:.75;
-    font-weight:800;
-    font-size:13px;
-  }
-
-
-  /* =========================================================
-   ✅ FIX DEFINITIVO: número do dia NÃO fica atrás do badge
-   - Troca badge absoluto por badge "embaixo" (fluxo normal)
-   ========================================================= */
-
-/* garante espaço vertical suficiente */
-.flatpickr-day.has-badge{
-  display: flex !important;
-  flex-direction: column !important;
-  justify-content: flex-start !important;
-  align-items: center !important;
-
-  /* remove aquele espaço que você colocou pro absoluto */
-  padding-bottom: 6px !important;
-
-  /* dá altura pra caber número + badge sem sobrepor */
-  min-height: 52px !important;
-  height: auto !important;
-}
-
-/* o texto do dia (número) fica naturalmente acima,
-   só garantimos que não cola no topo */
-.flatpickr-day{
-  line-height: 1 !important;
-  padding-top: 6px !important;
-}
-
-/* ✅ badge vira "bloco" abaixo do número (não sobrepõe) */
-.flatpickr-day .day-badge{
-  position: static !important;     /* era absolute */
-  left: auto !important;
-  bottom: auto !important;
-  transform: none !important;
-
-  margin-top: 4px !important;      /* espaço entre número e badge */
-
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1;
-  padding: 4px 6px;
-  border-radius: 8px;
-  color: #fff;
-  white-space: nowrap;
-  pointer-events: none;
-  box-shadow: 0 4px 10px rgba(0,0,0,.12);
-}
-
-/* bolinha de ocupado continua no topo sem brigar com badge */
-.flatpickr-day.ocupado::after{
-  top: 2px !important;
-}
-
-
-  /* =========================================================
-     ✅ CodFace pesquisável: mostra ponto, endereço, número,
-     cidade, bairro e tipo de painel no mesmo padrão do Kanban.
-     ========================================================= */
-  .select-search.codface-search .ss-input{
-    height: 42px;
-    padding-right: 44px;
-  }
-
-  .select-search.codface-search .ss-toggle{
-    position:absolute;
-    right:6px;
-    top:6px;
-    width:30px;
-    height:30px;
-    border:1px solid var(--border);
-    border-radius:9px;
-    background:#fff;
-    cursor:pointer;
-    font-weight:900;
-  }
-
-  .select-search.codface-search .ss-item .top{
-    display:block;
-    font-weight:1000;
-  }
-
-  .select-search.codface-search .ss-item .tag-digital,
-  .select-search.codface-search .ss-item .tag-analogico{
-    display:inline-block;
-    margin-left:6px;
-    padding:2px 6px;
+    padding:4px 8px;
     border-radius:999px;
-    font-size:11px;
+    font-size:12px;
     font-weight:1000;
+    margin-right:8px;
+    vertical-align:middle;
   }
 
-  .select-search.codface-search .ss-item .tag-digital{
-    background:rgba(23,138,58,.12);
-    color:#178a3a;
-  }
-
-  .select-search.codface-search .ss-item .tag-analogico{
-    background:rgba(107,114,128,.14);
-    color:#374151;
-  }
-
-  #cota:disabled{
-    background:#f3f4f6;
-    color:#6b7280;
-    cursor:not-allowed;
-  }
-
-
+  .fp-tooltip .tag.parcial{background:rgba(211,154,0,.12);color:#d39a00;}
+  .fp-tooltip .tag.livre{background:rgba(23,138,58,.12);color:#178a3a;}
+  .fp-tooltip .tag.cheio{background:rgba(176,0,32,.12);color:#b00020;}
+  .fp-tooltip .tag.indisp{background:rgba(107,114,128,.12);color:#6b7280;}
+  .fp-tooltip .muted{font-weight:800;opacity:.75;}
 
 </style>
 
-
-
-
-<div class="reserva-page">
-
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+<div class="reserva-ocupacao-page">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
     <div>
-      <h1 style="margin:0;">Nova Reserva</h1>
+      <h1 style="margin:0;">Reserva Ocupação</h1>
       <div style="opacity:.75;font-weight:700;margin-top:6px;">
-        CodPonto: <b>{{ codponto or "-" }}</b>
-        {% if tipo %} • Tipo: <b>{{ tipo }}</b>{% endif %}
-        {% if mes_ref %} • Mês ref: <b>{{ mes_ref }}</b>{% endif %}
+        Faça a Reserva
       </div>
     </div>
-
-    <a class="btn btn-secondary"
-       style="text-decoration:none;"
-       href="{{ request.referrer or url_for('Paineis.lista_paineis') }}">
-      Voltar
-    </a>
+    <a class="btn btn-secondary" style="text-decoration:none;" href="{{ request.referrer or url_for('Paineis.lista_paineis') }}">Voltar</a>
   </div>
 
-  <div style="height:14px;"></div>
+  <form id="formReservaOcupacao" autocomplete="off" method="post">
+    {% if form is defined %}
+      {{ form.hidden_tag() }}
+    {% endif %}
 
-  <div class="reserva-card" style="border:1px solid var(--border);border-radius:14px;background:#fff;padding:14px;">
-
-    <form id="formReserva" autocomplete="off" method="post">
-
-      {% if form is defined %}
-        {{ form.hidden_tag() }}
-      {% endif %}
-
-      <input type="hidden" id="f_cod_ponto" name="cod_ponto" value="{{ codponto or '' }}">
-      <input type="hidden" id="f_cod_face" name="cod_face" value="{{ codface_sel or '' }}">
-      <input type="hidden" id="f_cota" name="cota" value="">
-      <input type="hidden" id="f_data_inicio" name="data_inicio" value="{{ dt_ini or '' }}">
-      <input type="hidden" id="f_data_fim" name="data_fim" value="{{ dt_fim or '' }}">
-
-      <input type="hidden" id="f_dias" name="dias" value="2">
-
-      <input type="hidden" id="f_id_cliente" name="id_cliente" value="">
-      <input type="hidden" id="f_id_vendedor" name="id_vendedor" value="">
-      <input type="hidden" id="f_id_fato_controle_contratos" name="id_fato_controle_contratos" value="">
-
-      <input type="hidden" id="f_numero_contrato" name="numero_contrato" value="">
-      <input type="hidden" id="f_numero_previa" name="numero_previa" value="">
-
-      <input type="hidden" id="f_observacao" name="observacao" value="">
-      <input type="hidden" id="f_marca_exibida" name="marca_exibida" value="">
-      <input type="hidden" id="f_empresas_relacionadas" name="empresas_relacionadas" value="[]">
-
-      <div class="reserva-grid-2">
-        <div>
-          <label style="font-weight:900;display:block;margin-bottom:6px;">Face (CodFace)</label>
-
-          <div class="select-search codface-search" id="ssFace">
-            <input
-              id="codFace_search"
-              type="text"
-              class="ss-input"
-              placeholder="Digite CodFace, endereço, número, cidade, bairro ou tipo..."
-              autocomplete="off"
-              spellcheck="false"
-            >
-            <button class="ss-toggle" type="button" id="codFace_toggle" aria-label="Abrir lista de faces">▾</button>
-            <select id="codFace" class="form-control ss-select" required>
-              <option value="">Selecione...</option>
-              {% for f in faces %}
-                {% set cod = (f.CodFace|string) %}
-                <option
-                  value="{{ cod }}"
-                  data-codponto="{{ f.CodPonto or '' }}"
-                  data-logradouro="{{ f.Logradouro or '' }}"
-                  data-numero="{{ f.Numero or '' }}"
-                  data-cidade="{{ f.Cidade or '' }}"
-                  data-bairro="{{ f.Bairro or '' }}"
-                  data-tipo-painel="{{ f.TipoPainel or '' }}"
-                  data-eh-digital="{{ f.EhDigital or 0 }}"
-                  {% if codface_sel and (cod == (codface_sel|string)) %}selected{% endif %}
-                >
-                  {{ cod }}{% if f.Logradouro %} • {{ f.Logradouro }}{% endif %}{% if f.Numero %}, {{ f.Numero }}{% endif %}{% if f.Cidade %} • {{ f.Cidade }}{% endif %}{% if f.Bairro %} • {{ f.Bairro }}{% endif %}
-                </option>
-              {% endfor %}
-            </select>
-            <div class="ss-dropdown" id="codFace_dropdown"></div>
-            <div class="hint">Pesquisa por CodFace, endereço, número, cidade, bairro ou tipo do painel.</div>
+    <div class="reserva-ocupacao-stack">
+      <div class="reserva-ocupacao-card" id="cardDadosReservaGlobal">
+        <div class="reserva-card-top">
+          <div>
+            <div class="reserva-card-titulo">Dados da reserva</div>
+            <div class="reserva-card-resumo">Preencha estes dados uma única vez. Todas as faces selecionadas abaixo serão salvas para a mesma empresa, vendedor, marca e observação.</div>
           </div>
+        </div>
 
-          {% if not faces %}
-            <div style="margin-top:8px;opacity:.75;font-weight:700;">
-              Não encontrei faces para esse CodPonto. Verifique Integracao.Silver.DimFacesPaineis.
+        <div class="reserva-grid-3">
+          <div>
+            <label class="campo-label">Empresa (Cliente) <span style="color:#b00020;">*</span></label>
+            <div class="kb-combobox" data-role="combo-cliente-global">
+              <input class="kb-input kb-combobox-input" id="inputClienteGlobal" data-role="input-cliente-global" type="text" autocomplete="off" placeholder="Digite nome ou CNPJ...">
+              <button class="kb-combobox-toggle" id="btnClienteGlobal" data-role="btn-cliente-global" type="button" aria-label="Abrir lista de empresas">▾</button>
+              <div class="kb-combobox-lista" hidden data-role="lista-cliente-global" id="listaClienteGlobal"></div>
             </div>
-          {% endif %}
-        </div>
+            <div class="hint">Obrigatório. Esta empresa será usada em todas as faces selecionadas.</div>
+          </div>
 
-        <div>
-          <label style="font-weight:900;display:block;margin-bottom:6px;">Cota</label>
-          <select id="cota" class="form-control">
-            <option value=""></option>
-          </select>
-          <div class="hint" id="cotaHint">Cota 540/1080 aparece somente quando a face selecionada for painel digital.</div>
-        </div>
-      </div>
-
-      <div style="height:12px;"></div>
-
-      <div class="reserva-grid-3">
-        <div>
-          <label style="font-weight:900;display:block;margin-bottom:6px;">Data início</label>
-          <input id="dataInicio" type="text" class="form-control" required placeholder="AAAA-MM-DD" value="{{ dt_ini or '' }}">
-        </div>
-
-        <div>
-          <label style="font-weight:900;display:block;margin-bottom:6px;">Data fim</label>
-          <input id="dataFim" type="text" class="form-control" required placeholder="AAAA-MM-DD" value="{{ dt_fim or '' }}">
-        </div>
-
-        <div>
-          <label style="font-weight:900;display:block;margin-bottom:6px;">Prazo da reserva</label>
-          <input id="prazoDias" type="text" class="form-control" value="48 horas úteis" readonly aria-readonly="true" tabindex="-1">
-          <div class="hint">A reserva expira automaticamente após 2 dias úteis.</div>
-        </div>
-      </div>
-
-      <div style="height:12px;"></div>
-
-      <div class="reserva-grid-2">
-        <div>
-          <label style="font-weight:900;display:block;margin-bottom:6px;">Empresa (Cliente)</label>
-
-          <div class="select-search" id="ssCliente">
-            <input id="idCliente_search" type="text" class="ss-input" placeholder="Digite para pesquisar...">
-            <select id="idCliente" class="form-control ss-select">
-              <option value="">Carregando...</option>
-            </select>
-            <div class="ss-dropdown" id="idCliente_dropdown"></div>
-            <div class="hint">Digite nome ou CNPJ</div>
+          <div>
+            <label class="campo-label">Vendedor <span style="color:#b00020;">*</span></label>
+            <div class="kb-combobox" data-role="combo-vendedor-global">
+              <input class="kb-input kb-combobox-input" id="inputVendedorGlobal" data-role="input-vendedor-global" type="text" autocomplete="off" placeholder="Digite nome do vendedor...">
+              <button class="kb-combobox-toggle" id="btnVendedorGlobal" data-role="btn-vendedor-global" type="button" aria-label="Abrir lista de vendedores">▾</button>
+              <div class="kb-combobox-lista" hidden data-role="lista-vendedor-global" id="listaVendedorGlobal"></div>
+            </div>
+            <div class="hint">Obrigatório. Este vendedor será usado em todas as faces selecionadas.</div>
           </div>
         </div>
 
-        <div>
-          <label style="font-weight:900;display:block;margin-bottom:6px;">Vendedor</label>
+        <div style="height:12px;"></div>
 
-          <div class="select-search" id="ssVendedor">
-            <input id="idVendedor_search" type="text" class="ss-input" placeholder="Digite para pesquisar...">
-            <select id="idVendedor" class="form-control ss-select">
-              <option value="">Carregando...</option>
-            </select>
-            <div class="ss-dropdown" id="idVendedor_dropdown"></div>
-            <div class="hint">Digite nome do vendedor.</div>
+        <div>
+          <label class="campo-label">Marca Exibida <span style="color:#b00020;">*</span></label>
+          <input id="inputMarcaExibidaGlobal" data-role="marca-exibida-global" type="text" class="form-control" required maxlength="200" placeholder="Ex: Coca-Cola / Banco do Brasil / etc.">
+          <div class="hint">Obrigatório • até 200 caracteres. Esta marca será usada em todas as faces selecionadas.</div>
+        </div>
+
+        <div style="height:12px;"></div>
+
+        <div>
+          <label class="campo-label">Observação</label>
+          <textarea id="inputObservacaoGlobal" data-role="observacao-global" class="form-control" rows="3" placeholder="Anotações da reserva..."></textarea>
+          <div class="hint">Opcional. A mesma observação será enviada para todas as faces selecionadas.</div>
+        </div>
+
+        <div class="card-msg" id="msgDadosReservaGlobal" data-role="msg-dados-global"></div>
+      </div>
+
+      <div class="reserva-ocupacao-card" id="cardSeletorFacesReserva" hidden>
+        <div class="reserva-filtros-faces-grid">
+          <div>
+            <label class="campo-label">Cidade</label>
+            <details class="dd" data-dd="cidade_reserva_ocupacao" id="ddFiltroCidadeFace">
+              <summary class="dd-summary">
+                <span class="dd-label" id="labelFiltroCidadeFace">Cidade</span>
+                <span class="dd-caret">▾</span>
+              </summary>
+              <div class="dd-panel">
+                <input type="text" class="dd-search" id="inputFiltroCidadeFace" placeholder="Pesquisar..." autocomplete="off">
+                <div class="dd-hint">Digite para filtrar a lista</div>
+                <div class="dd-items" id="itensFiltroCidadeFace"></div>
+              </div>
+            </details>
+            <div class="hint">Filtra pelas cidades</div>
           </div>
+
+          <div>
+            <label class="campo-label">Tipo Produto</label>
+            <details class="dd" data-dd="tipo_produto_reserva_ocupacao" id="ddFiltroTipoFace">
+              <summary class="dd-summary">
+                <span class="dd-label" id="labelFiltroTipoFace">Tipo Produto</span>
+                <span class="dd-caret">▾</span>
+              </summary>
+              <div class="dd-panel">
+                <input type="text" class="dd-search" id="inputFiltroTipoFace" placeholder="Pesquisar..." autocomplete="off">
+                <div class="dd-hint">Digite para filtrar a lista</div>
+                <div class="dd-items" id="itensFiltroTipoFace"></div>
+              </div>
+            </details>
+            <div class="hint">Filtra pelo tipo da face/painel.</div>
+          </div>
+
+          <div>
+            <label class="campo-label">Face / Ponto</label>
+            <div class="kb-combobox" data-role="combo-painel" id="comboFace">
+              <input class="kb-input kb-combobox-input" id="inputFaceBusca" type="text" autocomplete="off" spellcheck="false" placeholder="Digite CodFace, CodPonto, logradouro, número, cidade, bairro ou tipo..." data-role="input-painel-busca">
+              <button class="kb-combobox-toggle" id="btnToggleFace" type="button" data-role="btn-toggle-painel" aria-label="Abrir lista de painéis e faces">▾</button>
+              <div class="kb-combobox-lista" hidden data-role="lista-painel-busca" id="listaFaceBusca"></div>
+              <select class="kb-select-hidden" tabindex="-1" aria-hidden="true" id="codFace" data-role="select-face" data-placeholder="— Face (CodFace) —">
+                <option value="">— Face (CodFace) —</option>
+                {% for f in faces %}
+                  {% set cod = (f.CodFace|string) %}
+                  <option value="{{ cod }}" {% if codface_sel and cod == (codface_sel|string) %}selected{% endif %}>{{ f.LabelExibicao or cod }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="hint" id="hintBloqueioFace">Preencha os dados da reserva acima para liberar a seleção de Face/Ponto.</div>
+          </div>
+
+          <div>
+            <label class="campo-label">Faces selecionadas</label>
+            <div class="reserva-face-contador" id="contadorFacesSelecionadas">0 selecionadas</div>
+            <div class="hint">Todas serão salvas com os dados fixos preenchidos acima.</div>
+          </div>
+        </div>
+
+        <div id="cardsReservasFaces" class="reserva-face-lista-selecionadas" hidden>
+          <div class="reserva-face-vazio">Nenhuma face selecionada ainda.</div>
         </div>
       </div>
 
-      <select id="idContrato" class="form-control" style="display:none;" aria-hidden="true" tabindex="-1">
-        <option value="">Selecione...</option>
-      </select>
-
-      <div style="height:12px;"></div>
-
-      <!-- ✅ NOVO: Marca Exibida (obrigatório) -->
-      <div>
-        <label style="font-weight:900;display:block;margin-bottom:6px;">
-          Marca Exibida <span style="color:#b00020;">*</span>
-        </label>
-        <input
-          id="marcaExibida"
-          type="text"
-          class="form-control"
-          required
-          maxlength="200"
-          placeholder="Ex: Coca-Cola / Banco do Brasil / etc."
-          value=""
-        >
-        <div class="hint">Obrigatório • até 200 caracteres</div>
+      <div class="reserva-ocupacao-card" id="cardSalvarReservas" hidden>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <button type="submit" class="btn btn-primary" id="btnSalvar">Salvar Reservas</button>
+          <div id="msg" class="msg"></div>
+        </div>
+        <div id="progressoSalvamento" class="reserva-progresso-salvamento"></div>
       </div>
-
-      <div style="height:12px;"></div>
-      <div>
-        <label style="font-weight:900;display:block;margin-bottom:6px;">Observação (opcional)</label>
-        <textarea id="observacao" class="form-control" rows="3" placeholder="Anotações..."></textarea>
-      </div>
-
-      <div style="height:14px;"></div>
-
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-        <button type="submit" class="btn btn-primary" id="btnSalvar">Salvar Reserva</button>
-        <div id="msg" style="font-weight:900;"></div>
-      </div>
-
-    </form>
-
-  </div>
-
+    </div>
+  </form>
 </div>
 
-<!-- ✅ tooltip flutuante único (reaproveitado) -->
-<div id="fpTooltip" class="fp-tooltip"></div>
-
-
+<div id="tooltipCalendarioReserva" class="fp-tooltip"></div>
 
 <script>
 (function(){
   "use strict";
 
+  const URL_FACES = "{{ url_for('Paineis.api_ocupacao_reserva_faces') }}";
+  const URL_FILTROS_FACES = "{{ url_for('Paineis.api_ocupacao_reserva_faces_filtros') }}";
   const URL_DADOS_MODAL = "{{ url_for('Paineis.api_ocupacao_reserva_dados_modal') }}";
-  const URL_CRIAR      = "{{ url_for('Paineis.api_ocupacao_reserva_criar') }}";
+  const URL_CRIAR = "{{ url_for('Paineis.api_ocupacao_reserva_criar') }}";
   const URL_CALENDARIO = "{{ url_for('Paineis.api_ocupacao_calendario') }}";
 
-  const COD_PONTO = "{{ codponto|e }}";
-  const MES_REF   = "{{ mes_ref|e }}";
-
+  const MES_REF = "{{ (mes_ref or '')|e }}";
+  const DATA_MINIMA = "{{ data_minima_reserva or dt_ini or '' }}";
   const COD_FACE_INICIAL = "{{ (codface_sel or '')|e }}";
-  const FACES_ATUAIS_INICIAIS = {{ faces_json|default([], true)|tojson }};
-  const DT_INI_INICIAL   = "{{ (dt_ini or '')|e }}";
-  const DT_FIM_INICIAL   = "{{ (dt_fim or '')|e }}";
+  const COD_FACES_INICIAIS = {{ (codfaces_sel if codfaces_sel is defined else [])|tojson }};
+  const FACES_INICIAIS = {{ faces_json|tojson }};
+  const FILTROS_FACES_INICIAIS = {{ (filtros_faces_json if filtros_faces_json is defined else {'cidades': [], 'tipos': []})|tojson }};
+  const FILTROS_FACES_SELECIONADOS = {{ (filtros_faces_selecionados_json if filtros_faces_selecionados_json is defined else {'cidades': [], 'tipos': []})|tojson }};
 
-  const PRAZO_RESERVA_FIXO_DIAS = 2;
-  const PRAZO_RESERVA_ROTULO = "48 horas úteis";
-  const DATA_MINIMA_RESERVA = "{{ data_minima_reserva|default('', true)|e }}";
+  let faces = Array.isArray(FACES_INICIAIS) ? FACES_INICIAIS : [];
+  let estadosCards = new Map();
+  let timerBuscaFace = null;
+  let timerFiltrosFace = null;
+  let salvamentoEmAndamento = false;
+  let dadosReservaGlobal = {
+    id_cliente: "",
+    id_vendedor: "",
+    marca_exibida: "",
+    observacao: "",
+    clientes: [],
+    clientes_iniciais: [],
+    vendedores: [],
+    dados_carregados: false
+  };
 
-  const elCodFace    = document.getElementById("codFace");
-  const elCota       = document.getElementById("cota");
-  const elDataInicio = document.getElementById("dataInicio");
-  const elDataFim    = document.getElementById("dataFim");
-  const elPrazoDias  = document.getElementById("prazoDias");
-  const elIdCliente  = document.getElementById("idCliente");
-  const elIdVendedor = document.getElementById("idVendedor");
-  const elIdContrato = document.getElementById("idContrato");
-  const elObservacao = document.getElementById("observacao");
-  const elMarcaExibida = document.getElementById("marcaExibida");
-  const elMsg        = document.getElementById("msg");
-  const elBtnSalvar  = document.getElementById("btnSalvar");
-  const elForm       = document.getElementById("formReserva");
+  const elForm = document.getElementById("formReservaOcupacao");
+  const elCodFace = document.getElementById("codFace");
+  const elInputFace = document.getElementById("inputFaceBusca");
+  const elListaFace = document.getElementById("listaFaceBusca");
+  const elBtnToggleFace = document.getElementById("btnToggleFace");
+  const elCardsReservasFaces = document.getElementById("cardsReservasFaces");
+  const elContadorFaces = document.getElementById("contadorFacesSelecionadas");
+  const elMsg = document.getElementById("msg");
+  const elBtnSalvar = document.getElementById("btnSalvar");
+  const elHintBloqueioFace = document.getElementById("hintBloqueioFace");
+  const elProgressoSalvamento = document.getElementById("progressoSalvamento");
+  const elTooltipCalendario = document.getElementById("tooltipCalendarioReserva");
+  const elCardDadosReservaGlobal = document.getElementById("cardDadosReservaGlobal");
+  const elCardSeletorFacesReserva = document.getElementById("cardSeletorFacesReserva");
+  const elCardSalvarReservas = document.getElementById("cardSalvarReservas");
+  const elMsgDadosReservaGlobal = document.getElementById("msgDadosReservaGlobal");
+  const elInputClienteGlobal = document.getElementById("inputClienteGlobal");
+  const elListaClienteGlobal = document.getElementById("listaClienteGlobal");
+  const elBtnClienteGlobal = document.getElementById("btnClienteGlobal");
+  const elInputVendedorGlobal = document.getElementById("inputVendedorGlobal");
+  const elListaVendedorGlobal = document.getElementById("listaVendedorGlobal");
+  const elBtnVendedorGlobal = document.getElementById("btnVendedorGlobal");
+  const elInputMarcaExibidaGlobal = document.getElementById("inputMarcaExibidaGlobal");
+  const elInputObservacaoGlobal = document.getElementById("inputObservacaoGlobal");
+  const elDdFiltroCidadeFace = document.getElementById("ddFiltroCidadeFace");
+  const elDdFiltroTipoFace = document.getElementById("ddFiltroTipoFace");
+  const elLabelFiltroCidadeFace = document.getElementById("labelFiltroCidadeFace");
+  const elLabelFiltroTipoFace = document.getElementById("labelFiltroTipoFace");
+  const elInputFiltroCidadeFace = document.getElementById("inputFiltroCidadeFace");
+  const elInputFiltroTipoFace = document.getElementById("inputFiltroTipoFace");
+  const elItensFiltroCidadeFace = document.getElementById("itensFiltroCidadeFace");
+  const elItensFiltroTipoFace = document.getElementById("itensFiltroTipoFace");
 
-  const fCodPonto = document.getElementById("f_cod_ponto");
-  const fCodFace  = document.getElementById("f_cod_face");
-  const fCota     = document.getElementById("f_cota");
-  const fDtIni    = document.getElementById("f_data_inicio");
-  const fDtFim    = document.getElementById("f_data_fim");
-  const fDias     = document.getElementById("f_dias");
+  function texto(valor){ return (valor === null || valor === undefined) ? "" : String(valor).trim(); }
+  function normalizar(valor){ return texto(valor).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
+  function escapeHtml(valor){ return texto(valor).replace(/[&<>'"]/g, function(c){ return ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;","\"":"&quot;"})[c]; }); }
+  function codFace(face){ return texto(face.CodFace || face.cod_face || face.codFace); }
+  function codPonto(face){ return texto(face.CodPonto || face.cod_ponto || face.codPonto); }
+  function ehDigital(face){ return Number(face.EhDigital || face.eh_digital || 0) === 1 || normalizar(face.TipoPainel || face.Tipo || face.tipo).includes("digital"); }
+  function chaveFace(face){ return (codPonto(face) + "|" + codFace(face)).toUpperCase(); }
+  function cotaFace(face){ return texto(face.__cota || (ehDigital(face) ? "540" : "")); }
 
-  const fIdCliente   = document.getElementById("f_id_cliente");
-  const fIdVendedor  = document.getElementById("f_id_vendedor");
-  const fIdFato      = document.getElementById("f_id_fato_controle_contratos");
-  const fNumContrato = document.getElementById("f_numero_contrato");
-  const fNumPrevia   = document.getElementById("f_numero_previa");
-  const fObs         = document.getElementById("f_observacao");
-  const fMarcaExibida  = document.getElementById("f_marca_exibida");
-  const fEmpresasRelacionadas = document.getElementById("f_empresas_relacionadas");
+  function valorCidadeFace(face){ return texto(face.Cidade || face.cidade || face.Municipio || face.municipio); }
+  function valorTipoFace(face){ return texto(face.TipoPainel || face.Tipo || face.tipo || face.TipoProduto || face.tipo_produto); }
 
-  const elCsrf = elForm ? elForm.querySelector("input[name='csrf_token']") : null;
-
-  const ssFaceWrap     = document.getElementById("ssFace");
-  const ssClienteWrap  = document.getElementById("ssCliente");
-  const ssVendedorWrap = document.getElementById("ssVendedor");
-  const ssContratoWrap = null;
-
-  const elCodFaceSearch = document.getElementById("codFace_search");
-  const elCodFaceToggle = document.getElementById("codFace_toggle");
-  const elClienteSearch  = document.getElementById("idCliente_search");
-  const elVendedorSearch = document.getElementById("idVendedor_search");
-  const elContratoSearch = null;
-
-  const elCodFaceDrop  = document.getElementById("codFace_dropdown");
-  const elClienteDrop  = document.getElementById("idCliente_dropdown");
-  const elVendedorDrop = document.getElementById("idVendedor_dropdown");
-  const elContratoDrop = null;
-  const elCotaHint     = document.getElementById("cotaHint");
-
-  const elTooltip = document.getElementById("fpTooltip");
-  const elEmpresasRelacionadasLista = document.getElementById("empresasRelacionadasLista");
-
-  if(!elForm || !elCodFace || !elCota || !elDataInicio || !elDataFim || !elPrazoDias || !elBtnSalvar){
-    console.error("[reserva] Elementos do DOM não encontrados. Verifique IDs no template.");
-    return;
+  function listaTextoNormalizada(lista){
+    const saida = [];
+    const vistos = new Set();
+    (Array.isArray(lista) ? lista : []).forEach(function(valor){
+      const item = texto(valor);
+      if(!item) return;
+      const chave = item.toUpperCase();
+      if(vistos.has(chave)) return;
+      vistos.add(chave);
+      saida.push(item);
+    });
+    return saida;
   }
 
-  let ocupacoesAtuais = [];
-  let ocupacoesRanges = [];
-
-  let contratosAtuais = [];
-  let contratosMap = new Map();
-
-  let fpInicio = null;
-  let fpFim = null;
-
-  let facesAtuais = Array.isArray(FACES_ATUAIS_INICIAIS) ? FACES_ATUAIS_INICIAIS : [];
-  let faceSelecionadaEhDigital = false;
-
-  let empresasAtuais = [];
-  let vendedoresAtuais = [];
-  let empresasRelacionadasEstado = [];
-
-  // chave "YYYY-MM-DD" -> { disponiveis, total, status }
-  let dayBadgeMap = new Map();
-  let CAP_TOTAL_DEFAULT = 16;
-
-  function setMsg(txt, ok){
-    if(!elMsg) return;
-    elMsg.textContent = txt || "";
-    elMsg.style.color = ok ? "#0a7a2f" : "#b00020";
-  }
-
-  function travarPrazoReserva(){
-    if(elPrazoDias){
-      elPrazoDias.value = PRAZO_RESERVA_ROTULO;
-      elPrazoDias.readOnly = true;
-      elPrazoDias.setAttribute("aria-readonly", "true");
+  let filtrosFaces = {
+    cidades: new Set(listaTextoNormalizada((FILTROS_FACES_SELECIONADOS || {}).cidades)),
+    tipos: new Set(listaTextoNormalizada((FILTROS_FACES_SELECIONADOS || {}).tipos)),
+    opcoes: {
+      cidades: listaTextoNormalizada((FILTROS_FACES_INICIAIS || {}).cidades),
+      tipos: listaTextoNormalizada((FILTROS_FACES_INICIAIS || {}).tipos)
     }
-
-    if(fDias){
-      fDias.value = String(PRAZO_RESERVA_FIXO_DIAS);
-    }
-  }
-
-  function getEmpresaId(e){
-    return String(e.IDEmpresa ?? e.IDEmpresas ?? e.IDCliente ?? e.ID ?? "").trim();
-  }
-
-  function getVendedorId(v){
-    return String(v.IDVendedor ?? v.ID ?? "").trim();
-  }
-
-  function getContratoId(c){
-    return String(c.IDContrato ?? c.IDFatoControleContratosEuromidia ?? c.ID ?? "").trim();
-  }
-
-  function preencherSelectTolerante(el, itens, getValueFn, labelFn, valorInicial){
-    if(!el) return;
-    el.innerHTML = '<option value="">Selecione...</option>';
-    for(const it of (itens || [])){
-      const val = String(getValueFn(it) ?? "").trim();
-      if(!val) continue;
-      const opt = document.createElement("option");
-      opt.value = val;
-      opt.textContent = labelFn(it);
-      el.appendChild(opt);
-    }
-    if(valorInicial){
-      el.value = valorInicial;
-    }
-  }
-
-  function yyyy_mm_dd_para_date(v){
-    const s = (v || "").trim();
-    if(!s) return null;
-    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if(!m) return null;
-
-    const y  = parseInt(m[1], 10);
-    const mo = parseInt(m[2], 10);
-    const d  = parseInt(m[3], 10);
-
-    return new Date(Date.UTC(y, mo - 1, d));
-  }
-
-  function normalizarParaMeiaNoiteTs(dt){
-    if(!dt) return null;
-    return Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
-  }
-
-  function date_para_yyyy_mm_dd(dt){
-    if(!dt) return "";
-    const y = dt.getUTCFullYear();
-    const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
-    const d = String(dt.getUTCDate()).padStart(2, "0");
-    return y + "-" + m + "-" + d;
-  }
+  };
 
   function hojeLocalYmd(){
     const agora = new Date();
@@ -705,119 +980,309 @@
     return y + "-" + m + "-" + d;
   }
 
-  function dataMinimaReservaYmd(){
-    return (DATA_MINIMA_RESERVA || hojeLocalYmd()).trim();
+  function hojeYmd(){ return texto(DATA_MINIMA) || hojeLocalYmd(); }
+
+  function yyyy_mm_dd_para_date(valor){
+    const s = texto(valor);
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(!m) return null;
+    const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if(Number.isNaN(dt.getTime())) return null;
+    return dt;
+  }
+
+  function date_para_yyyy_mm_dd(dt){
+    if(!dt) return "";
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, "0");
+    const d = String(dt.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + d;
   }
 
   function compararDatasYmd(a, b){
-    const da = yyyy_mm_dd_para_date(a);
-    const db = yyyy_mm_dd_para_date(b);
-    if(!da || !db) return 0;
-
-    const ta = normalizarParaMeiaNoiteTs(da);
-    const tb = normalizarParaMeiaNoiteTs(db);
-    if(ta == null || tb == null) return 0;
-
-    if(ta < tb) return -1;
-    if(ta > tb) return 1;
+    const aa = texto(a);
+    const bb = texto(b);
+    if(!aa || !bb) return 0;
+    if(aa < bb) return -1;
+    if(aa > bb) return 1;
     return 0;
   }
 
-  function dataStrEhPassada(dataStr){
-    const s = (dataStr || "").trim();
-    if(!s) return false;
-    return compararDatasYmd(s, dataMinimaReservaYmd()) < 0;
-  }
-
-  function dateObjEhAntesDaDataMinima(dateObj){
-    const dataStr = date_para_yyyy_mm_dd(dateObj);
-    return dataStrEhPassada(dataStr);
-  }
-
   function maiorDataYmd(a, b){
-    const aa = (a || "").trim();
-    const bb = (b || "").trim();
+    const aa = texto(a);
+    const bb = texto(b);
     if(!aa) return bb;
     if(!bb) return aa;
     return compararDatasYmd(aa, bb) >= 0 ? aa : bb;
   }
 
-  function corrigirDatasPassadasNoClient(){
-    const dataMinima = dataMinimaReservaYmd();
-    const diStr = (elDataInicio.value || "").trim();
-    const dfStr = (elDataFim.value || "").trim();
+  function dataPassada(valor){ return texto(valor) && compararDatasYmd(texto(valor), hojeYmd()) < 0; }
+  function numeroInteiroOuVazio(valor){ return /^\d+$/.test(texto(valor)) ? texto(valor) : ""; }
 
-    if(diStr && dataStrEhPassada(diStr)){
-      if(fpInicio) fpInicio.setDate(dataMinima, false);
-      else elDataInicio.value = dataMinima;
-    }
-
-    const diAtual = (elDataInicio.value || "").trim() || dataMinima;
-    const minFim = maiorDataYmd(dataMinima, diAtual);
-
-    if(dfStr && compararDatasYmd(dfStr, minFim) < 0){
-      if(fpFim) fpFim.setDate(minFim, false);
-      else elDataFim.value = minFim;
-    }
+  function labelFace(face){
+    return [
+      codFace(face),
+      codPonto(face) ? "CodPonto " + codPonto(face) : "",
+      texto(face.EnderecoExibicao),
+      texto(face.Logradouro),
+      texto(face.Numero),
+      texto(face.Bairro),
+      texto(face.Cidade),
+      texto(face.TipoPainel || face.Tipo)
+    ].filter(Boolean).join(" • ");
   }
 
-  function datasSelecionadasTemPassado(){
-    return dataStrEhPassada((elDataInicio.value || "").trim()) || dataStrEhPassada((elDataFim.value || "").trim());
+  function resumoFace(face){
+    const endereco = texto(face.EnderecoExibicao) || [texto(face.Logradouro), texto(face.Numero) ? "Nº " + texto(face.Numero) : ""].filter(Boolean).join(", ");
+    return [codPonto(face) ? "CodPonto " + codPonto(face) : "", endereco, texto(face.Bairro), texto(face.Cidade), texto(face.TipoPainel || face.Tipo)].filter(Boolean).join(" • ");
   }
 
-  function montarRangesDeOcupacao(){
-    ocupacoesRanges = [];
-    for(const o of (ocupacoesAtuais || [])){
-      const di = yyyy_mm_dd_para_date(o.DataInicio);
-      const df = yyyy_mm_dd_para_date(o.DataFim);
-      if(!di || !df) continue;
+  function facePassaFiltrosSelecionados(face){
+    const cidade = valorCidadeFace(face).toUpperCase();
+    const tipo = valorTipoFace(face).toUpperCase();
+    const cidadesSelecionadas = Array.from(filtrosFaces.cidades).map(function(v){ return texto(v).toUpperCase(); });
+    const tiposSelecionados = Array.from(filtrosFaces.tipos).map(function(v){ return texto(v).toUpperCase(); });
 
-      const iniTs = normalizarParaMeiaNoiteTs(di);
-      const fimTs = normalizarParaMeiaNoiteTs(df);
-      if(iniTs == null || fimTs == null) continue;
+    if(cidadesSelecionadas.length && !cidadesSelecionadas.includes(cidade)) return false;
+    if(tiposSelecionados.length && !tiposSelecionados.includes(tipo)) return false;
+    return true;
+  }
 
-      const a = Math.min(iniTs, fimTs);
-      const b = Math.max(iniTs, fimTs);
-      ocupacoesRanges.push({ iniTs: a, fimTs: b });
+  function resumoFiltroDropdown(rotulo, selecionados){
+    const lista = Array.from(selecionados || []).map(texto).filter(Boolean);
+    if(!lista.length) return rotulo;
+    if(lista.length === 1) return rotulo + ": " + lista[0];
+    return rotulo + ": " + lista.length + " selecionados";
+  }
+
+  function opcoesFiltroComSelecionados(chave){
+    const base = listaTextoNormalizada((filtrosFaces.opcoes || {})[chave]);
+    const selecionados = chave === "cidades" ? filtrosFaces.cidades : filtrosFaces.tipos;
+    selecionados.forEach(function(valor){
+      const item = texto(valor);
+      if(item && !base.some(function(v){ return v.toUpperCase() === item.toUpperCase(); })){
+        base.push(item);
+      }
+    });
+    base.sort(function(a, b){ return a.localeCompare(b, "pt-BR", {sensitivity:"base"}); });
+    return base;
+  }
+
+  function renderFiltroDropdown(cfg){
+    if(!cfg.itens || !cfg.label) return;
+
+    const busca = normalizar(cfg.input ? cfg.input.value : "");
+    const opcoes = opcoesFiltroComSelecionados(cfg.chave).filter(function(valor){
+      return !busca || normalizar(valor).includes(busca);
+    });
+    const selecionados = cfg.selecionados;
+
+    cfg.label.textContent = resumoFiltroDropdown(cfg.rotulo, selecionados);
+    cfg.itens.innerHTML = "";
+
+    const labelTodas = document.createElement("label");
+    labelTodas.className = "dd-item";
+    const inputTodas = document.createElement("input");
+    inputTodas.type = "checkbox";
+    inputTodas.name = cfg.nome;
+    inputTodas.value = "";
+    inputTodas.checked = selecionados.size === 0;
+    inputTodas.setAttribute("data-filtro-todas", "1");
+    inputTodas.setAttribute("data-filtro-chave", cfg.chave);
+    const spanTodas = document.createElement("span");
+    spanTodas.textContent = "(Todas)";
+    labelTodas.appendChild(inputTodas);
+    labelTodas.appendChild(spanTodas);
+    cfg.itens.appendChild(labelTodas);
+
+    if(!opcoes.length){
+      const vazio = document.createElement("div");
+      vazio.className = "dd-vazio";
+      vazio.textContent = "Nenhuma opção disponível";
+      cfg.itens.appendChild(vazio);
+      return;
     }
+
+    opcoes.forEach(function(valor){
+      const item = document.createElement("label");
+      item.className = "dd-item";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.name = cfg.nome;
+      input.value = valor;
+      input.checked = Array.from(selecionados).some(function(v){ return texto(v).toUpperCase() === valor.toUpperCase(); });
+      input.setAttribute("data-filtro-chave", cfg.chave);
+      const span = document.createElement("span");
+      span.textContent = valor;
+      item.appendChild(input);
+      item.appendChild(span);
+      cfg.itens.appendChild(item);
+    });
   }
 
-  function diaEstaOcupado(dateObj){
-    const ts = normalizarParaMeiaNoiteTs(dateObj);
-    if(ts == null) return false;
-    for(const r of ocupacoesRanges){
-      if(ts >= r.iniTs && ts <= r.fimTs) return true;
+  function renderFiltrosFaces(){
+    renderFiltroDropdown({
+      chave:"cidades",
+      nome:"cidade_exibicao",
+      rotulo:"Cidade",
+      selecionados:filtrosFaces.cidades,
+      input:elInputFiltroCidadeFace,
+      itens:elItensFiltroCidadeFace,
+      label:elLabelFiltroCidadeFace
+    });
+
+    renderFiltroDropdown({
+      chave:"tipos",
+      nome:"tipo_produto",
+      rotulo:"Tipo Produto",
+      selecionados:filtrosFaces.tipos,
+      input:elInputFiltroTipoFace,
+      itens:elItensFiltroTipoFace,
+      label:elLabelFiltroTipoFace
+    });
+  }
+
+  function paramsFiltrosFaces(qs){
+    filtrosFaces.cidades.forEach(function(valor){ if(texto(valor)) qs.append("cidade", texto(valor)); });
+    filtrosFaces.tipos.forEach(function(valor){ if(texto(valor)) qs.append("tipo_produto", texto(valor)); });
+    return qs;
+  }
+
+  function aplicarMudancaFiltro(chave, valor, marcado, todas){
+    const destino = chave === "cidades" ? filtrosFaces.cidades : filtrosFaces.tipos;
+    if(!destino) return;
+
+    if(todas){
+      destino.clear();
+    }else{
+      const item = texto(valor);
+      if(!item) return;
+      if(marcado){
+        destino.add(item);
+      }else{
+        Array.from(destino).forEach(function(v){
+          if(texto(v).toUpperCase() === item.toUpperCase()) destino.delete(v);
+        });
+      }
     }
-    return false;
+
+    renderFiltrosFaces();
+    filtrarFacesLocal({abrir:false});
+    fecharLista(elListaFace);
+    clearTimeout(timerFiltrosFace);
+    timerFiltrosFace = setTimeout(function(){
+      carregarFiltrosFacesRemoto({abrir:false});
+      buscarFacesRemoto({abrir:false});
+    }, 180);
   }
 
-  // =========================================================
-  // ✅ STATUS / BADGE
-  // =========================================================
+  async function carregarFiltrosFacesRemoto(opcoes){
+    const qs = paramsFiltrosFaces(new URLSearchParams());
+    try{
+      const resp = await fetch(URL_FILTROS_FACES + "?" + qs.toString(), {credentials:"same-origin"});
+      const data = await resp.json().catch(function(){ return null; });
+      if(!resp.ok || !data || !data.ok) return;
+      filtrosFaces.opcoes = {
+        cidades: listaTextoNormalizada(data.cidades || []),
+        tipos: listaTextoNormalizada(data.tipos || [])
+      };
+      renderFiltrosFaces();
+      filtrarFacesLocal(opcoes || {abrir:false});
+      if(opcoes && opcoes.abrir === false) fecharLista(elListaFace);
+    }catch(e){}
+  }
+
+  function bindFiltrosFaces(){
+    renderFiltrosFaces();
+
+    [elInputFiltroCidadeFace, elInputFiltroTipoFace].forEach(function(input){
+      if(!input) return;
+      input.addEventListener("input", renderFiltrosFaces);
+      input.addEventListener("keydown", function(ev){ ev.stopPropagation(); });
+      input.addEventListener("click", function(ev){ ev.stopPropagation(); });
+    });
+
+    [elItensFiltroCidadeFace, elItensFiltroTipoFace].forEach(function(container){
+      if(!container) return;
+      container.addEventListener("change", function(ev){
+        const input = ev.target;
+        if(!input || input.type !== "checkbox") return;
+        aplicarMudancaFiltro(
+          input.getAttribute("data-filtro-chave"),
+          input.value,
+          input.checked,
+          input.getAttribute("data-filtro-todas") === "1"
+        );
+      });
+      container.addEventListener("pointerdown", function(ev){ ev.stopPropagation(); });
+      container.addEventListener("mousedown", function(ev){ ev.stopPropagation(); });
+      container.addEventListener("click", function(ev){ ev.stopPropagation(); });
+    });
+
+    [elDdFiltroCidadeFace, elDdFiltroTipoFace].forEach(function(dd){
+      if(!dd) return;
+      const painel = dd.querySelector(".dd-panel");
+      if(painel){
+        painel.addEventListener("pointerdown", function(ev){ ev.stopPropagation(); });
+        painel.addEventListener("mousedown", function(ev){ ev.stopPropagation(); });
+        painel.addEventListener("click", function(ev){ ev.stopPropagation(); });
+      }
+      dd.addEventListener("toggle", function(){
+        if(!dd.open) return;
+        document.querySelectorAll("details.dd").forEach(function(outro){
+          if(outro !== dd) outro.open = false;
+        });
+      });
+    });
+  }
+
+  function getCsrfToken(){
+    const el = elForm.querySelector("input[name='csrf_token']");
+    return el ? el.value : "";
+  }
+
+  function abrirLista(lista){ if(lista) lista.hidden = false; }
+  function fecharLista(lista){ if(lista) lista.hidden = true; }
+
+  function setMsg(msg, ok){
+    elMsg.textContent = msg || "";
+    elMsg.classList.remove("ok", "err");
+    if(msg) elMsg.classList.add(ok ? "ok" : "err");
+  }
+
+  function setProgresso(msg){
+    if(elProgressoSalvamento) elProgressoSalvamento.textContent = msg || "";
+  }
+
+  function setCardMsg(estado, msg, ok){
+    estado.card_msg = msg || "";
+    estado.card_msg_ok = !!ok;
+    const card = document.querySelector("[data-chave-face='" + CSS.escape(estado.chave) + "']");
+    if(!card) return;
+    const msgEl = card.querySelector("[data-role='card-msg']");
+    if(!msgEl) return;
+    msgEl.textContent = estado.card_msg;
+    msgEl.classList.remove("ok", "err");
+    if(estado.card_msg) msgEl.classList.add(estado.card_msg_ok ? "ok" : "err");
+  }
+
+
   function normalizarStatusBadge(status){
-    const s = (status || "").toString().trim().toUpperCase();
+    const s = texto(status).toUpperCase();
     if(!s) return "PARCIAL";
-
-    if(s === "LOTADO") return "CHEIO";
-    if(s === "OCUPADO") return "CHEIO";
-    if(s === "CHEIO") return "CHEIO";
-    if(s === "LIVRE") return "LIVRE";
+    if(s === "LOTADO" || s === "OCUPADO" || s === "CHEIO") return "CHEIO";
+    if(s === "DISPONIVEL" || s === "DISPONÍVEL" || s === "LIVRE") return "LIVRE";
     if(s === "PARCIAL") return "PARCIAL";
-
-    if(s.includes("INDISP")) return "INDISPONIVEL";
-    if(s.includes("BLOQ")) return "INDISPONIVEL";
-
+    if(s.includes("INDISP") || s.includes("BLOQ")) return "INDISPONIVEL";
     return s;
   }
 
   function escolherCorBadgePorStatus(statusNorm, disponiveis, total){
     const s = normalizarStatusBadge(statusNorm);
-
     if(s === "INDISPONIVEL") return "gray";
     if(s === "CHEIO") return "red";
     if(s === "LIVRE") return "green";
     if(s === "PARCIAL") return "yellow";
-
     if(total <= 0) return "green";
     if(disponiveis <= 0) return "red";
     if(disponiveis >= total) return "green";
@@ -829,1098 +1294,1190 @@
     return st + " — " + disponiveis + "/" + total + " disponíveis";
   }
 
-  function limparBadgeClasses(dayElem){
-    dayElem.classList.remove("has-badge","badge-green","badge-yellow","badge-red","badge-gray");
-    const old = dayElem.querySelector(".day-badge");
-    if(old) old.remove();
-    dayElem.removeAttribute("data-badge-tooltip");
-    dayElem.removeAttribute("data-badge-status");
-  }
-
-  function tooltipShow(texto, status, x, y){
-    if(!elTooltip) return;
+  function tooltipShow(textoTooltip, status, x, y){
+    if(!elTooltipCalendario) return;
     const stNorm = normalizarStatusBadge(status);
-
-    const cls =
-      (stNorm === "CHEIO") ? "cheio" :
-      (stNorm === "LIVRE") ? "livre" :
-      (stNorm === "INDISPONIVEL") ? "indisp" :
-      "parcial";
-
-    elTooltip.innerHTML =
-      "<span class='tag "+cls+"'>" + (stNorm || "PARCIAL") + "</span>" +
-      "<span class='muted'>" + String(texto || "").replace(/^.*—\s*/, "") + "</span>";
-
-    elTooltip.style.display = "block";
+    const cls = stNorm === "CHEIO" ? "cheio" : (stNorm === "LIVRE" ? "livre" : (stNorm === "INDISPONIVEL" ? "indisp" : "parcial"));
+    elTooltipCalendario.innerHTML =
+      "<span class='tag " + cls + "'>" + escapeHtml(stNorm || "PARCIAL") + "</span>" +
+      "<span class='muted'>" + escapeHtml(String(textoTooltip || "").replace(/^.*—\s*/, "")) + "</span>";
+    elTooltipCalendario.style.display = "block";
 
     const pad = 12;
-    const w = elTooltip.offsetWidth || 260;
-    const h = elTooltip.offsetHeight || 44;
-
+    const w = elTooltipCalendario.offsetWidth || 260;
+    const h = elTooltipCalendario.offsetHeight || 44;
     let left = x + pad;
-    let top  = y + pad;
-
+    let top = y + pad;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-
     if(left + w + 10 > vw) left = x - w - pad;
-    if(top  + h + 10 > vh) top  = y - h - pad;
-
-    elTooltip.style.left = left + "px";
-    elTooltip.style.top  = top  + "px";
+    if(top + h + 10 > vh) top = y - h - pad;
+    elTooltipCalendario.style.left = left + "px";
+    elTooltipCalendario.style.top = top + "px";
   }
 
   function tooltipHide(){
-    if(!elTooltip) return;
-    elTooltip.style.display = "none";
+    if(elTooltipCalendario) elTooltipCalendario.style.display = "none";
   }
 
-  // =========================================================
-  // ✅ BLOQUEIO POR CAPACIDADE (PARCIAL com disp>0 é clicável)
-  // =========================================================
-  function getDayInfo(dateObj){
+  function limparBadgeClasses(dayElem){
+    dayElem.classList.remove("has-badge", "badge-green", "badge-yellow", "badge-red", "badge-gray", "ocupado");
+    const old = dayElem.querySelector(".day-badge");
+    if(old) old.remove();
+  }
+
+  function slotsNecessariosEstado(estado){
+    return ehDigital(estado.face) && cotaFace(estado.face) === "1080" ? 2 : 1;
+  }
+
+  function getDayInfoEstado(estado, dateObj){
     const key = date_para_yyyy_mm_dd(dateObj);
-    return dayBadgeMap.get(key) || null;
+    return (estado.dayBadgeMap || new Map()).get(key) || null;
   }
 
-  function diaBloqueadoPorCapacidade(dateObj){
-    if(dateObjEhAntesDaDataMinima(dateObj)) return true;
-
-    const info = getDayInfo(dateObj);
-
-    if(info){
-      const disp = Number(info.disponiveis);
-      const total = Number(info.total);
-      const st = normalizarStatusBadge(info.status);
-      const diaDisponivel = info.diaDisponivel ?? info.dia_disponivel ?? null;
-      const disponiveisCota = Number(info.disponiveisCota ?? info.disponiveis_cota ?? info.disp_cota ?? NaN);
-      const maxBlocoLivre = Number(info.maxBlocoLivre ?? info.max_bloco_livre ?? NaN);
-      const spanNecessario = Number(info.spanNecessario ?? info.span_necessario ?? NaN);
-
-      if(diaDisponivel !== null && diaDisponivel !== undefined && String(diaDisponivel) !== ""){
-        const flagDiaDisponivel = Number(diaDisponivel);
-        if(Number.isFinite(flagDiaDisponivel)) return flagDiaDisponivel !== 1;
-      }
-
-      if(Number.isFinite(disponiveisCota) && disponiveisCota <= 0) return true;
-      if(Number.isFinite(maxBlocoLivre) && Number.isFinite(spanNecessario) && spanNecessario > 0 && maxBlocoLivre < spanNecessario) return true;
-
-      if(!Number.isFinite(disp) || !Number.isFinite(total)) return false;
-      if(st === "INDISPONIVEL") return true;
-      if(st === "CHEIO") return true;
-      if(disp <= 0) return true;
-
-      return false;
-    }
-
-    // fallback: sem calendário diário -> usa faixa azul
-    return diaEstaOcupado(dateObj);
-  }
-
-  function ranges_tem_conflito(inicioStr, fimStr){
-    if(dataStrEhPassada(inicioStr) || dataStrEhPassada(fimStr)) return true;
-
-    const di = yyyy_mm_dd_para_date(inicioStr);
-    const df = yyyy_mm_dd_para_date(fimStr);
-    if(!di || !df) return false;
-
-    const tIni = normalizarParaMeiaNoiteTs(di);
-    const tFim = normalizarParaMeiaNoiteTs(df);
-    if(tIni == null || tFim == null) return false;
-
-    if(tFim < tIni) return true;
-
-    const diaMs = 24 * 60 * 60 * 1000;
-    for(let t = tIni; t <= tFim; t += diaMs){
-      const d = new Date(t);
-      if(diaBloqueadoPorCapacidade(d)) return true;
+  function diaEstaOcupadoEstado(estado, dateObj){
+    const key = date_para_yyyy_mm_dd(dateObj);
+    if(!key) return false;
+    for(const r of (estado.ocupacoesRanges || [])){
+      if(key >= r.ini && key <= r.fim) return true;
     }
     return false;
   }
 
-  function garantirFimNaoAntesDoInicio(){
-    if(!fpFim) return;
+  function diaBloqueadoPorCapacidadeEstado(estado, dateObj){
+    const key = date_para_yyyy_mm_dd(dateObj);
+    if(!key || dataPassada(key)) return true;
 
-    const diStr = (elDataInicio.value || "").trim();
-    if(!diStr) return;
-
-    fpFim.set("minDate", maiorDataYmd(dataMinimaReservaYmd(), diStr));
-
-    const dfStr = (elDataFim.value || "").trim();
-    if(!dfStr){
-      fpFim.setDate(diStr, false);
-      return;
+    const info = getDayInfoEstado(estado, dateObj);
+    if(info){
+      const disponiveis = Number(info.disponiveis);
+      const disponiveisCota = Number(info.disponiveis_cota);
+      const maxBlocoLivre = Number(info.max_bloco_livre);
+      const total = Number(info.total);
+      const status = normalizarStatusBadge(info.status);
+      if(status === "INDISPONIVEL" || status === "CHEIO") return true;
+      if(Number.isFinite(disponiveisCota)){
+        if(disponiveisCota <= 0) return true;
+        return false;
+      }
+      if(Number.isFinite(maxBlocoLivre)){
+        if(maxBlocoLivre < slotsNecessariosEstado(estado)) return true;
+        return false;
+      }
+      if(Number.isFinite(disponiveis)){
+        if(disponiveis <= 0) return true;
+        if(disponiveis < slotsNecessariosEstado(estado)) return true;
+      }
+      if(Number.isFinite(total) && total <= 0) return true;
+      return false;
     }
 
-    const di = yyyy_mm_dd_para_date(diStr);
-    const df = yyyy_mm_dd_para_date(dfStr);
-    if(!di || !df) return;
-
-    const tIni = normalizarParaMeiaNoiteTs(di);
-    const tFim = normalizarParaMeiaNoiteTs(df);
-    if(tIni == null || tFim == null) return;
-
-    if(tFim < tIni){
-      fpFim.setDate(diStr, false);
-    }
+    return diaEstaOcupadoEstado(estado, dateObj);
   }
 
-  function atualizarRestricoesCalendarios(){
-    if(!fpInicio || !fpFim) return;
+  function rangesTemConflitoEstado(estado, inicioStr, fimStr){
+    if(dataPassada(inicioStr) || dataPassada(fimStr)) return true;
+    if(!texto(inicioStr) || !texto(fimStr)) return false;
+    if(compararDatasYmd(fimStr, inicioStr) < 0) return true;
 
-    fpInicio.set("disable", [ (date) => diaBloqueadoPorCapacidade(date) ]);
-    fpFim.set("disable", [ (date) => diaBloqueadoPorCapacidade(date) ]);
+    const ini = yyyy_mm_dd_para_date(inicioStr);
+    const fim = yyyy_mm_dd_para_date(fimStr);
+    if(!ini || !fim) return false;
 
-    const diStr = (elDataInicio.value || "").trim();
-    if(diStr){
-      fpFim.set("minDate", maiorDataYmd(dataMinimaReservaYmd(), diStr));
-      garantirFimNaoAntesDoInicio();
-    }else{
-      fpFim.set("minDate", dataMinimaReservaYmd());
+    const cursor = new Date(ini.getFullYear(), ini.getMonth(), ini.getDate());
+    const limite = new Date(fim.getFullYear(), fim.getMonth(), fim.getDate());
+    while(cursor <= limite){
+      if(diaBloqueadoPorCapacidadeEstado(estado, cursor)) return true;
+      cursor.setDate(cursor.getDate() + 1);
     }
-
-    fpInicio.redraw();
-    fpFim.redraw();
+    return false;
   }
 
-  function validarDatasNoClient(){
-    corrigirDatasPassadasNoClient();
-
-    const di = (elDataInicio.value || "").trim();
-    const df = (elDataFim.value || "").trim();
-    if(!di || !df) return;
-
-    if(datasSelecionadasTemPassado()){
-      setMsg("Não é permitido reservar datas anteriores a " + dataMinimaReservaYmd() + ".", false);
-      elBtnSalvar.disabled = true;
-      return;
-    }
-
-    if(ranges_tem_conflito(di, df)){
-      setMsg("Período conflita (dia CHEIO/INDISPONÍVEL). Escolha outro intervalo.", false);
-      elBtnSalvar.disabled = true;
-      return;
-    }
-
-    setMsg("", true);
-    elBtnSalvar.disabled = false;
+  function montarRangesDeOcupacaoEstado(estado, ocupacoes){
+    estado.ocupacoesRanges = [];
+    (ocupacoes || []).forEach(function(o){
+      const di = texto(o.DataInicio || o.data_inicio || o.dataInicio);
+      const df = texto(o.DataFim || o.data_fim || o.dataFim);
+      if(!di || !df) return;
+      estado.ocupacoesRanges.push({ini: di <= df ? di : df, fim: di <= df ? df : di});
+    });
   }
 
-  // =========================================================
-  // ✅ Flatpickr
-  // =========================================================
-  function initFlatpickr(){
-    fpInicio = flatpickr(elDataInicio, {
-      dateFormat: "Y-m-d",
-      minDate: dataMinimaReservaYmd(),
-      allowInput: true,
-      disableMobile: true,
-      prevArrow: "‹",
-      nextArrow: "›",
-      disable: [ (date) => diaBloqueadoPorCapacidade(date) ],
-      onDayCreate: function(dObj, dStr, fp, dayElem){
-        limparBadgeClasses(dayElem);
+  function montarDayBadgeMapGenerico(estado, payload){
+    const mapa = new Map();
+    if(!payload) return mapa;
 
-        const key = date_para_yyyy_mm_dd(dayElem.dateObj);
-        const info = dayBadgeMap.get(key);
+    const cap = Number(payload.capacidade_total ?? payload.cap_total ?? payload.k_fisico ?? payload.CapacidadeTotal ?? estado.cap_total_default ?? 16);
+    const capTotal = Number.isFinite(cap) && cap > 0 ? cap : (estado.cap_total_default || 16);
 
-        if(info){
-          const disponiveis = Number(info.disponiveis);
-          const total = Number(info.total);
+    const calObj = payload.cal || payload.calendar || payload.dias_calendario || payload.day_status || payload.calendario || null;
 
-          if(Number.isFinite(disponiveis) && Number.isFinite(total)){
-            const status = normalizarStatusBadge(
-              info.status || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL"))
-            );
-            const cor = escolherCorBadgePorStatus(status, disponiveis, total);
-
-            dayElem.classList.add("has-badge");
-            dayElem.classList.add(
-              cor === "red" ? "badge-red" :
-              (cor === "yellow" ? "badge-yellow" :
-              (cor === "gray" ? "badge-gray" : "badge-green"))
-            );
-
-            const badge = document.createElement("span");
-            badge.className = "day-badge";
-            badge.textContent = disponiveis + "/" + total;
-            dayElem.appendChild(badge);
-
-            const tooltipText = montarTooltipText(status, disponiveis, total);
-            dayElem.addEventListener("mouseenter", (ev) => tooltipShow(tooltipText, status, ev.clientX, ev.clientY));
-            dayElem.addEventListener("mousemove", (ev) => tooltipShow(tooltipText, status, ev.clientX, ev.clientY));
-            dayElem.addEventListener("mouseleave", tooltipHide);
-          }
+    if(Array.isArray(calObj)){
+      calObj.forEach(function(it){
+        const dt = texto(it.data || it.Data || it.dia || it.Dia || it.date || it.Date);
+        if(!dt) return;
+        const total = Number(it.total ?? it.Total ?? it.capacidade ?? it.Capacidade ?? it.cap ?? it.Cap ?? capTotal);
+        let disp = it.disponiveis ?? it.Disponiveis ?? it.available ?? it.Available ?? it.disp ?? it.Disp ?? null;
+        if(disp == null){
+          const ocupados = it.ocupados ?? it.Ocupados ?? it.usados ?? it.Usados ?? it.used ?? it.Used ?? it.ocup ?? it.Ocup ?? null;
+          if(ocupados != null) disp = Number(total) - Number(ocupados);
         }
+        const disponiveis = Number(disp);
+        const dispCotaRaw = it.disp_cota ?? it.disponiveis_cota ?? it.SlotsDisponiveisCota ?? it.DisponiveisCota ?? null;
+        const maxBlocoRaw = it.max_bloco_livre ?? it.MaxBlocoLivre ?? it.maior_bloco_livre ?? null;
+        const disponiveisCota = Number(dispCotaRaw);
+        const maxBlocoLivre = Number(maxBlocoRaw);
+        if(!Number.isFinite(disponiveis) || !Number.isFinite(total)) return;
+        const status = normalizarStatusBadge(texto(it.status || it.Status || it.StatusDia) || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL")));
+        mapa.set(dt, {
+          disponiveis: disponiveis,
+          total: total,
+          status: status,
+          disponiveis_cota: Number.isFinite(disponiveisCota) ? disponiveisCota : null,
+          max_bloco_livre: Number.isFinite(maxBlocoLivre) ? maxBlocoLivre : null
+        });
+      });
+      return mapa;
+    }
 
-        if(diaEstaOcupado(dayElem.dateObj)){
-          dayElem.classList.add("ocupado");
-        }
-      },
-      onReady: function(selectedDates, dateStr, fp){
-        const mesRef = (MES_REF || "").trim();
-        if(mesRef) fp.jumpToDate(mesRef + "-01", false);
-      },
-      onChange: function(){
-        atualizarRestricoesCalendarios();
-        garantirFimNaoAntesDoInicio();
-        if(fpFim) fpFim.redraw();
-        validarDatasNoClient();
+    if(calObj && typeof calObj === "object"){
+      Object.keys(calObj).forEach(function(dt){
+        const it = calObj[dt] || {};
+        const total = Number(it.cap ?? it.capacidade ?? it.CapacidadeSlots ?? it.Capacidade ?? capTotal);
+        const disponiveis = Number(it.disp ?? it.disponiveis ?? it.SlotsDisponiveis ?? it.Disponiveis ?? NaN);
+        const dispCotaRaw = it.disp_cota ?? it.disponiveis_cota ?? it.SlotsDisponiveisCota ?? it.DisponiveisCota ?? null;
+        const maxBlocoRaw = it.max_bloco_livre ?? it.MaxBlocoLivre ?? it.maior_bloco_livre ?? null;
+        const disponiveisCota = Number(dispCotaRaw);
+        const maxBlocoLivre = Number(maxBlocoRaw);
+        if(!Number.isFinite(total) || !Number.isFinite(disponiveis)) return;
+        const status = normalizarStatusBadge(texto(it.status || it.Status || it.StatusDia) || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL")));
+        mapa.set(dt, {
+          disponiveis: disponiveis,
+          total: total,
+          status: status,
+          disponiveis_cota: Number.isFinite(disponiveisCota) ? disponiveisCota : null,
+          max_bloco_livre: Number.isFinite(maxBlocoLivre) ? maxBlocoLivre : null
+        });
+        if(total > 0) estado.cap_total_default = total;
+      });
+    }
+
+    return mapa;
+  }
+
+  function aplicarCalendarioNoEstado(estado, payload){
+    estado.dayBadgeMap = montarDayBadgeMapGenerico(estado, payload);
+    atualizarRestricoesCalendariosEstado(estado);
+  }
+
+  function aplicarBadgeDia(estado, dayElem){
+    limparBadgeClasses(dayElem);
+    const info = getDayInfoEstado(estado, dayElem.dateObj);
+    if(info){
+      const disponiveis = Number(info.disponiveis);
+      const total = Number(info.total);
+      if(Number.isFinite(disponiveis) && Number.isFinite(total)){
+        const status = normalizarStatusBadge(info.status || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL")));
+        const cor = escolherCorBadgePorStatus(status, disponiveis, total);
+        dayElem.classList.add("has-badge");
+        dayElem.classList.add(cor === "red" ? "badge-red" : (cor === "yellow" ? "badge-yellow" : (cor === "gray" ? "badge-gray" : "badge-green")));
+        const badge = document.createElement("span");
+        badge.className = "day-badge";
+        badge.textContent = disponiveis + "/" + total;
+        dayElem.appendChild(badge);
+        const tooltipText = montarTooltipText(status, disponiveis, total);
+        dayElem.addEventListener("mouseenter", function(ev){ tooltipShow(tooltipText, status, ev.clientX, ev.clientY); });
+        dayElem.addEventListener("mousemove", function(ev){ tooltipShow(tooltipText, status, ev.clientX, ev.clientY); });
+        dayElem.addEventListener("mouseleave", tooltipHide);
+      }
+    }
+    if(diaEstaOcupadoEstado(estado, dayElem.dateObj)) dayElem.classList.add("ocupado");
+  }
+
+  function garantirFimNaoAntesDoInicioEstado(estado){
+    if(!estado.fp_fim) return;
+    const minFim = maiorDataYmd(hojeYmd(), estado.data_inicio);
+    estado.fp_fim.set("minDate", minFim);
+  }
+
+  function atualizarRestricoesCalendariosEstado(estado){
+    if(!estado || !estado.fp_inicio || !estado.fp_fim) return;
+    const fn = function(date){ return diaBloqueadoPorCapacidadeEstado(estado, date); };
+    estado.fp_inicio.set("disable", [fn]);
+    estado.fp_fim.set("disable", [fn]);
+    garantirFimNaoAntesDoInicioEstado(estado);
+    estado.fp_inicio.redraw();
+    estado.fp_fim.redraw();
+  }
+
+  function validarDatasEstadoNoClient(estado){
+    if(!estado) return true;
+    if(dataPassada(estado.data_inicio) || dataPassada(estado.data_fim)){
+      setCardMsg(estado, "Não é permitido reservar datas anteriores a " + hojeYmd() + ".", false);
+      return false;
+    }
+    if(compararDatasYmd(estado.data_fim, estado.data_inicio) < 0){
+      setCardMsg(estado, "Data fim não pode ser menor que data início.", false);
+      return false;
+    }
+    if(rangesTemConflitoEstado(estado, estado.data_inicio, estado.data_fim)){
+      setCardMsg(estado, "Período conflita com dia CHEIO/INDISPONÍVEL ou não tem slots suficientes para esta cota.", false);
+      return false;
+    }
+    return true;
+  }
+
+  function inicializarFlatpickrCard(estado, dataInicio, dataFim){
+    if(!window.flatpickr || !dataInicio || !dataFim) return;
+
+    try{ if(estado.fp_inicio) estado.fp_inicio.destroy(); }catch(e){}
+    try{ if(estado.fp_fim) estado.fp_fim.destroy(); }catch(e){}
+
+    const onDia = function(dObj, dStr, fp, dayElem){ aplicarBadgeDia(estado, dayElem); };
+
+    function normalizarDataDigitada(valor){
+      return texto(valor);
+    }
+
+    function deveCarregarDadosPeriodo(estado){
+      return !!(texto(estado.data_inicio) && texto(estado.data_fim));
+    }
+
+    function aplicarInicio(dateStr, acionarCarga){
+      const assinaturaAntes = estado.data_inicio + "|" + estado.data_fim;
+      const valorDigitado = texto(dateStr || dataInicio.value);
+      estado.data_inicio = normalizarDataDigitada(valorDigitado);
+      garantirFimNaoAntesDoInicioEstado(estado);
+      validarDatasEstadoNoClient(estado);
+      atualizarBloqueioSeletorFaces();
+      const assinaturaDepois = estado.data_inicio + "|" + estado.data_fim;
+      if(acionarCarga && assinaturaDepois !== assinaturaAntes && deveCarregarDadosPeriodo(estado)) carregarDadosCard(estado.chave);
+    }
+
+    function aplicarFim(dateStr, acionarCarga){
+      const assinaturaAntes = estado.data_inicio + "|" + estado.data_fim;
+      const valorDigitado = texto(dateStr || dataFim.value);
+      estado.data_fim = normalizarDataDigitada(valorDigitado);
+      validarDatasEstadoNoClient(estado);
+      atualizarBloqueioSeletorFaces();
+      const assinaturaDepois = estado.data_inicio + "|" + estado.data_fim;
+      if(acionarCarga && assinaturaDepois !== assinaturaAntes && deveCarregarDadosPeriodo(estado)) carregarDadosCard(estado.chave);
+    }
+
+    estado.fp_inicio = flatpickr(dataInicio, {
+      dateFormat:"Y-m-d",
+      minDate: hojeYmd(),
+      allowInput:true,
+      disableMobile:true,
+      prevArrow:"‹",
+      nextArrow:"›",
+      disable:[function(date){ return diaBloqueadoPorCapacidadeEstado(estado, date); }],
+      onDayCreate:onDia,
+      onReady:function(selectedDates, dateStr, fp){ if(MES_REF) fp.jumpToDate(MES_REF + "-01", false); },
+      onOpen:function(){ if(estado.fp_inicio) estado.fp_inicio.redraw(); },
+      onChange:function(_, dateStr){ aplicarInicio(dateStr, true); },
+      onClose:function(_, dateStr){ aplicarInicio(dateStr, true); }
+    });
+
+    estado.fp_fim = flatpickr(dataFim, {
+      dateFormat:"Y-m-d",
+      minDate: maiorDataYmd(hojeYmd(), estado.data_inicio),
+      allowInput:true,
+      disableMobile:true,
+      prevArrow:"‹",
+      nextArrow:"›",
+      disable:[function(date){ return diaBloqueadoPorCapacidadeEstado(estado, date); }],
+      onDayCreate:onDia,
+      onReady:function(selectedDates, dateStr, fp){ if(MES_REF) fp.jumpToDate(MES_REF + "-01", false); },
+      onOpen:function(){ garantirFimNaoAntesDoInicioEstado(estado); if(estado.fp_fim) estado.fp_fim.redraw(); },
+      onChange:function(_, dateStr){ aplicarFim(dateStr, true); },
+      onClose:function(_, dateStr){ aplicarFim(dateStr, true); }
+    });
+
+    if(texto(estado.data_inicio)) estado.fp_inicio.setDate(estado.data_inicio, false);
+    if(texto(estado.data_fim)) estado.fp_fim.setDate(estado.data_fim, false);
+    atualizarRestricoesCalendariosEstado(estado);
+  }
+
+  function htmlFace(face){
+    const chave = chaveFace(face);
+    const selecionado = estadosCards.has(chave);
+    const tagTipo = ehDigital(face) ? "<span class='tag-digital'>DIGITAL</span>" : "<span class='tag-analogico'>ANALÓGICO</span>";
+    const tagSelecionado = selecionado ? "<span class='tag-selecionado'>SELECIONADO</span>" : "";
+    const acao = selecionado
+      ? "<button type='button' class='kb-face-action is-remove' data-acao-face='remover' title='Remover face selecionada' aria-label='Remover face selecionada'>−</button>"
+      : "<button type='button' class='kb-face-action is-add' data-acao-face='adicionar' title='Adicionar face' aria-label='Adicionar face'>+</button>";
+
+    return "<div class='kb-face-text'><span class='top'>" + escapeHtml(codFace(face) || "—") + tagTipo + tagSelecionado + "</span>" +
+      (resumoFace(face) ? "<span class='sub'>" + escapeHtml(resumoFace(face)) + "</span>" : "") +
+      "</div><span class='kb-face-actions'>" + acao + "</span>";
+  }
+
+  function renderListaFaces(lista){
+    elListaFace.innerHTML = "";
+    if(!lista || !lista.length){
+      const vazio = document.createElement("div");
+      vazio.className = "kb-combobox-item";
+      vazio.innerHTML = "<span class='top'>Nenhuma face encontrada</span>";
+      elListaFace.appendChild(vazio);
+      return;
+    }
+
+    lista.slice(0, 200).forEach(function(face){
+      const chave = chaveFace(face);
+      const item = document.createElement("div");
+      item.className = "kb-combobox-item" + (estadosCards.has(chave) ? " is-selected" : "");
+      item.innerHTML = htmlFace(face);
+      item.addEventListener("mousedown", function(ev){
+        ev.preventDefault();
+        alternarFace(face);
+      });
+      elListaFace.appendChild(item);
+    });
+  }
+
+  function filtrarFacesLocal(opcoes){
+    const cfg = opcoes || {};
+    const deveAbrirLista = cfg.abrir !== false;
+    const termo = normalizar(elInputFace.value);
+    const lista = faces.filter(function(face){
+      if(!facePassaFiltrosSelecionados(face)) return false;
+      return !termo || normalizar(labelFace(face)).includes(termo);
+    });
+    renderListaFaces(lista);
+    if(deveAbrirLista) abrirLista(elListaFace);
+  }
+
+  async function buscarFacesRemoto(opcoes){
+    if(!seletorFacesLiberadoParaAdicionar()) return;
+    const qs = paramsFiltrosFaces(new URLSearchParams());
+    const termo = texto(elInputFace.value);
+    if(termo) qs.set("q", termo);
+
+    const resp = await fetch(URL_FACES + "?" + qs.toString(), {credentials:"same-origin"});
+    if(!resp.ok) return;
+
+    const data = await resp.json().catch(function(){ return null; });
+    if(!data || !data.ok) return;
+
+    const novasFaces = data.items || [];
+    const jaExiste = new Set(faces.map(function(face){ return chaveFace(face); }));
+    novasFaces.forEach(function(face){
+      const chave = chaveFace(face);
+      if(chave && !jaExiste.has(chave)){
+        faces.push(face);
+        jaExiste.add(chave);
       }
     });
 
-    fpFim = flatpickr(elDataFim, {
-      dateFormat: "Y-m-d",
-      minDate: dataMinimaReservaYmd(),
-      allowInput: true,
-      disableMobile: true,
-      prevArrow: "‹",
-      nextArrow: "›",
-      disable: [ (date) => diaBloqueadoPorCapacidade(date) ],
-      onDayCreate: function(dObj, dStr, fp, dayElem){
-        limparBadgeClasses(dayElem);
-
-        const key = date_para_yyyy_mm_dd(dayElem.dateObj);
-        const info = dayBadgeMap.get(key);
-
-        if(info){
-          const disponiveis = Number(info.disponiveis);
-          const total = Number(info.total);
-
-          if(Number.isFinite(disponiveis) && Number.isFinite(total)){
-            const status = normalizarStatusBadge(
-              info.status || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL"))
-            );
-            const cor = escolherCorBadgePorStatus(status, disponiveis, total);
-
-            dayElem.classList.add("has-badge");
-            dayElem.classList.add(
-              cor === "red" ? "badge-red" :
-              (cor === "yellow" ? "badge-yellow" :
-              (cor === "gray" ? "badge-gray" : "badge-green"))
-            );
-
-            const badge = document.createElement("span");
-            badge.className = "day-badge";
-            badge.textContent = disponiveis + "/" + total;
-            dayElem.appendChild(badge);
-
-            const tooltipText = montarTooltipText(status, disponiveis, total);
-            dayElem.addEventListener("mouseenter", (ev) => tooltipShow(tooltipText, status, ev.clientX, ev.clientY));
-            dayElem.addEventListener("mousemove", (ev) => tooltipShow(tooltipText, status, ev.clientX, ev.clientY));
-            dayElem.addEventListener("mouseleave", tooltipHide);
-          }
-        }
-
-        if(diaEstaOcupado(dayElem.dateObj)){
-          dayElem.classList.add("ocupado");
-        }
-      },
-      onReady: function(selectedDates, dateStr, fp){
-        const mesRef = (MES_REF || "").trim();
-        if(mesRef) fp.jumpToDate(mesRef + "-01", false);
-      },
-      onOpen: function(){
-        garantirFimNaoAntesDoInicio();
-        if(fpFim) fpFim.redraw();
-      },
-      onChange: function(){
-        validarDatasNoClient();
-      }
-    });
-
-    if(DT_INI_INICIAL) fpInicio.setDate(dataStrEhPassada(DT_INI_INICIAL) ? dataMinimaReservaYmd() : DT_INI_INICIAL, false);
-    if(DT_FIM_INICIAL) fpFim.setDate(dataStrEhPassada(DT_FIM_INICIAL) ? dataMinimaReservaYmd() : DT_FIM_INICIAL, false);
-
-    corrigirDatasPassadasNoClient();
-    atualizarRestricoesCalendarios();
-    garantirFimNaoAntesDoInicio();
+    filtrarFacesLocal(opcoes);
+    if(opcoes && opcoes.abrir === false) fecharLista(elListaFace);
   }
 
-  // =========================================================
-  // ✅ Searchable selects
-  // =========================================================
-  function normalizarTexto(s){
-    return (s || "")
-      .toString()
-      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .trim();
+  function criarEstadoFace(face){
+    const copia = Object.assign({}, face);
+    copia.__cota = ehDigital(copia) ? "540" : "";
+    return {
+      chave: chaveFace(copia),
+      face: copia,
+      data_inicio: "",
+      data_fim: "",
+      id_cliente: "",
+      id_vendedor: "",
+      id_contrato: "",
+      numero_contrato: "",
+      numero_previa: "",
+      marca_exibida: "",
+      observacao: "",
+      clientes: [],
+      vendedores: [],
+      contratos: [],
+      contratosMap: new Map(),
+      dayBadgeMap: new Map(),
+      ocupacoesRanges: [],
+      fp_inicio: null,
+      fp_fim: null,
+      cap_total_default: ehDigital(copia) ? 16 : 1,
+      card_msg: "",
+      card_msg_ok: true
+    };
   }
 
-  function labelEmpresa(e){
-    const nome = (e.Nome || e.RazaoSocial || "").trim();
-    const cnpj = (e.CNPJ || "").trim();
-    return (nome && cnpj) ? (nome + " — " + cnpj) : (nome || cnpj || "—");
-  }
+  function alternarFace(face){
+    const chave = chaveFace(face);
+    if(!chave) return;
 
-
-
-  // =========================================================
-  // Empresas relacionadas removidas desta tela.
-  // Mantém o hidden como [] para preservar compatibilidade com o backend.
-  // =========================================================
-  function fecharDropdownsEmpresasRelacionadas(){}
-
-  function renderizarEmpresasRelacionadas(){
-    sincronizarEmpresasRelacionadasHidden();
-  }
-
-  function coletarEmpresasRelacionadasValidas(){
-    return [];
-  }
-
-  function sincronizarEmpresasRelacionadasHidden(){
-    if(fEmpresasRelacionadas){
-      fEmpresasRelacionadas.value = "[]";
+    if(estadosCards.has(chave)){
+      estadosCards.delete(chave);
+      renderCardsReservas();
+      renderListaFaces(faces);
+      atualizarSelectCodFace();
+      atualizarBloqueioSeletorFaces();
+      return;
     }
+
+    const erroGlobal = erroDadosReservaGlobal();
+    if(erroGlobal){
+      setMsg("Preencha os dados fixos da reserva antes de selecionar faces.", false);
+      setMsgDadosGlobal("Preencha os dados fixos da reserva para liberar a seleção das faces: " + erroGlobal + ".", false);
+      atualizarBloqueioSeletorFaces();
+      return;
+    }
+
+    const estado = criarEstadoFace(face);
+    estadosCards.set(chave, estado);
+    setMsg("Face " + (codFace(face) || "selecionada") + " adicionada. Você pode adicionar outras faces e preencher as datas em seguida.", true);
+    renderCardsReservas();
+    renderListaFaces(faces);
+    atualizarSelectCodFace();
+    atualizarBloqueioSeletorFaces();
+    carregarDadosCard(chave);
+    carregarCalendario(estado);
   }
 
-  function validarEmpresasRelacionadas(){
+  function atualizarSelectCodFace(){
+    const primeiro = Array.from(estadosCards.values())[0];
+    elCodFace.value = primeiro ? codFace(primeiro.face) : "";
+    elContadorFaces.textContent = estadosCards.size + (estadosCards.size === 1 ? " selecionada" : " selecionadas");
+  }
+
+
+  function erroPreenchimentoParaLiberarNovaFace(estado){
+    if(!estado || !estado.face) return "Selecione uma face válida.";
+    corrigirDatasEstado(estado);
+
+    if(!codFace(estado.face) || !codPonto(estado.face)) return "selecione uma face válida";
+    if(ehDigital(estado.face) && !["540", "1080"].includes(cotaFace(estado.face))) return "selecione a cota da face";
+    if(!texto(estado.data_inicio) || !texto(estado.data_fim)) return "informe data início e data fim";
+    if(dataPassada(estado.data_inicio) || dataPassada(estado.data_fim)) return "use datas a partir de " + hojeYmd();
+    if(compararDatasYmd(estado.data_fim, estado.data_inicio) < 0) return "corrija a data fim";
     return "";
   }
 
-  function labelVendedor(v){
-    return (v.NomeVendedor || "").trim() || "—";
+  function primeiroEstadoPendenteParaLiberarNovaFace(){
+    const estados = Array.from(estadosCards.values());
+    for(const estado of estados){
+      const erro = erroPreenchimentoParaLiberarNovaFace(estado);
+      if(erro) return {estado: estado, erro: erro};
+    }
+    return null;
   }
 
-  function labelContrato(c){
-    const nc = (c.NumeroContrato || "").trim();
-    const np = (c.NumeroPrevia || "").trim();
-    const rz = (c.RazaoSocial || "").trim();
-    const cj = (c.CNPJ || "").trim();
-    const cab = ("Contrato " + (nc || "-") + " / Prévia " + (np || "-"));
-    const emp = (rz || cj) ? (" — " + (rz || "") + (cj ? (" — " + cj) : "")) : "";
-    return cab + emp;
+  function seletorFacesLiberadoParaAdicionar(){
+    return dadosReservaGlobalCompleto();
   }
 
-  function getFaceCod(f){
-    return String(f.CodFace ?? f.cod_face ?? f.codFace ?? "").trim();
+  function atualizarBloqueioSeletorFaces(){
+    atualizarVisibilidadeFluxoReserva();
+
+    const erroGlobal = erroDadosReservaGlobal();
+    const pendente = !erroGlobal ? primeiroEstadoPendenteParaLiberarNovaFace() : null;
+    const bloqueado = !!erroGlobal;
+
+    if(elInputFace){
+      elInputFace.disabled = bloqueado;
+      elInputFace.setAttribute("aria-disabled", bloqueado ? "true" : "false");
+      elInputFace.placeholder = bloqueado
+        ? "Preencha os dados da reserva acima"
+        : "Digite CodFace, CodPonto, logradouro, número, cidade, bairro ou tipo...";
+    }
+
+    if(elBtnToggleFace){
+      elBtnToggleFace.disabled = bloqueado;
+      elBtnToggleFace.setAttribute("aria-disabled", bloqueado ? "true" : "false");
+    }
+
+    const comboFace = document.getElementById("comboFace");
+    if(comboFace) comboFace.classList.toggle("is-bloqueado", bloqueado);
+
+    [elDdFiltroCidadeFace, elDdFiltroTipoFace].forEach(function(dd){
+      if(!dd) return;
+      dd.classList.toggle("is-bloqueado", bloqueado);
+      dd.setAttribute("aria-disabled", bloqueado ? "true" : "false");
+      if(bloqueado) dd.open = false;
+    });
+
+    if(bloqueado){
+      fecharLista(elListaFace);
+    }
+
+    if(elHintBloqueioFace){
+      elHintBloqueioFace.classList.toggle("is-bloqueio-face", bloqueado);
+      if(erroGlobal){
+        elHintBloqueioFace.textContent = "Preencha os dados fixos da reserva acima para liberar a seleção de Face/Ponto: " + erroGlobal + ".";
+      }else if(estadosCards.size === 0){
+        elHintBloqueioFace.textContent = "Clique no sinal + para selecionar a primeira Face/Ponto.";
+      }else if(pendente && pendente.estado){
+        elHintBloqueioFace.textContent = "Você pode continuar adicionando outras faces. Antes de salvar, preencha os dados da face " + (codFace(pendente.estado.face) || "atual") + ": " + pendente.erro + ".";
+      }else{
+        elHintBloqueioFace.textContent = "Faces selecionadas. Use o sinal + para adicionar outra Face/Ponto ou − para remover uma selecionada.";
+      }
+    }
   }
 
-  function faceEhDigital(f){
-    const flag = String(f.EhDigital ?? f.eh_digital ?? "").trim();
-    if(flag === "1" || flag.toLowerCase() === "true") return true;
-    const tipo = String(f.TipoPainel ?? f.tipo_painel ?? f.Tipo ?? f.tipo ?? "").toUpperCase();
-    return tipo.includes("DIGITAL");
+  function getEmpresaId(item){ return texto(item.IDEmpresa || item.id_empresa || item.IDCliente || item.id_cliente); }
+  function labelEmpresa(item){ return [texto(item.Nome || item.RazaoSocial || item.NomeFantasia), texto(item.CNPJ)].filter(Boolean).join(" — ") || "—"; }
+  function getVendedorId(item){ return texto(item.IDVendedor || item.id_vendedor); }
+  function labelVendedor(item){ return texto(item.NomeVendedor || item.nome_vendedor || item.Nome) || "—"; }
+  function getContratoId(item){ return texto(item.IDFatoControleContratosEuromidia || item.IDContrato || item.id_contrato); }
+  function labelContrato(item){
+    const contrato = texto(item.NumeroContrato);
+    const previa = texto(item.NumeroPrevia);
+    const empresa = texto(item.RazaoSocial || item.MarcaExibida || item.NomeFantasia);
+    return ["Contrato " + (contrato || "-") + " / Prévia " + (previa || "-"), empresa].filter(Boolean).join(" — ");
   }
 
-  function labelFace(f){
-    const cod = getFaceCod(f);
-    const codPonto = String(f.CodPonto ?? f.cod_ponto ?? COD_PONTO ?? "").trim();
-    const logradouro = String(f.Logradouro ?? f.logradouro ?? "").trim();
-    const numero = String(f.Numero ?? f.numero ?? "").trim();
-    const cidade = String(f.Cidade ?? f.cidade ?? "").trim();
-    const bairro = String(f.Bairro ?? f.bairro ?? "").trim();
-    const tipo = String(f.TipoPainel ?? f.tipo_painel ?? f.Tipo ?? f.tipo ?? "").trim();
-
-    const endereco = logradouro ? (logradouro + (numero ? ", " + numero : "")) : (numero ? "Nº " + numero : "");
-    return [cod, codPonto ? "Ponto " + codPonto : "", endereco, cidade, bairro, tipo]
-      .filter(Boolean)
-      .join(" • ");
+  function setMsgDadosGlobal(msg, ok){
+    if(!elMsgDadosReservaGlobal) return;
+    elMsgDadosReservaGlobal.textContent = texto(msg);
+    elMsgDadosReservaGlobal.classList.remove("ok", "err");
+    if(msg) elMsgDadosReservaGlobal.classList.add(ok ? "ok" : "err");
   }
 
-  function renderFace(f){
-    const cod = getFaceCod(f) || "—";
-    const tipo = String(f.TipoPainel ?? f.tipo_painel ?? f.Tipo ?? f.tipo ?? "").trim();
-    const logradouro = String(f.Logradouro ?? f.logradouro ?? "").trim();
-    const numero = String(f.Numero ?? f.numero ?? "").trim();
-    const cidade = String(f.Cidade ?? f.cidade ?? "").trim();
-    const bairro = String(f.Bairro ?? f.bairro ?? "").trim();
-    const codPonto = String(f.CodPonto ?? f.cod_ponto ?? COD_PONTO ?? "").trim();
-    const digital = faceEhDigital(f);
-    const tag = digital
-      ? "<span class='tag-digital'>DIGITAL</span>"
-      : "<span class='tag-analogico'>ANALÓGICO</span>";
-    const endereco = logradouro ? (logradouro + (numero ? ", " + numero : "")) : "";
-    const sub = [codPonto ? "CodPonto " + codPonto : "", endereco, bairro, cidade, tipo]
-      .filter(Boolean)
-      .join(" • ");
-    return "<span class='top'>" + cod + tag + "</span>" + (sub ? "<span class='sub'>" + sub + "</span>" : "");
+  function erroDadosReservaGlobal(){
+    if(!texto(dadosReservaGlobal.id_cliente)) return "selecione a empresa/cliente";
+    if(!texto(dadosReservaGlobal.id_vendedor)) return "selecione o vendedor";
+    if(!texto(dadosReservaGlobal.marca_exibida)) return "informe a Marca Exibida";
+    if(texto(dadosReservaGlobal.marca_exibida).length > 200) return "reduza a Marca Exibida para até 200 caracteres";
+    return "";
   }
 
-  function faceSelecionadaAtual(){
-    const cod = (elCodFace.value || "").trim();
-    if(!cod) return null;
-    return (facesAtuais || []).find(f => getFaceCod(f) === cod) || null;
+  function dadosReservaGlobalCompleto(){
+    return !erroDadosReservaGlobal();
   }
 
-  function atualizarCampoCotaPorFace(){
-    const face = faceSelecionadaAtual();
-    faceSelecionadaEhDigital = face ? faceEhDigital(face) : false;
+  function atualizarVisibilidadeFluxoReserva(){
+    const completo = dadosReservaGlobalCompleto();
 
-    if(faceSelecionadaEhDigital){
-      const valorAtual = (elCota.value || "").trim();
-      elCota.disabled = false;
-      elCota.required = true;
-      elCota.innerHTML = "<option value='540'>540</option><option value='1080'>1080</option>";
-      elCota.value = (valorAtual === "1080" || valorAtual === "540") ? valorAtual : "540";
-      if(elCotaHint) elCotaHint.textContent = "Painel digital: selecione a cota 540 ou 1080.";
+    if(elCardSeletorFacesReserva) elCardSeletorFacesReserva.hidden = !completo;
+    if(elCardsReservasFaces) elCardsReservasFaces.hidden = !completo;
+    if(elCardSalvarReservas) elCardSalvarReservas.hidden = !completo;
+
+    if(completo){
+      setMsgDadosGlobal("Dados fixos preenchidos. Agora selecione uma ou mais faces abaixo.", true);
     }else{
-      elCota.required = false;
-      elCota.disabled = true;
-      elCota.innerHTML = "<option value=''></option>";
-      elCota.value = "";
-      if(elCotaHint) elCotaHint.textContent = "Este painel não é digital; por isso a cota fica vazia.";
-    }
-
-    if(fCota) fCota.value = (elCota.value || "").trim();
-  }
-
-  function abrirDropdown(wrap){ if(wrap) wrap.classList.add("open"); }
-  function fecharDropdown(wrap){ if(wrap) wrap.classList.remove("open"); }
-
-  function renderDropdown(dropEl, itens, renderFn, onPick){
-    if(!dropEl) return;
-    dropEl.innerHTML = "";
-    if(!itens || itens.length === 0){
-      const d = document.createElement("div");
-      d.className = "ss-empty";
-      d.textContent = "Nenhum resultado";
-      dropEl.appendChild(d);
-      return;
-    }
-    for(const it of itens){
-      const row = document.createElement("div");
-      row.className = "ss-item";
-      const html = renderFn(it);
-      if(typeof html === "string") row.innerHTML = html;
-      else row.textContent = String(html);
-
-      row.addEventListener("mousedown", function(ev){
-        ev.preventDefault();
-        onPick(it);
-      });
-      dropEl.appendChild(row);
+      const erro = erroDadosReservaGlobal();
+      setMsgDadosGlobal("Preencha os dados fixos da reserva para liberar a seleção das faces: " + erro + ".", false);
     }
   }
 
-  function buildSearchableSelect(cfg){
-    const wrap = cfg.wrap;
+  function preencherInputGlobalPorValor(){
+    const empresa = dadosReservaGlobal.clientes.find(function(item){ return getEmpresaId(item) === texto(dadosReservaGlobal.id_cliente); });
+    const vendedor = dadosReservaGlobal.vendedores.find(function(item){ return getVendedorId(item) === texto(dadosReservaGlobal.id_vendedor); });
+    if(elInputClienteGlobal && empresa) elInputClienteGlobal.value = labelEmpresa(empresa);
+    if(elInputVendedorGlobal && vendedor) elInputVendedorGlobal.value = labelVendedor(vendedor);
+  }
+
+  function montarComboGlobalReserva(cfg){
     const input = cfg.input;
-    const select = cfg.select;
-    const dropdown = cfg.dropdown;
+    const lista = cfg.lista;
+    const botao = cfg.botao;
+    if(!input || !lista || !botao) return;
 
-    if(!wrap || !input || !select || !dropdown){
-      console.warn("[reserva] buildSearchableSelect: elementos não encontrados:", cfg);
-      return { setItems: function(){} };
-    }
+    let timerBuscaServidor = null;
+    let sequenciaBuscaServidor = 0;
 
-    let itensOriginais = [];
-    const getValue = cfg.getValue;
-    const getLabel = cfg.getLabel;
-    const renderItem = cfg.renderItem;
-
-    function setItems(itens){
-      itensOriginais = Array.isArray(itens) ? itens : [];
-      const valorAtual = (select.value || "").toString().trim();
-      if(valorAtual){
-        const achado = itensOriginais.find(x => String(getValue(x)).trim() === valorAtual);
-        if(achado) input.value = getLabel(achado);
-      }
-      filtrarEExibir();
-    }
-
-    function filtrarEExibir(){
-      const termo = normalizarTexto(input.value || "");
-      const filtrados = itensOriginais
-        .filter(it => !termo || normalizarTexto(getLabel(it)).includes(termo))
-        .slice(0, 200);
-
-      renderDropdown(dropdown, filtrados, renderItem, function(it){
-        const val = String(getValue(it) ?? "").trim();
-        select.value = val;
-        input.value = getLabel(it);
-        fecharDropdown(wrap);
-        select.dispatchEvent(new Event("change", { bubbles:true }));
+    function render(){
+      const termo = normalizar(input.value);
+      const itens = (cfg.getLista() || []).filter(function(item){
+        return !termo || normalizar(cfg.getLabel(item)).includes(termo);
       });
-    }
+      lista.innerHTML = "";
 
-    input.addEventListener("focus", function(){ abrirDropdown(wrap); filtrarEExibir(); });
-    input.addEventListener("input", function(){ abrirDropdown(wrap); filtrarEExibir(); });
-    input.addEventListener("keydown", function(ev){ if(ev.key === "Escape") fecharDropdown(wrap); });
-
-    document.addEventListener("mousedown", function(ev){
-      if(!wrap.contains(ev.target)) fecharDropdown(wrap);
-    });
-
-    select.addEventListener("change", function(){
-      const valorAtual = (select.value || "").toString().trim();
-      const achado = itensOriginais.find(x => String(getValue(x)).trim() === valorAtual);
-      if(achado) input.value = getLabel(achado);
-    });
-
-    return { setItems };
-  }
-
-  const ssFace = buildSearchableSelect({
-    wrap: ssFaceWrap,
-    input: elCodFaceSearch,
-    select: elCodFace,
-    dropdown: elCodFaceDrop,
-    getValue: (f) => getFaceCod(f),
-    getLabel: (f) => labelFace(f),
-    renderItem: (f) => renderFace(f)
-  });
-
-  if(elCodFaceToggle){
-    elCodFaceToggle.addEventListener("mousedown", function(ev){
-      ev.preventDefault();
-      abrirDropdown(ssFaceWrap);
-      if(elCodFaceSearch) elCodFaceSearch.focus();
-    });
-  }
-
-  const ssCliente = buildSearchableSelect({
-    wrap: ssClienteWrap,
-    input: elClienteSearch,
-    select: elIdCliente,
-    dropdown: elClienteDrop,
-    getValue: (e) => getEmpresaId(e),
-    getLabel: (e) => labelEmpresa(e),
-    renderItem: (e) => {
-      const nome = (e.Nome || e.RazaoSocial || "").trim() || "—";
-      const cnpj = (e.CNPJ || "").trim();
-      const sub = cnpj ? ("<span class='sub'>" + cnpj + "</span>") : "";
-      return nome + sub;
-    }
-  });
-
-  const ssVendedor = buildSearchableSelect({
-    wrap: ssVendedorWrap,
-    input: elVendedorSearch,
-    select: elIdVendedor,
-    dropdown: elVendedorDrop,
-    getValue: (v) => getVendedorId(v),
-    getLabel: (v) => labelVendedor(v),
-    renderItem: (v) => (v.NomeVendedor || "").trim() || "—"
-  });
-
-  // Campo visual de Contrato (Número / Prévia) removido desta tela.
-  // Mantém o select oculto apenas para compatibilidade com o backend e com os hidden fields.
-  const ssContrato = {
-    setItems: function(itens){
-      if(!elIdContrato) return;
-
-      const valorAtual = (elIdContrato.value || "").toString().trim();
-      elIdContrato.innerHTML = '<option value="">Selecione...</option>';
-
-      for(const c of (Array.isArray(itens) ? itens : [])){
-        const id = getContratoId(c);
-        if(!id) continue;
-
-        const opt = document.createElement("option");
-        opt.value = id;
-        opt.textContent = labelContrato(c);
-        elIdContrato.appendChild(opt);
-      }
-
-      if(valorAtual){
-        elIdContrato.value = valorAtual;
-      }
-    }
-  };
-
-
-  // =========================================================
-  // ✅ fetch fallback
-  // =========================================================
-  async function fetchComFallback(url, options){
-    const tentar = async (u) => {
-      console.log("[reserva] FETCH:", (options && options.method) ? options.method : "GET", u);
-      return await fetch(u, options);
-    };
-
-    let resp = await tentar(url);
-    if(resp.status !== 404) return resp;
-
-    if(url.includes("/paineis/")){
-      const u2 = url.replace("/paineis/", "/");
-      resp = await tentar(u2);
-      if(resp.status !== 404) return resp;
-    }
-
-    if(!url.includes("/paineis/")){
-      const u3 = "/paineis" + (url.startsWith("/") ? "" : "/") + url;
-      resp = await tentar(u3);
-      if(resp.status !== 404) return resp;
-    }
-
-    return resp;
-  }
-
-  // =========================================================
-  // ✅ calendário -> dayBadgeMap
-  // =========================================================
-  function montarDayBadgeMapDoPayload(data){
-    dayBadgeMap = new Map();
-
-    const cap = Number(data.capacidade_total ?? data.cap_total ?? data.k_fisico ?? data.CapacidadeTotal ?? NaN);
-    const capTotal = Number.isFinite(cap) ? cap : CAP_TOTAL_DEFAULT;
-
-    const cal = data.calendario || data.calendar || data.dias_calendario || data.day_status || null;
-    if(Array.isArray(cal) && cal.length){
-      for(const it of cal){
-        const dt = (it.data || it.Data || it.dia || it.Dia || it.date || it.Date || "").toString().trim();
-        if(!dt) continue;
-
-        const total = Number(it.total ?? it.Total ?? it.capacidade ?? it.Capacidade ?? capTotal);
-
-        let disp = it.disponiveis ?? it.Disponiveis ?? it.available ?? it.Available ?? null;
-        if(disp == null){
-          const ocu = it.ocupados ?? it.Ocupados ?? it.usados ?? it.Usados ?? it.used ?? it.Used ?? null;
-          if(ocu != null) disp = Number(total) - Number(ocu);
-        }
-
-        const disponiveis = Number(disp);
-        if(!Number.isFinite(disponiveis) || !Number.isFinite(total)) continue;
-
-        const status = normalizarStatusBadge(
-          (it.status || it.Status || "").toString().trim().toUpperCase()
-          || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL"))
-        );
-
-        const diaDisponivelRaw = it.dia_disponivel ?? it.DiaDisponivel ?? it.disponivel_cota ?? it.DisponivelCota ?? null;
-        const dispCotaRaw = it.disp_cota ?? it.disponiveis_cota ?? it.DisponiveisCota ?? it.available_cota ?? null;
-        const maxBlocoLivreRaw = it.max_bloco_livre ?? it.MaxBlocoLivre ?? null;
-        const spanNecessarioRaw = it.span_necessario ?? it.SpanNecessario ?? null;
-
-        dayBadgeMap.set(dt, {
-          disponiveis,
-          total,
-          status,
-          diaDisponivel: diaDisponivelRaw,
-          disponiveisCota: dispCotaRaw,
-          maxBlocoLivre: maxBlocoLivreRaw,
-          spanNecessario: spanNecessarioRaw
+      if(!itens.length){
+        const vazio = document.createElement("div");
+        vazio.className = "kb-combobox-item";
+        vazio.innerHTML = "<span class='top'>Nenhum registro encontrado</span>";
+        lista.appendChild(vazio);
+      }else{
+        itens.slice(0, 200).forEach(function(item){
+          const div = document.createElement("div");
+          div.className = "kb-combobox-item";
+          div.innerHTML = "<span class='top'>" + escapeHtml(cfg.getLabel(item)) + "</span>";
+          div.addEventListener("mousedown", function(ev){
+            ev.preventDefault();
+            cfg.onSelect(item, input);
+            fecharLista(lista);
+            atualizarBloqueioSeletorFaces();
+          });
+          lista.appendChild(div);
         });
       }
+
+      abrirLista(lista);
     }
+
+    function pesquisarERenderizar(){
+      if(typeof cfg.buscarServidor !== "function"){
+        render();
+        return;
+      }
+
+      clearTimeout(timerBuscaServidor);
+      const termoDigitado = texto(input.value).trim();
+      const minhaSequencia = ++sequenciaBuscaServidor;
+
+      timerBuscaServidor = setTimeout(async function(){
+        try{
+          await cfg.buscarServidor(termoDigitado);
+        }catch(e){
+          console.error("[reserva] Falha ao pesquisar empresa no servidor:", e);
+        }
+
+        if(minhaSequencia === sequenciaBuscaServidor){
+          render();
+        }
+      }, 250);
+    }
+
+    input.addEventListener("input", function(){
+      cfg.onInputLivre(input.value);
+      atualizarBloqueioSeletorFaces();
+      pesquisarERenderizar();
+    });
+    input.addEventListener("focus", function(){
+      if(typeof cfg.buscarServidor === "function" && texto(input.value).trim().length >= 2){
+        pesquisarERenderizar();
+      }else{
+        render();
+      }
+    });
+    botao.addEventListener("click", render);
   }
 
-  function montarDayBadgeMapDoCalendario(payloadCalendario){
-    dayBadgeMap = new Map();
+  function bindDadosReservaGlobal(){
+    montarComboGlobalReserva({
+      input: elInputClienteGlobal,
+      lista: elListaClienteGlobal,
+      botao: elBtnClienteGlobal,
+      getLista:function(){ return dadosReservaGlobal.clientes; },
+      getLabel:labelEmpresa,
+      buscarServidor:async function(termo){
+        const busca = texto(termo).trim();
 
-    if(!payloadCalendario || !payloadCalendario.ok) return;
+        if(busca.length < 2){
+          dadosReservaGlobal.clientes = dadosReservaGlobal.clientes_iniciais.slice();
+          return;
+        }
 
-    const cal = payloadCalendario.cal || {};
-    const chaves = Object.keys(cal);
+        const qs = new URLSearchParams();
+        qs.set("somente_empresas", "1");
+        qs.set("q_empresa", busca);
 
-    for(const dt of chaves){
-      const it = cal[dt];
-      if(!it) continue;
+        const resp = await fetch(URL_DADOS_MODAL + "?" + qs.toString(), {
+          credentials:"same-origin"
+        });
+        const data = await resp.json().catch(function(){ return null; });
 
-      const total = Number(it.cap ?? it.capacidade ?? it.CapacidadeSlots ?? it.Capacidade ?? NaN);
-      const disponiveis = Number(it.disp ?? it.disponiveis ?? it.SlotsDisponiveis ?? it.Disponiveis ?? NaN);
-      if(!Number.isFinite(total) || !Number.isFinite(disponiveis)) continue;
+        if(!resp.ok || !data || !data.ok){
+          throw new Error((data && data.erro) || "Pesquisa de empresas falhou.");
+        }
 
-      const status = normalizarStatusBadge(it.status || it.Status || "");
-      const dispCota = Number(it.disp_cota ?? it.disponiveis_cota ?? it.DisponiveisCota ?? it.SlotsDisponiveisCota ?? NaN);
-      const diaDisponivel = it.dia_disponivel ?? it.DiaDisponivel ?? null;
-      const maxBlocoLivre = Number(it.max_bloco_livre ?? it.MaxBlocoLivre ?? NaN);
-      const spanNecessario = Number(it.span_necessario ?? it.SpanNecessario ?? NaN);
+        dadosReservaGlobal.clientes = data.clientes || data.empresas || [];
+      },
+      onInputLivre:function(){ dadosReservaGlobal.id_cliente = ""; },
+      onSelect:function(item, input){
+        dadosReservaGlobal.id_cliente = getEmpresaId(item);
+        input.value = labelEmpresa(item);
+      }
+    });
 
-      dayBadgeMap.set(dt, {
-        disponiveis,
-        total,
-        status: status || (disponiveis <= 0 ? "CHEIO" : (disponiveis >= total ? "LIVRE" : "PARCIAL")),
-        diaDisponivel,
-        disponiveisCota: Number.isFinite(dispCota) ? dispCota : null,
-        maxBlocoLivre: Number.isFinite(maxBlocoLivre) ? maxBlocoLivre : null,
-        spanNecessario: Number.isFinite(spanNecessario) ? spanNecessario : null
+    montarComboGlobalReserva({
+      input: elInputVendedorGlobal,
+      lista: elListaVendedorGlobal,
+      botao: elBtnVendedorGlobal,
+      getLista:function(){ return dadosReservaGlobal.vendedores; },
+      getLabel:labelVendedor,
+      onInputLivre:function(){ dadosReservaGlobal.id_vendedor = ""; },
+      onSelect:function(item, input){
+        dadosReservaGlobal.id_vendedor = getVendedorId(item);
+        input.value = labelVendedor(item);
+      }
+    });
+
+    if(elInputMarcaExibidaGlobal){
+      elInputMarcaExibidaGlobal.addEventListener("input", function(){
+        dadosReservaGlobal.marca_exibida = texto(elInputMarcaExibidaGlobal.value);
+        atualizarBloqueioSeletorFaces();
       });
     }
 
-    for(const dt of chaves){
-      const it = cal[dt];
-      const t = Number(it && (it.cap ?? it.capacidade ?? it.CapacidadeSlots ?? it.Capacidade ?? NaN));
-      if(Number.isFinite(t) && t > 0){
-        CAP_TOTAL_DEFAULT = t;
-        break;
-      }
+    if(elInputObservacaoGlobal){
+      elInputObservacaoGlobal.addEventListener("input", function(){
+        dadosReservaGlobal.observacao = texto(elInputObservacaoGlobal.value);
+      });
     }
   }
 
-  // =========================================================
-  // ✅ contratos map
-  // =========================================================
-  function montarContratosMap(){
-    contratosMap = new Map();
-    for(const c of (contratosAtuais || [])){
-      const id = getContratoId(c);
-      if(id) contratosMap.set(id, c);
-    }
-  }
+  async function carregarDadosGlobaisReserva(){
+    setMsgDadosGlobal("Carregando empresas e vendedores...", true);
 
-  function onContratoChange(){
-    if(!elIdContrato || !elIdCliente || !elClienteSearch) return;
+    try{
+      const resp = await fetch(URL_DADOS_MODAL, {credentials:"same-origin"});
+      const data = await resp.json().catch(function(){ return null; });
 
-    const id = (elIdContrato.value || "").trim();
-    if(!id) return;
-
-    const c = contratosMap.get(id);
-    if(!c) return;
-
-    const idEmpresa = String(c.IDEmpresa ?? c.IDEmpresaCliente ?? c.IDCliente ?? "").trim();
-    if(idEmpresa){
-      elIdCliente.value = idEmpresa;
-
-      const achada = (empresasAtuais || []).find(x => getEmpresaId(x) === idEmpresa);
-      if(achada){
-        elClienteSearch.value = labelEmpresa(achada);
-      }
-    }
-  }
-
-  // =========================================================
-  // ✅ carregar dados modal + calendário
-  // =========================================================
-  async function carregarDadosModal(){
-    const codFace = (elCodFace.value || "").trim();
-    const cota = (elCota.value || "").trim();
-
-    if(!COD_PONTO){
-      console.warn("[reserva] COD_PONTO vazio.");
-      return;
-    }
-
-    const qs = new URLSearchParams();
-    qs.set("cod_ponto", COD_PONTO || "");
-    qs.set("cod_face", codFace);
-    qs.set("cota", cota);
-    qs.set("mes_ref", MES_REF || "");
-
-    const url = URL_DADOS_MODAL + "?" + qs.toString();
-
-    const resp = await fetchComFallback(url, { method: "GET", credentials: "same-origin" });
-    if(!resp.ok){
-      const txt = await resp.text().catch(()=> "");
-      console.error("[reserva] dados-modal falhou:", resp.status, txt);
-      setMsg("Erro ao carregar dados (clientes/vendedores/contratos).", false);
-      return;
-    }
-
-    const data = await resp.json().catch(()=> null);
-    if(!data){
-      setMsg("Erro: resposta inválida do backend.", false);
-      return;
-    }
-
-    empresasAtuais   = data.empresas   || data.Empresas   || [];
-    vendedoresAtuais = data.vendedores || data.Vendedores || [];
-    contratosAtuais  = data.contratos  || data.Contratos  || [];
-
-    ocupacoesAtuais = data.ocupacoes || data.Ocupacoes || [];
-    montarRangesDeOcupacao();
-
-    // opcional: se backend mandar calendário aqui
-    montarDayBadgeMapDoPayload(data);
-
-    // selects reais
-    preencherSelectTolerante(elIdCliente,  empresasAtuais,   getEmpresaId,  labelEmpresa,  (fIdCliente.value || "").trim());
-    preencherSelectTolerante(elIdVendedor, vendedoresAtuais, getVendedorId, labelVendedor, (fIdVendedor.value || "").trim());
-
-    // contrato (label grande)
-    if(elIdContrato){
-      elIdContrato.innerHTML = '<option value="">Selecione...</option>';
-      for(const c of (contratosAtuais || [])){
-        const id = getContratoId(c);
-        if(!id) continue;
-        const opt = document.createElement("option");
-        opt.value = id;
-        opt.textContent = labelContrato(c);
-        elIdContrato.appendChild(opt);
-      }
-      const v = (fIdFato.value || "").trim();
-      if(v) elIdContrato.value = v;
-    }
-
-    montarContratosMap();
-
-    // searchable UI
-    ssCliente.setItems(empresasAtuais);
-    ssVendedor.setItems(vendedoresAtuais);
-    ssContrato.setItems(contratosAtuais);
-    renderizarEmpresasRelacionadas();
-
-    atualizarRestricoesCalendarios();
-    if(fpInicio) fpInicio.redraw();
-    if(fpFim) fpFim.redraw();
-  }
-
-  async function carregarCalendario(){
-    const codFace = (elCodFace.value || "").trim();
-    const cota = (elCota.value || "").trim();
-
-    if(!COD_PONTO || !codFace) return;
-
-    const qs = new URLSearchParams();
-    qs.set("cod_ponto", COD_PONTO);
-    qs.set("cod_face", codFace);
-    qs.set("cota", cota);
-    if(MES_REF) qs.set("mes_ref", MES_REF);
-
-    const url = URL_CALENDARIO + "?" + qs.toString();
-
-    const resp = await fetchComFallback(url, { method:"GET", credentials:"same-origin" });
-    if(!resp.ok){
-      const txt = await resp.text().catch(()=> "");
-      console.warn("[reserva] calendario falhou:", resp.status, txt);
-      dayBadgeMap = new Map();
-      if(fpInicio) fpInicio.redraw();
-      if(fpFim) fpFim.redraw();
-      return;
-    }
-
-    const payload = await resp.json().catch(()=> null);
-    if(!payload){
-      dayBadgeMap = new Map();
-      if(fpInicio) fpInicio.redraw();
-      if(fpFim) fpFim.redraw();
-      return;
-    }
-
-    montarDayBadgeMapDoCalendario(payload);
-
-    if(fpInicio) fpInicio.redraw();
-    if(fpFim) fpFim.redraw();
-  }
-
-  // =========================================================
-  // ✅ sync hidden fields
-  // =========================================================
-  function syncHiddenFields(){
-    atualizarCampoCotaPorFace();
-
-    const codFace = (elCodFace.value || "").trim();
-    const cota = faceSelecionadaEhDigital ? (elCota.value || "").trim() : "";
-
-    fCodPonto.value = (COD_PONTO || "").trim();
-    fCodFace.value  = codFace;
-    fCota.value     = cota;
-
-    fDtIni.value = (elDataInicio.value || "").trim();
-    fDtFim.value = (elDataFim.value || "").trim();
-
-    travarPrazoReserva();
-    fDias.value = String(PRAZO_RESERVA_FIXO_DIAS);
-
-    const idCli = (elIdCliente.value || "").trim();
-    const idVen = (elIdVendedor.value || "").trim();
-    const idCtr = (elIdContrato.value || "").trim();
-
-    fIdCliente.value = idCli;
-    fIdVendedor.value = idVen;
-    fIdFato.value = idCtr;
-
-    if(idCtr && contratosMap.has(idCtr)){
-      const c = contratosMap.get(idCtr);
-      fNumContrato.value = String(c.NumeroContrato || "").trim();
-      fNumPrevia.value   = String(c.NumeroPrevia || "").trim();
-    }else{
-      fNumContrato.value = "";
-      fNumPrevia.value   = "";
-    }
-
-    fObs.value = (elObservacao.value || "").trim();
-    fMarcaExibida.value = (elMarcaExibida && elMarcaExibida.value ? elMarcaExibida.value : "").trim();
-    sincronizarEmpresasRelacionadasHidden();
-  }
-
-  // =========================================================
-  // ✅ submit
-  // =========================================================
-  async function enviarReserva(ev){
-    ev.preventDefault();
-
-    syncHiddenFields();
-
-    const codFace = (fCodFace.value || "").trim();
-    const cota = (fCota.value || "").trim();
-    const di = (fDtIni.value || "").trim();
-    const df = (fDtFim.value || "").trim();
-
-    if(!COD_PONTO || !codFace || !di || !df){
-      setMsg("Preencha Face e Datas.", false);
-      return;
-    }
-
-    if(faceSelecionadaEhDigital && !cota){
-      setMsg("Para painel digital, selecione a cota 540 ou 1080.", false);
-      return;
-    }
-
-    if(dataStrEhPassada(di) || dataStrEhPassada(df)){
-      setMsg("Não é permitido salvar reserva com data anterior a " + dataMinimaReservaYmd() + ".", false);
-      elBtnSalvar.disabled = false;
-      return;
-    }
-
-    if(ranges_tem_conflito(di, df)){
-      setMsg("Período conflita (dia CHEIO/INDISPONÍVEL).", false);
-      return;
-    }
-
-    const erroEmpresasRelacionadas = validarEmpresasRelacionadas();
-    if(erroEmpresasRelacionadas){
-      setMsg(erroEmpresasRelacionadas, false);
-      return;
-    }
-
-    sincronizarEmpresasRelacionadasHidden();
-
-    elBtnSalvar.disabled = true;
-    setMsg("Salvando...", true);
-
-    const formData = new FormData(elForm);
-
-    formData.set("cod_ponto", fCodPonto.value);
-    formData.set("cod_face", fCodFace.value);
-    formData.set("cota", fCota.value);
-    formData.set("data_inicio", fDtIni.value);
-    formData.set("data_fim", fDtFim.value);
-    formData.set("dias", String(PRAZO_RESERVA_FIXO_DIAS));
-
-    formData.set("id_cliente", fIdCliente.value);
-    formData.set("id_vendedor", fIdVendedor.value);
-    formData.set("id_fato_controle_contratos", fIdFato.value);
-
-    formData.set("numero_contrato", fNumContrato.value);
-    formData.set("numero_previa", fNumPrevia.value);
-    formData.set("observacao", fObs.value);
-    formData.set("marca_exibida", fMarcaExibida.value);
-    formData.set("empresas_relacionadas", fEmpresasRelacionadas ? (fEmpresasRelacionadas.value || "[]") : "[]");
-
-    if(elCsrf && elCsrf.value){
-      formData.set("csrf_token", elCsrf.value);
-    }
-
-    const resp = await fetchComFallback(URL_CRIAR, {
-      method: "POST",
-      credentials: "same-origin",
-      body: formData
-    });
-
-    let payload = null;
-    try{ payload = await resp.json(); }catch(e){}
-
-    if(!resp.ok || !payload){
-      const txt = payload && (payload.msg || payload.erro) ? (payload.msg || payload.erro) : ("HTTP " + resp.status);
-      setMsg("Erro ao salvar: " + txt, false);
-      elBtnSalvar.disabled = false;
-      return;
-    }
-
-    if(payload.ok){
-      setMsg(payload.msg || "Reserva criada com sucesso!", true);
-
-      await carregarDadosModal();
-      await carregarCalendario();
-
-      if(payload.redirect){
-        window.location.href = payload.redirect;
+      if(!resp.ok || !data || !data.ok){
+        setMsgDadosGlobal((data && data.erro) || "Não consegui carregar empresas e vendedores.", false);
         return;
       }
-    }else{
-      setMsg(payload.msg || payload.erro || "Falha ao criar reserva.", false);
-    }
 
-    elBtnSalvar.disabled = false;
+      dadosReservaGlobal.clientes = data.clientes || data.empresas || [];
+      dadosReservaGlobal.clientes_iniciais = dadosReservaGlobal.clientes.slice();
+      dadosReservaGlobal.vendedores = data.vendedores || [];
+      dadosReservaGlobal.dados_carregados = true;
+      preencherInputGlobalPorValor();
+      atualizarBloqueioSeletorFaces();
+    }catch(e){
+      setMsgDadosGlobal("Erro de comunicação ao carregar empresas e vendedores.", false);
+    }
   }
 
-  // =========================================================
-  // ✅ eventos
-  // =========================================================
-  elPrazoDias.addEventListener("change", function(){
-    travarPrazoReserva();
+  function aplicarContratoNoEstado(estado, contrato){
+    if(!contrato) return;
 
-    const diStr = (elDataInicio.value || "").trim();
-    if(!diStr) return;
+    const idEmpresa = getEmpresaId(contrato);
+    const idVendedor = getVendedorId(contrato);
 
-    const prazo = PRAZO_RESERVA_FIXO_DIAS;
-    const di = yyyy_mm_dd_para_date(diStr);
-    if(!di) return;
+    if(idEmpresa){
+      estado.id_cliente = idEmpresa;
+    }
 
-    const baseTs = normalizarParaMeiaNoiteTs(di);
-    const diasMs = 24 * 60 * 60 * 1000;
-    const dfTs = baseTs + ((prazo - 1) * diasMs);
-    const df = new Date(dfTs);
+    if(idVendedor){
+      estado.id_vendedor = idVendedor;
+    }
 
-    const dfStr = date_para_yyyy_mm_dd(df);
+    if(!texto(estado.marca_exibida)){
+      estado.marca_exibida = texto(contrato.MarcaExibida || contrato.RazaoSocial || "");
+    }
 
-    if(ranges_tem_conflito(diStr, dfStr)){
-      setMsg("Prazo fixo de 2 dias cai em dia CHEIO/INDISPONÍVEL. Ajuste Data início.", false);
+    estado.numero_contrato = texto(contrato.NumeroContrato);
+    estado.numero_previa = texto(contrato.NumeroPrevia);
+  }
+
+  function montarComboCard(estado, card, cfg){
+    const input = card.querySelector(cfg.inputSelector);
+    const lista = card.querySelector(cfg.listaSelector);
+    const botao = card.querySelector(cfg.botaoSelector);
+    if(!input || !lista || !botao) return;
+
+    function render(){
+      const termo = normalizar(input.value);
+      const itens = (cfg.getLista(estado) || []).filter(function(item){ return !termo || normalizar(cfg.getLabel(item)).includes(termo); });
+      lista.innerHTML = "";
+
+      if(!itens.length){
+        const vazio = document.createElement("div");
+        vazio.className = "kb-combobox-item";
+        vazio.innerHTML = "<span class='top'>Nenhum registro encontrado</span>";
+        lista.appendChild(vazio);
+      }else{
+        itens.slice(0, 200).forEach(function(item){
+          const div = document.createElement("div");
+          div.className = "kb-combobox-item";
+          div.innerHTML = "<span class='top'>" + escapeHtml(cfg.getLabel(item)) + "</span>";
+          div.addEventListener("mousedown", function(ev){
+            ev.preventDefault();
+            cfg.onSelect(estado, item, input, card);
+            fecharLista(lista);
+            atualizarBloqueioSeletorFaces();
+          });
+          lista.appendChild(div);
+        });
+      }
+
+      abrirLista(lista);
+    }
+
+    input.addEventListener("input", function(){
+      cfg.onInputLivre(estado, input.value);
+      atualizarBloqueioSeletorFaces();
+      render();
+    });
+    input.addEventListener("focus", render);
+    botao.addEventListener("click", render);
+  }
+
+  function corrigirDatasEstado(estado){
+    if(!estado) return;
+    estado.data_inicio = texto(estado.data_inicio);
+    estado.data_fim = texto(estado.data_fim);
+  }
+
+  function htmlCardReservaVazio(){
+    return "<div class='reserva-face-vazio'>Nenhuma face selecionada ainda. Use o sinal <strong>+</strong> na lista de Face/Ponto para adicionar uma ou mais faces. Quando uma face estiver selecionada, use o sinal <strong>−</strong> para removê-la.</div>";
+  }
+
+  function htmlCardReserva(estado){
+    const face = estado.face;
+    const tagTipo = ehDigital(face) ? "<span class='tag-digital'>DIGITAL</span>" : "<span class='tag-analogico'>ANALÓGICO</span>";
+    const cotaHtml = ehDigital(face)
+      ? "<div><label class='campo-label'>Cota</label><select class='form-control' data-role='cota-face'><option value='540'>540</option><option value='1080'>1080</option></select></div>"
+      : "<div><label class='campo-label'>Cota</label><input class='form-control' value='Não se aplica' readonly tabindex='-1'><div class='hint'>Painel não digital: cota vazia.</div></div>";
+
+    return "<div class='reserva-face-linha-top'>" +
+      "<div><div class='reserva-face-linha-titulo'>Face " + escapeHtml(codFace(face) || "—") + tagTipo + "</div>" +
+      "<div class='reserva-face-linha-resumo'>" + escapeHtml(resumoFace(face) || "—") + "</div></div>" +
+      "<button type='button' class='reserva-face-remover-compacto' data-role='remover-face'>Remover</button>" +
+      "</div>" +
+
+      "<div class='reserva-face-controles'>" +
+        cotaHtml +
+        "<div><label class='campo-label'>Data Inicio Campanha</label><input data-role='data-inicio' type='text' class='form-control' required placeholder='AAAA-MM-DD' value='" + escapeHtml(estado.data_inicio) + "'></div>" +
+        "<div><label class='campo-label'>Data Fim da Campanha</label><input data-role='data-fim' type='text' class='form-control' required placeholder='AAAA-MM-DD' value='" + escapeHtml(estado.data_fim) + "'></div>" +
+        "<div><label class='campo-label'>Prazo</label><input type='text' class='form-control' value='48 horas úteis' readonly aria-readonly='true' tabindex='-1'><div class='hint'>2 dias úteis.</div></div>" +
+      "</div>" +
+
+      "<div class='card-msg " + (estado.card_msg ? (estado.card_msg_ok ? "ok" : "err") : "") + "' data-role='card-msg'>" + escapeHtml(estado.card_msg) + "</div>";
+  }
+
+  function bindCard(estado, card){
+    const btnRemover = card.querySelector("[data-role='remover-face']");
+    if(btnRemover){
+      btnRemover.addEventListener("click", function(){
+        estadosCards.delete(estado.chave);
+        renderCardsReservas();
+        renderListaFaces(faces);
+        atualizarSelectCodFace();
+        atualizarBloqueioSeletorFaces();
+      });
+    }
+
+    const selectCota = card.querySelector("[data-role='cota-face']");
+    if(selectCota){
+      selectCota.value = cotaFace(estado.face) || "540";
+      selectCota.addEventListener("change", function(){
+        estado.face.__cota = texto(selectCota.value);
+        atualizarBloqueioSeletorFaces();
+        carregarDadosCard(estado.chave);
+        carregarCalendario(estado);
+      });
+    }
+
+    const dataInicio = card.querySelector("[data-role='data-inicio']");
+    const dataFim = card.querySelector("[data-role='data-fim']");
+
+    function aplicarDatas(acionarCarga){
+      const assinaturaAntes = estado.data_inicio + "|" + estado.data_fim;
+      if(dataInicio) estado.data_inicio = texto(dataInicio.value);
+      if(dataFim) estado.data_fim = texto(dataFim.value);
+      corrigirDatasEstado(estado);
+      if(dataInicio) dataInicio.value = estado.data_inicio;
+      if(dataFim) dataFim.value = estado.data_fim;
+      garantirFimNaoAntesDoInicioEstado(estado);
+      validarDatasEstadoNoClient(estado);
+      atualizarBloqueioSeletorFaces();
+      const assinaturaDepois = estado.data_inicio + "|" + estado.data_fim;
+      if(acionarCarga && assinaturaDepois !== assinaturaAntes && texto(estado.data_inicio) && texto(estado.data_fim)) carregarDadosCard(estado.chave);
+    }
+
+    function aplicarDatasAoSairDoCampo(input){
+      window.setTimeout(function(){
+        const fp = input && input._flatpickr;
+        if(fp && fp.isOpen) return;
+        aplicarDatas(true);
+      }, 0);
+    }
+
+    if(dataInicio){ dataInicio.addEventListener("blur", function(){ aplicarDatasAoSairDoCampo(dataInicio); }); }
+    if(dataFim){ dataFim.addEventListener("blur", function(){ aplicarDatasAoSairDoCampo(dataFim); }); }
+
+    inicializarFlatpickrCard(estado, dataInicio, dataFim);
+  }
+
+  function renderCardsReservas(){
+    atualizarSelectCodFace();
+    elCardsReservasFaces.innerHTML = "";
+
+    const estados = Array.from(estadosCards.values());
+    if(!estados.length){
+      elCardsReservasFaces.innerHTML = htmlCardReservaVazio();
+      atualizarBloqueioSeletorFaces();
       return;
     }
 
-    fpFim.setDate(dfStr, true);
-    garantirFimNaoAntesDoInicio();
-    validarDatasNoClient();
-  });
-
-  elCodFace.addEventListener("change", async function(){
-    fCodFace.value = (elCodFace.value || "").trim();
-    atualizarCampoCotaPorFace();
-    await carregarDadosModal();
-    await carregarCalendario();
-    validarDatasNoClient();
-  });
-
-  elCota.addEventListener("change", async function(){
-    fCota.value = (elCota.value || "").trim();
-    await carregarDadosModal();
-    await carregarCalendario();
-    validarDatasNoClient();
-  });
-
-  elIdContrato.addEventListener("change", function(){
-    onContratoChange();
-    syncHiddenFields();
-  });
-
-  elIdCliente.addEventListener("change", syncHiddenFields);
-  elIdVendedor.addEventListener("change", syncHiddenFields);
-  elObservacao.addEventListener("input", syncHiddenFields);
-  if(elMarcaExibida){
-    elMarcaExibida.addEventListener("input", syncHiddenFields);
+    estados.forEach(function(estado){
+      corrigirDatasEstado(estado);
+      const linha = document.createElement("div");
+      linha.className = "reserva-face-linha";
+      linha.setAttribute("data-chave-face", estado.chave);
+      linha.innerHTML = htmlCardReserva(estado);
+      elCardsReservasFaces.appendChild(linha);
+      bindCard(estado, linha);
+    });
+    atualizarBloqueioSeletorFaces();
   }
 
-  document.addEventListener("mousedown", function(ev){
-    if(elEmpresasRelacionadasLista && !elEmpresasRelacionadasLista.contains(ev.target)){
-      fecharDropdownsEmpresasRelacionadas();
+  async function carregarDadosCard(chave){
+    const estado = estadosCards.get(chave);
+    if(!estado) return;
+
+    corrigirDatasEstado(estado);
+    if(!texto(estado.data_inicio) || !texto(estado.data_fim)){
+      setCardMsg(estado, "Informe Data Inicio Campanha e Data Fim da Campanha para carregar a disponibilidade do período.", true);
+      return;
     }
-  });
+    setCardMsg(estado, "Carregando disponibilidade desta face...", true);
 
-  elForm.addEventListener("submit", enviarReserva);
+    const face = estado.face;
+    const qs = new URLSearchParams();
+    qs.set("cod_face", codFace(face));
+    qs.set("cod_ponto", codPonto(face));
+    if(cotaFace(face)) qs.set("cota", cotaFace(face));
+    qs.set("dt_ini", estado.data_inicio);
+    qs.set("dt_fim", estado.data_fim);
 
-  // =========================================================
-  // ✅ boot
-  // =========================================================
-  async function boot(){
-    travarPrazoReserva();
+    try{
+      const resp = await fetch(URL_DADOS_MODAL + "?" + qs.toString(), {credentials:"same-origin"});
+      const data = await resp.json().catch(function(){ return null; });
 
-    if(COD_FACE_INICIAL && elCodFace){
-      elCodFace.value = COD_FACE_INICIAL;
+      if(!resp.ok || !data || !data.ok){
+        setCardMsg(estado, (data && data.erro) || "Não consegui carregar dados desta face.", false);
+        return;
+      }
+
+      estado.contratos = data.contratos || [];
+      montarRangesDeOcupacaoEstado(estado, data.ocupacoes || data.Ocupacoes || []);
+      if(data.cal || data.calendario || data.calendar || data.dias_calendario || data.day_status){
+        aplicarCalendarioNoEstado(estado, data);
+      }else{
+        atualizarRestricoesCalendariosEstado(estado);
+      }
+      estado.contratosMap = new Map();
+      estado.contratos.forEach(function(item){
+        const id = getContratoId(item);
+        if(id) estado.contratosMap.set(id, item);
+      });
+
+      if(estado.id_contrato && !estado.contratosMap.has(estado.id_contrato)) estado.id_contrato = "";
+
+      estado.card_msg = "Disponibilidade carregada para esta face.";
+      estado.card_msg_ok = true;
+      renderCardsReservas();
+    }catch(e){
+      setCardMsg(estado, "Erro de comunicação ao carregar os dados desta face.", false);
     }
-
-    ssFace.setItems(facesAtuais);
-    atualizarCampoCotaPorFace();
-    renderizarEmpresasRelacionadas();
-
-    initFlatpickr();
-
-    await carregarDadosModal();
-    await carregarCalendario();
-
-    corrigirDatasPassadasNoClient();
-    syncHiddenFields();
-    validarDatasNoClient();
   }
 
-  boot();
+  async function carregarCalendario(estado){
+    if(!estado || !estado.face) return;
+    const face = estado.face;
+    const qs = new URLSearchParams();
+    qs.set("cod_face", codFace(face));
+    qs.set("cod_ponto", codPonto(face));
+    qs.set("meses", "24");
+    if(MES_REF) qs.set("mes_ref", MES_REF);
+    if(cotaFace(face)) qs.set("cota", cotaFace(face));
 
+    try{
+      const resp = await fetch(URL_CALENDARIO + "?" + qs.toString(), {credentials:"same-origin"});
+      const payload = await resp.json().catch(function(){ return null; });
+      if(!resp.ok || !payload || !payload.ok){
+        estado.dayBadgeMap = new Map();
+        atualizarRestricoesCalendariosEstado(estado);
+        return;
+      }
+      aplicarCalendarioNoEstado(estado, payload);
+      validarDatasEstadoNoClient(estado);
+    }catch(e){
+      estado.dayBadgeMap = new Map();
+      atualizarRestricoesCalendariosEstado(estado);
+    }
+  }
+
+  function montarPayload(estado){
+    const contrato = estado.contratosMap.get(texto(estado.id_contrato));
+    const idFatoControle = contrato ? numeroInteiroOuVazio(contrato.IDFatoControleContratosEuromidia) : "";
+
+    return {
+      csrf_token: getCsrfToken(),
+      origem_tela: "reserva-ocupacao",
+      cod_ponto: codPonto(estado.face),
+      cod_face: codFace(estado.face),
+      cota: ehDigital(estado.face) ? cotaFace(estado.face) : "",
+      data_inicio: estado.data_inicio,
+      data_fim: estado.data_fim,
+      dias: "2",
+      id_cliente: texto(dadosReservaGlobal.id_cliente),
+      id_vendedor: texto(dadosReservaGlobal.id_vendedor),
+      id_fato_controle_contratos: idFatoControle,
+      numero_contrato: contrato ? texto(contrato.NumeroContrato) : texto(estado.numero_contrato),
+      numero_previa: contrato ? texto(contrato.NumeroPrevia) : texto(estado.numero_previa),
+      marca_exibida: texto(dadosReservaGlobal.marca_exibida),
+      observacao: texto(dadosReservaGlobal.observacao)
+    };
+  }
+
+  function validarEstado(estado){
+    corrigirDatasEstado(estado);
+
+    if(!codFace(estado.face) || !codPonto(estado.face)) return "Face sem CodFace ou CodPonto válido.";
+    if(ehDigital(estado.face) && !["540", "1080"].includes(cotaFace(estado.face))) return "Para painel digital, selecione cota 540 ou 1080.";
+    if(!texto(estado.data_inicio) || !texto(estado.data_fim)) return "Informe data início e data fim.";
+    if(dataPassada(estado.data_inicio) || dataPassada(estado.data_fim)) return "Não é permitido reservar datas anteriores a " + hojeYmd() + ".";
+    if(compararDatasYmd(estado.data_fim, estado.data_inicio) < 0) return "Data fim não pode ser menor que data início.";
+    if(rangesTemConflitoEstado(estado, estado.data_inicio, estado.data_fim)) return "Período conflita com dia CHEIO/INDISPONÍVEL ou não tem slots suficientes para esta cota.";
+
+    return "";
+  }
+
+  async function salvarReserva(ev){
+    ev.preventDefault();
+
+    if(salvamentoEmAndamento) return;
+
+    const erroGlobal = erroDadosReservaGlobal();
+    if(erroGlobal){
+      setMsgDadosGlobal("Preencha os dados fixos da reserva antes de salvar: " + erroGlobal + ".", false);
+      setMsg("Corrija os dados fixos da reserva.", false);
+      atualizarBloqueioSeletorFaces();
+      return;
+    }
+
+    const estados = Array.from(estadosCards.values());
+    if(!estados.length){
+      setMsg("Selecione pelo menos uma face válida.", false);
+      return;
+    }
+
+    for(const estado of estados){
+      const erro = validarEstado(estado);
+      if(erro){
+        setCardMsg(estado, erro, false);
+        setMsg("Corrija os dados da face " + codFace(estado.face) + ".", false);
+        renderCardsReservas();
+        return;
+      }
+    }
+
+    salvamentoEmAndamento = true;
+    let salvamentoConcluido = false;
+    elBtnSalvar.disabled = true;
+    elBtnSalvar.textContent = "Salvando...";
+    setMsg("Salvando reservas...", true);
+    setProgresso("0 de " + estados.length + " reservas enviadas.");
+
+    const salvas = [];
+    try{
+      for(let i = 0; i < estados.length; i++){
+        const estado = estados[i];
+        const payload = montarPayload(estado);
+
+        setProgresso("Salvando " + (i + 1) + " de " + estados.length + ": " + codFace(estado.face) + "...");
+        setCardMsg(estado, "Enviando reserva desta face...", true);
+
+        const resp = await fetch(URL_CRIAR, {
+          method:"POST",
+          headers:{
+            "Content-Type":"application/json",
+            "X-CSRFToken": getCsrfToken(),
+            "X-Origem-Tela": "reserva-ocupacao"
+          },
+          credentials:"same-origin",
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json().catch(function(){ return null; });
+        if(!resp.ok || !data || !data.ok){
+          const erro = (data && data.erro) || "Erro ao salvar reserva.";
+          setCardMsg(estado, erro, false);
+          setMsg("Falha na face " + codFace(estado.face) + ": " + erro, false);
+          setProgresso(salvas.length + " reserva(s) foram salva(s) antes da falha.");
+          return;
+        }
+        salvas.push(codFace(estado.face));
+        setCardMsg(estado, "Reserva salva com sucesso.", true);
+      }
+
+      salvamentoConcluido = true;
+      setMsg(salvas.length + (salvas.length === 1 ? " reserva salva com sucesso." : " reservas salvas com sucesso."), true);
+      setProgresso("Faces salvas: " + salvas.join(", "));
+    }catch(e){
+      setMsg("Erro de comunicação ao salvar reservas.", false);
+      setProgresso(salvas.length + " reserva(s) foram salva(s) antes do erro de comunicação.");
+    }finally{
+      salvamentoEmAndamento = false;
+      elBtnSalvar.disabled = salvamentoConcluido;
+      elBtnSalvar.textContent = salvamentoConcluido ? "Reservas salvas" : "Salvar Reservas";
+    }
+  }
+
+  elInputFace.addEventListener("focus", function(){ if(seletorFacesLiberadoParaAdicionar()) filtrarFacesLocal(); });
+  elInputFace.addEventListener("input", function(){
+    if(!seletorFacesLiberadoParaAdicionar()){
+      atualizarBloqueioSeletorFaces();
+      return;
+    }
+    filtrarFacesLocal();
+    clearTimeout(timerBuscaFace);
+    timerBuscaFace = setTimeout(buscarFacesRemoto, 250);
+  });
+  elBtnToggleFace.addEventListener("click", function(){ if(seletorFacesLiberadoParaAdicionar()) filtrarFacesLocal(); });
+  elForm.addEventListener("submit", salvarReserva);
+
+  document.addEventListener("click", function(ev){
+    const comboFace = document.getElementById("comboFace");
+    if(comboFace && !comboFace.contains(ev.target)) fecharLista(elListaFace);
+
+    document.querySelectorAll("details.dd").forEach(function(dd){
+      if(!dd.contains(ev.target)) dd.open = false;
+    });
+
+    document.querySelectorAll(".kb-combobox").forEach(function(combo){
+      if(!combo.contains(ev.target)){
+        const lista = combo.querySelector(".kb-combobox-lista");
+        fecharLista(lista);
+      }
+    });
+  });
+
+  function adicionarFaceInicial(face){
+    const chave = chaveFace(face);
+    if(!chave || estadosCards.has(chave)) return;
+    const estado = criarEstadoFace(face);
+    estadosCards.set(chave, estado);
+  }
+
+  function selecionarFacesIniciais(){
+    estadosCards.clear();
+
+    const codigos = [];
+    if(Array.isArray(COD_FACES_INICIAIS)){
+      COD_FACES_INICIAIS.forEach(function(cod){ if(texto(cod)) codigos.push(texto(cod)); });
+    }
+    if(texto(COD_FACE_INICIAL)) codigos.push(texto(COD_FACE_INICIAL));
+    if(elCodFace && texto(elCodFace.value)) codigos.push(texto(elCodFace.value));
+
+    const vistos = new Set();
+    codigos.forEach(function(cod){
+      const codNorm = texto(cod).toUpperCase();
+      if(!codNorm || vistos.has(codNorm)) return;
+      vistos.add(codNorm);
+      const face = faces.find(function(item){ return codFace(item).toUpperCase() === codNorm; });
+      if(face) adicionarFaceInicial(face);
+    });
+
+    renderCardsReservas();
+    renderListaFaces(faces);
+    atualizarSelectCodFace();
+
+    elInputFace.value = "";
+
+    atualizarBloqueioSeletorFaces();
+
+    Array.from(estadosCards.keys()).forEach(function(chave){
+      carregarDadosCard(chave);
+      carregarCalendario(estadosCards.get(chave));
+    });
+  }
+
+  /*
+    A tela agora respeita a face recebida na URL.
+    Exemplo: /paineis/ocupacao/reserva/nova?codponto=30&codface=30A
+    já abre o card completo da face 30A.
+  */
+  bindFiltrosFaces();
+  bindDadosReservaGlobal();
+  selecionarFacesIniciais();
+  carregarDadosGlobaisReserva();
 })();
 </script>
-
-
 {% endblock %}
