@@ -3141,6 +3141,23 @@
   const btnImprimirOrcamentoCard = document.getElementById("btnImprimirOrcamentoCard");
   const orcamentoCardConteudo = document.getElementById("orcamentoCardConteudo");
 
+  function garantirModalOrcamentoAcimaDoLayout(){
+    if (
+      modalOrcamentoCard &&
+      document.body &&
+      modalOrcamentoCard.parentElement !== document.body
+    ) {
+      /*
+       * O template fica dentro do contêiner principal da aplicação. Alguns
+       * cabeçalhos fixos criam um contexto de empilhamento próprio e podem
+       * cobrir o topo do modal mesmo com z-index alto. Como o elemento conserva
+       * referências e eventos ao ser movido, anexá-lo ao body elimina esse
+       * conflito sem alterar a montagem ou a impressão do orçamento.
+       */
+      document.body.appendChild(modalOrcamentoCard);
+    }
+  }
+
   const modalRemoverCard = document.getElementById("modalRemoverCard");
   const btnFecharRemoverCard = document.getElementById("btnFecharRemoverCard");
   const btnConfirmarRemoverCard = document.getElementById("btnConfirmarRemoverCard");
@@ -16390,9 +16407,15 @@ async function moverCard(idCard, idFasePara, posicao) {
   function fecharModalOrcamentoCard(){
     if (modalOrcamentoCard) {
       modalOrcamentoCard.style.display = "none";
+      modalOrcamentoCard.scrollTop = 0;
     }
     cardOrcamentoAbertoId = null;
     if (orcamentoCardConteudo) {
+      const corpoModalOrcamento = orcamentoCardConteudo.closest(".kb-modal-body");
+      if (corpoModalOrcamento) {
+        corpoModalOrcamento.scrollTop = 0;
+        corpoModalOrcamento.scrollLeft = 0;
+      }
       orcamentoCardConteudo.innerHTML = "";
     }
   }
@@ -17479,7 +17502,13 @@ async function moverCard(idCard, idFasePara, posicao) {
     const itens = Array.isArray(dados.itens) ? dados.itens : [];
     const tituloCard = safeStr(dados.titulo_card || `Card ${idNum(dados.id_card)}`).trim() || `Card ${idNum(dados.id_card)}`;
     const marcaExibida = safeStr(dados.marca_exibida || tituloCard).trim() || "Marca não informada";
-    const empresaNome = safeStr(empresa.nome_fantasia || empresa.razao_social || "").trim() || "Empresa não vinculada";
+    const empresaNome = safeStr(
+      empresa.razao_social ||
+      empresa.RazaoSocial ||
+      empresa.nome_fantasia ||
+      empresa.NomeFantasia ||
+      ""
+    ).trim() || "Empresa não vinculada";
     const nomeVendedor = safeStr(vendedor.nome || "").trim() || "Vendedor não informado";
     const emailVendedor = safeStr(vendedor.email || "").trim() || "E-mail não informado";
     const telefoneVendedor = safeStr(vendedor.telefone || "").trim() || "Telefone não informado";
@@ -17503,8 +17532,22 @@ async function moverCard(idCard, idFasePara, posicao) {
       el("span", {class:"kb-orcamento-capa-vendedor-valor"}, [telefoneVendedor])
     ]);
 
+    const quantidadeCaracteresEmpresa = Array.from(empresaNome).length;
+    const tamanhoEmpresaCapa = quantidadeCaracteresEmpresa > 108
+      ? "extremo"
+      : (
+        quantidadeCaracteresEmpresa > 78
+          ? "muito-longo"
+          : (quantidadeCaracteresEmpresa > 48 ? "longo" : "normal")
+      );
+
     const conteudoCapa = el("div", {class:"kb-orcamento-capa-conteudo"}, [
-      el("div", {class:"kb-orcamento-capa-empresa", title:empresaNome}, [empresaNome]),
+      el("div", {
+        class:"kb-orcamento-capa-empresa",
+        title:empresaNome,
+        "aria-label":empresaNome,
+        "data-kb-tamanho":tamanhoEmpresaCapa
+      }, [empresaNome]),
       el("div", {class:"kb-orcamento-capa-marca", title:marcaExibida}, [marcaExibida]),
       linhaVendedor
     ]);
@@ -17833,8 +17876,8 @@ async function moverCard(idCard, idFasePara, posicao) {
         z-index:1;
         left:17.5%;
         right:6.5%;
-        top:13%;
-        bottom:10%;
+        top:7%;
+        bottom:5%;
         display:flex;
         flex-direction:column;
         align-items:flex-start;
@@ -17848,9 +17891,6 @@ async function moverCard(idCard, idFasePara, posicao) {
       .kb-orcamento-capa-marca{
         max-width:100%;
         min-width:0;
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
         color:#FFBD59;
         font-style:italic;
         font-weight:900;
@@ -17859,11 +17899,34 @@ async function moverCard(idCard, idFasePara, posicao) {
         text-transform:uppercase;
       }
       .kb-orcamento-capa-empresa{
-        font-size:22px;
+        display:block;
+        flex:0 0 auto;
+        width:100%;
+        overflow:visible;
+        text-overflow:clip;
+        white-space:normal;
+        overflow-wrap:anywhere;
+        word-break:normal;
+        text-wrap:balance;
+        font-size:19px;
+        line-height:1.08;
+      }
+      .kb-orcamento-capa-empresa[data-kb-tamanho="longo"]{
+        font-size:17px;
+      }
+      .kb-orcamento-capa-empresa[data-kb-tamanho="muito-longo"]{
+        font-size:15px;
+      }
+      .kb-orcamento-capa-empresa[data-kb-tamanho="extremo"]{
+        font-size:13px;
       }
       .kb-orcamento-capa-marca{
-        margin-top:8px;
-        font-size:19px;
+        flex:0 0 auto;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        margin-top:5px;
+        font-size:17px;
       }
       .kb-orcamento-capa-vendedor{
         display:flex;
@@ -17872,9 +17935,9 @@ async function moverCard(idCard, idFasePara, posicao) {
         gap:6px;
         max-width:100%;
         min-width:0;
-        margin-top:12px;
+        margin-top:7px;
         color:#FFFFFF;
-        font-size:11px;
+        font-size:9px;
         font-weight:700;
         line-height:1.2;
         white-space:nowrap;
@@ -18661,9 +18724,26 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
 
     cardOrcamentoAbertoId = id;
+    garantirModalOrcamentoAcimaDoLayout();
     renderizarOrcamentoCard(corpo);
     if (modalOrcamentoCard) {
-      modalOrcamentoCard.style.display = "block";
+      /*
+       * O overlay funciona como contêiner flexível e o corpo interno concentra
+       * a rolagem. Assim o cabeçalho e suas ações permanecem sempre acessíveis,
+       * independentemente da altura das artes do orçamento.
+       */
+      modalOrcamentoCard.style.display = "flex";
+      modalOrcamentoCard.scrollTop = 0;
+
+      const corpoModalOrcamento = orcamentoCardConteudo?.closest(".kb-modal-body");
+      if (corpoModalOrcamento) {
+        corpoModalOrcamento.scrollTop = 0;
+        corpoModalOrcamento.scrollLeft = 0;
+      }
+
+      requestAnimationFrame(() => {
+        btnFecharOrcamentoCard?.focus({ preventScroll: true });
+      });
     }
   }
 

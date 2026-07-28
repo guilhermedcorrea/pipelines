@@ -2959,25 +2959,100 @@
   .kb-orcamento-modal-card{
     max-width: min(1120px, calc(100vw - 32px));
     width: 100%;
+    max-height:calc(100dvh - 48px);
+    margin:0;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+
+  /*
+   * O modal é movido para o body ao abrir para não ficar preso ao contexto de
+   * empilhamento do conteúdo principal. O z-index máximo garante que a barra
+   * fixa do sistema não cubra o cabeçalho com Fechar e Imprimir/PDF.
+   */
+  #modalOrcamentoCard{
+    position:fixed !important;
+    inset:0 !important;
+    z-index:2147483647 !important;
+    width:100vw !important;
+    height:100vh !important;
+    height:100dvh !important;
+    margin:0 !important;
+    padding:12px !important;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden !important;
+    overscroll-behavior:contain;
+    isolation:isolate;
+    background:rgba(2,6,23,.62) !important;
+  }
+
+  #modalOrcamentoCard > .kb-orcamento-modal-card{
+    position:relative;
+    z-index:1;
+    max-height:calc(100dvh - 24px) !important;
+  }
+
+  .kb-orcamento-modal-card > .kb-orcamento-modal-head{
+    flex:0 0 auto !important;
+  }
+
+  .kb-orcamento-modal-card > .kb-modal-body{
+    flex:1 1 auto;
+    min-height:0;
+    overflow-y:auto;
+    overflow-x:hidden;
+    overscroll-behavior:contain;
+    scrollbar-gutter:stable;
   }
 
   .kb-orcamento-modal-head{
-    display:flex;
+    position:relative !important;
+    z-index:10 !important;
+    display:flex !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    min-height:58px;
     align-items:center;
     justify-content:space-between;
     gap:12px;
     flex-wrap:wrap;
+    background:#f3f7fc;
+    box-shadow:0 1px 0 rgba(11,78,162,.10);
   }
 
   .kb-orcamento-modal-acoes{
-    display:flex;
+    position:relative;
+    z-index:11;
+    display:flex !important;
+    visibility:visible !important;
+    opacity:1 !important;
     align-items:center;
     justify-content:flex-end;
     gap:8px;
     flex-wrap:wrap;
   }
 
+  .kb-orcamento-modal-acoes .kb-btn{
+    display:inline-flex !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    align-items:center;
+    justify-content:center;
+  }
+
   @media (max-width: 720px){
+    #modalOrcamentoCard{
+      padding:8px !important;
+    }
+
+    .kb-orcamento-modal-card{
+      max-width:100%;
+      max-height:calc(100dvh - 16px) !important;
+      border-radius:14px;
+    }
+
     .kb-orcamento-modal-head{
       align-items:stretch;
     }
@@ -3082,8 +3157,8 @@
     z-index:1;
     left:17.5%;
     right:6.5%;
-    top:13%;
-    bottom:10%;
+    top:7%;
+    bottom:5%;
     display:flex;
     flex-direction:column;
     align-items:flex-start;
@@ -3099,9 +3174,6 @@
   .kb-orcamento-capa-marca{
     max-width:100%;
     min-width:0;
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
     color:#FFBD59;
     font-style:italic;
     font-weight:900;
@@ -3111,12 +3183,38 @@
   }
 
   .kb-orcamento-capa-empresa{
-    font-size:clamp(12px, 1.65vw, 22px);
+    display:block;
+    flex:0 0 auto;
+    width:100%;
+    overflow:visible;
+    text-overflow:clip;
+    white-space:normal;
+    overflow-wrap:anywhere;
+    word-break:normal;
+    text-wrap:balance;
+    font-size:clamp(11px, 1.42vw, 19px);
+    line-height:1.08;
+  }
+
+  .kb-orcamento-capa-empresa[data-kb-tamanho="longo"]{
+    font-size:clamp(10px, 1.22vw, 17px);
+  }
+
+  .kb-orcamento-capa-empresa[data-kb-tamanho="muito-longo"]{
+    font-size:clamp(9px, 1.04vw, 15px);
+  }
+
+  .kb-orcamento-capa-empresa[data-kb-tamanho="extremo"]{
+    font-size:clamp(8px, .9vw, 13px);
   }
 
   .kb-orcamento-capa-marca{
-    margin-top:clamp(5px, .55vw, 8px);
-    font-size:clamp(11px, 1.45vw, 19px);
+    flex:0 0 auto;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    margin-top:clamp(3px, .35vw, 5px);
+    font-size:clamp(10px, 1.25vw, 17px);
   }
 
   .kb-orcamento-capa-vendedor{
@@ -3126,9 +3224,9 @@
     gap:clamp(3px, .38vw, 7px);
     max-width:100%;
     min-width:0;
-    margin-top:clamp(8px, .8vw, 12px);
+    margin-top:clamp(4px, .48vw, 7px);
     color:#FFFFFF;
-    font-size:clamp(7px, .82vw, 11px);
+    font-size:clamp(6px, .7vw, 9px);
     font-weight:700;
     line-height:1.2;
     white-space:nowrap;
@@ -3744,8 +3842,8 @@
     .kb-orcamento-capa-conteudo{
       left:14%;
       right:5%;
-      top:12%;
-      bottom:9%;
+      top:7%;
+      bottom:5%;
     }
 
     .kb-orcamento-resumo,
@@ -3770,9 +3868,8 @@
     }
   }
 
-    .kb-orcamento-preco{
-      min-width: 0;
-    }
+  .kb-orcamento-preco{
+    min-width:0;
   }
 
 
@@ -4757,12 +4854,27 @@
 </div>
 
 <div id="modalOrcamentoCard" class="kb-modal">
-  <div class="kb-modal-card kb-orcamento-modal-card">
+  <div
+    class="kb-modal-card kb-orcamento-modal-card"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="tituloModalOrcamentoCard"
+  >
     <div class="kb-modal-head kb-orcamento-modal-head">
-      <strong>Orçamento</strong>
+      <strong id="tituloModalOrcamentoCard">Orçamento</strong>
       <div class="kb-orcamento-modal-acoes">
-        <button class="kb-btn ghost" id="btnImprimirOrcamentoCard" type="button">Imprimir / PDF</button>
-        <button class="kb-btn" id="btnFecharOrcamentoCard" type="button">Fechar</button>
+        <button
+          class="kb-btn ghost"
+          id="btnImprimirOrcamentoCard"
+          type="button"
+          title="Abrir impressão ou salvar o orçamento em PDF"
+        >Imprimir / Salvar PDF</button>
+        <button
+          class="kb-btn"
+          id="btnFecharOrcamentoCard"
+          type="button"
+          title="Fechar orçamento"
+        >Fechar</button>
       </div>
     </div>
 
@@ -5453,10 +5565,58 @@
     conteudo.appendChild(complemento);
   }
 
+  function ajustarRazoesSociaisCapa() {
+    const elementos = document.querySelectorAll(
+      "#orcamentoCardConteudo .kb-orcamento-capa-empresa"
+    );
+
+    elementos.forEach((elemento) => {
+      const textoAtual = String(elemento.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const textoTitulo = String(elemento.getAttribute("title") || "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      /*
+       * O title guarda o valor integral na implementação legada. Se algum
+       * renderizador tiver gravado "..." no próprio texto, restaura-se a
+       * razão social completa antes de calcular o tamanho visual.
+       */
+      const textoAtualPareceCortado = /(?:\.\.\.|…)\s*$/.test(textoAtual);
+      const textoCompleto = (
+        textoTitulo
+        && (textoAtualPareceCortado || textoTitulo.length > textoAtual.length)
+      ) ? textoTitulo : textoAtual;
+
+      if (textoCompleto && textoCompleto !== textoAtual) {
+        elemento.textContent = textoCompleto;
+      }
+
+      const quantidadeCaracteres = Array.from(textoCompleto).length;
+      let tamanho = "normal";
+
+      if (quantidadeCaracteres > 108) {
+        tamanho = "extremo";
+      } else if (quantidadeCaracteres > 78) {
+        tamanho = "muito-longo";
+      } else if (quantidadeCaracteres > 48) {
+        tamanho = "longo";
+      }
+
+      elemento.dataset.kbTamanho = tamanho;
+      if (textoCompleto) {
+        elemento.setAttribute("title", textoCompleto);
+        elemento.setAttribute("aria-label", textoCompleto);
+      }
+    });
+  }
+
   function agendarAplicacao() {
     if (aplicacaoAgendada) return;
     aplicacaoAgendada = true;
     window.requestAnimationFrame(() => {
+      ajustarRazoesSociaisCapa();
       aplicarImagensExclusivasOrcamento();
       aplicarComplementoFinalOrcamento();
     });
@@ -5709,6 +5869,7 @@
   }
 
   async function imprimirOrcamentoEmPaisagem() {
+    ajustarRazoesSociaisCapa();
     aplicarImagensExclusivasOrcamento();
     aplicarComplementoFinalOrcamento();
 
@@ -5764,38 +5925,23 @@
   const conteudoOrcamento = document.getElementById("orcamentoCardConteudo");
   if (conteudoOrcamento) {
     const observer = new MutationObserver((mutacoes) => {
-      const recebeuItemOrcamento = mutacoes.some((mutacao) => (
+      const recebeuConteudoOrcamento = mutacoes.some((mutacao) => (
         Array.from(mutacao.addedNodes || []).some((node) => (
           node?.nodeType === 1
           && (
             node.matches?.(".kb-orcamento-item")
             || node.querySelector?.(".kb-orcamento-item")
+            || node.matches?.(".kb-orcamento-capa-empresa")
+            || node.querySelector?.(".kb-orcamento-capa-empresa")
           )
         ))
       ));
 
-      if (recebeuItemOrcamento) {
+      if (recebeuConteudoOrcamento) {
         agendarAplicacao();
       }
     });
     observer.observe(conteudoOrcamento, { childList: true, subtree: true });
-  }
-
-  const botaoImprimirOrcamento = document.getElementById("btnImprimirOrcamentoCard");
-  if (botaoImprimirOrcamento) {
-    /*
-     * O listener em captura assume o clique antes do manipulador legado do
-     * bundle externo. Isso garante uma única janela de impressão e mantém
-     * impressão física e "Salvar como PDF" no mesmo layout A4 paisagem.
-     */
-    botaoImprimirOrcamento.addEventListener("click", (evento) => {
-      evento.preventDefault();
-      evento.stopImmediatePropagation();
-      imprimirOrcamentoEmPaisagem().catch((erro) => {
-        console.error("[KANBAN][ORCAMENTO] Falha ao preparar impressão:", erro);
-        window.alert("Não foi possível preparar o orçamento para impressão.");
-      });
-    }, { capture:true });
   }
 
   window.fetch = async (...argumentos) => {
@@ -5816,7 +5962,7 @@
   };
 })();
 </script>
-<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260724_orcamento_observacoes_rodape_v1') }}"></script>
+<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260728_orcamento_impressao_unificada_v2') }}"></script>
 <script>
 (() => {
   "use strict";
