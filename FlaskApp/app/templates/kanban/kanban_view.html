@@ -3433,6 +3433,10 @@
     letter-spacing:.04em;
     text-transform:uppercase;
     width:max-content;
+    max-width:100%;
+    white-space:normal;
+    overflow-wrap:anywhere;
+    text-align:left;
   }
 
   .kb-orcamento-item-topo{
@@ -3584,9 +3588,9 @@
     --kb-orcamento-faixa-bg:#6B6BF2;
     --kb-orcamento-faixa-label:#FFD000;
     display:grid;
-    grid-template-columns:minmax(0, 1fr) minmax(220px, 320px);
+    grid-template-columns:minmax(0, 1fr) minmax(180px, 250px);
     align-items:center;
-    gap:20px;
+    gap:16px;
     width:100%;
     min-height:112px;
     padding:18px 28px;
@@ -3619,6 +3623,15 @@
     flex-wrap:wrap;
     column-gap:6px;
     row-gap:3px;
+  }
+
+  /*
+   * Os três valores comerciais formam uma única sequência lógica. A coluna
+   * menor da marca libera espaço para mantê-los na mesma linha sem reduzir a
+   * legibilidade; em telas estreitas a quebra continua permitida.
+   */
+  .kb-orcamento-faixa-linha--valores{
+    flex-wrap:nowrap;
   }
 
   .kb-orcamento-faixa-campo{
@@ -3661,9 +3674,9 @@
   .kb-orcamento-faixa-logo{
     display:block;
     width:100%;
-    max-width:320px;
+    max-width:250px;
     height:auto;
-    max-height:78px;
+    max-height:64px;
     object-fit:contain;
     object-position:right center;
   }
@@ -3680,8 +3693,8 @@
     }
 
     .kb-orcamento-faixa-logo{
-      max-width:240px;
-      max-height:64px;
+      max-width:200px;
+      max-height:56px;
     }
   }
 
@@ -3696,6 +3709,10 @@
 
     .kb-orcamento-faixa-campo{
       white-space:normal;
+    }
+
+    .kb-orcamento-faixa-linha--valores{
+      flex-wrap:wrap;
     }
   }
 
@@ -5031,6 +5048,10 @@
     minimumFractionDigits: 0,
     maximumFractionDigits: 2
   });
+  const formatadorNumeroFaixa = new Intl.NumberFormat("pt-BR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  });
 
   function obterUrlFetch(recurso) {
     if (typeof recurso === "string") return recurso;
@@ -5092,6 +5113,20 @@
     return `${formatadorPercentual.format(numero)}%`;
   }
 
+  function formatarNumeroFaixa(valor) {
+    const numero = numeroFinito(valor);
+    if (numero === null) return "—";
+    return formatadorNumeroFaixa.format(numero);
+  }
+
+  function normalizarTipoProdutoFaixa(valor) {
+    return String(valor || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toUpperCase();
+  }
+
   function criarCampoFaixa(rotulo, valor, destaque = false) {
     const campo = document.createElement("span");
     campo.className = `kb-orcamento-faixa-campo${destaque ? " destaque" : ""}`;
@@ -5108,9 +5143,12 @@
     return campo;
   }
 
-  function criarLinhaFaixa(campos) {
+  function criarLinhaFaixa(campos, classeAdicional = "") {
     const linha = document.createElement("div");
-    linha.className = "kb-orcamento-faixa-linha";
+    linha.className = [
+      "kb-orcamento-faixa-linha",
+      String(classeAdicional || "").trim()
+    ].filter(Boolean).join(" ");
     campos.forEach((campo) => linha.appendChild(campo));
     return linha;
   }
@@ -5134,6 +5172,20 @@
     const numeroItem = String(ordemItem).padStart(2, "0");
     const codFace = String(item?.cod_face || item?.nome_painel || "—").trim() || "—";
     const periodoCampanha = obterPeriodoCampanha(item);
+    const tipoProduto = normalizarTipoProdutoFaixa(
+      item?.tipo_produto ||
+      item?.tipo_painel ||
+      item?.TipoPainel ||
+      ""
+    );
+    const ehPainelDigital = tipoProduto === "PAINEL DIGITAL";
+    /*
+     * O endpoint do orçamento expõe em `exibicoes_dia` o valor lido de
+     * Kanban.Silver.FatoKanbanCardPainelFace.ExibicoesDia para o item ativo.
+     */
+    const insercoesDiaTexto = formatarNumeroFaixa(
+      item?.exibicoes_dia ?? item?.ExibicoesDia
+    );
 
     const valorCheio = primeiroNumero(
       item?.valor_periodo_cheio,
@@ -5185,6 +5237,8 @@
     const assinatura = JSON.stringify([
       numeroItem,
       codFace,
+      tipoProduto,
+      ehPainelDigital ? insercoesDiaTexto : null,
       periodoCampanha,
       valorCheioTexto,
       descontoTexto,
@@ -5204,15 +5258,24 @@
     faixa.setAttribute(
       "aria-label",
       `Resumo comercial do item ${numeroItem}, painel ${codFace}`
+      + (ehPainelDigital ? `, inserções por dia ${insercoesDiaTexto}` : "")
     );
 
     const texto = document.createElement("div");
     texto.className = "kb-orcamento-faixa-texto";
+    const camposPrimeiraLinha = [
+      criarCampoFaixa("Item", numeroItem),
+      criarCampoFaixa("Painel", codFace)
+    ];
+
+    if (ehPainelDigital) {
+      camposPrimeiraLinha.push(
+        criarCampoFaixa("Inserções/Dia", insercoesDiaTexto)
+      );
+    }
+
     texto.append(
-      criarLinhaFaixa([
-        criarCampoFaixa("Item", numeroItem),
-        criarCampoFaixa("Painel", codFace)
-      ]),
+      criarLinhaFaixa(camposPrimeiraLinha),
       criarLinhaFaixa([
         criarCampoFaixa("Período de Campanha", periodoCampanha)
       ]),
@@ -5220,7 +5283,7 @@
         criarCampoFaixa("Valor Período", valorCheioTexto),
         criarCampoFaixa("Desconto", descontoTexto),
         criarCampoFaixa("Valor Período Negociado", valorNegociadoTexto, true)
-      ])
+      ], "kb-orcamento-faixa-linha--valores")
     );
     faixa.appendChild(texto);
 
@@ -5316,9 +5379,9 @@
           --kb-orcamento-faixa-bg:#6B6BF2;
           --kb-orcamento-faixa-label:#FFD000;
           display:grid !important;
-          grid-template-columns:minmax(0, 1fr) minmax(220px, 320px) !important;
+          grid-template-columns:minmax(0, 1fr) minmax(180px, 250px) !important;
           align-items:center !important;
-          gap:20px !important;
+          gap:16px !important;
           width:100% !important;
           min-height:112px !important;
           padding:18px 28px !important;
@@ -5348,6 +5411,9 @@
           flex-wrap:wrap !important;
           column-gap:6px !important;
           row-gap:3px !important;
+        }
+        .kb-orcamento-faixa-linha--valores{
+          flex-wrap:nowrap !important;
         }
         .kb-orcamento-faixa-campo{
           min-width:0 !important;
@@ -5383,9 +5449,9 @@
         .kb-orcamento-faixa-logo{
           display:block !important;
           width:100% !important;
-          max-width:320px !important;
+          max-width:250px !important;
           height:auto !important;
-          max-height:78px !important;
+          max-height:64px !important;
           object-fit:contain !important;
           object-position:right center !important;
         }
@@ -5396,8 +5462,8 @@
             padding:18px 20px !important;
           }
           .kb-orcamento-faixa-logo{
-            max-width:240px !important;
-            max-height:64px !important;
+            max-width:200px !important;
+            max-height:56px !important;
           }
         }
         @media (max-width:520px){
@@ -5409,6 +5475,9 @@
           }
           .kb-orcamento-faixa-campo{
             white-space:normal !important;
+          }
+          .kb-orcamento-faixa-linha--valores{
+            flex-wrap:wrap !important;
           }
         }
       `;
@@ -5748,12 +5817,12 @@
 
     .kb-orcamento-faixa-institucional{
       display:grid !important;
-      grid-template-columns:minmax(0, 1fr) minmax(48mm, 72mm) !important;
+      grid-template-columns:minmax(0, 1fr) minmax(40mm, 56mm) !important;
       align-items:center !important;
       width:100% !important;
       min-height:28mm !important;
       max-height:28mm !important;
-      gap:5mm !important;
+      gap:4mm !important;
       margin:0 !important;
       padding:3.5mm 7mm !important;
       border:0 !important;
@@ -5778,6 +5847,10 @@
       row-gap:.8mm !important;
     }
 
+    .kb-orcamento-faixa-linha--valores{
+      flex-wrap:nowrap !important;
+    }
+
     .kb-orcamento-faixa-campo{
       gap:1mm !important;
       white-space:nowrap !important;
@@ -5785,8 +5858,8 @@
 
     .kb-orcamento-faixa-logo{
       width:100% !important;
-      max-width:72mm !important;
-      max-height:18mm !important;
+      max-width:56mm !important;
+      max-height:15mm !important;
       object-fit:contain !important;
       object-position:right center !important;
     }
@@ -5962,7 +6035,7 @@
   };
 })();
 </script>
-<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260728_orcamento_impressao_unificada_v2') }}"></script>
+<script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260729_orcamento_valor_negociado_logo_v1') }}"></script>
 <script>
 (() => {
   "use strict";

@@ -17605,6 +17605,45 @@ async function moverCard(idCard, idFasePara, posicao) {
         const imagens = Array.isArray(item.imagens) ? item.imagens : [];
         const galeria = criarGaleriaOrcamento(imagens, `Painel ${indice + 1}`);
         const valorExibido = Number(item.valor_exibido || 0);
+        const numeroItem = idNum(item.indice || (indice + 1)) || (indice + 1);
+        const numeroItemTexto = String(numeroItem).padStart(2, "0");
+        const tipoPainelItem = safeStr(
+          item.tipo_produto ||
+          item.tipo_painel ||
+          item.TipoPainel ||
+          ""
+        ).trim();
+        const ehPainelDigital =
+          normalizarTextoComparacaoPainelContrato(tipoPainelItem) === "PAINEL DIGITAL";
+        const painelItemTexto = safeStr(
+          item.cod_face ||
+          item.cod_ponto ||
+          item.nome_painel ||
+          "—"
+        ).trim() || "—";
+        /*
+         * `exibicoes_dia` vem de
+         * Kanban.Silver.FatoKanbanCardPainelFace.ExibicoesDia no payload do orçamento.
+         */
+        const insercoesDiaValor =
+          item.exibicoes_dia ??
+          item.ExibicoesDia ??
+          null;
+        const insercoesDiaTexto = insercoesDiaValor !== null
+          && insercoesDiaValor !== undefined
+          && safeStr(insercoesDiaValor).trim()
+          ? safeStr(insercoesDiaValor).trim()
+          : "—";
+        const tituloResumoItem = ehPainelDigital
+          ? `Item:${numeroItemTexto} | Painel: ${painelItemTexto} | Inserções/Dia: ${insercoesDiaTexto}`
+          : `Item:${numeroItemTexto} | Painel: ${painelItemTexto}`;
+        const periodoCampanhaTexto =
+          safeStr(item.periodo_exibicao || "Período de campanha não informado")
+          + (
+            ehPainelDigital && insercoesDiaTexto !== "—"
+              ? ` • ${insercoesDiaTexto} inserções/dia`
+              : ""
+          );
 
         const descontoTexto = item.percentual_desconto != null
           ? `${formatarNumeroBR(Number(item.percentual_desconto), 2)}%`
@@ -17622,7 +17661,10 @@ async function moverCard(idCard, idFasePara, posicao) {
           galeria,
           el("div", {class:"kb-orcamento-item-info"}, [
             el("div", {class:"kb-orcamento-item-topo"}, [
-              el("span", {class:"kb-orcamento-item-indice"}, [`Item ${indice}`])
+              el("span", {
+                class:"kb-orcamento-item-indice",
+                title:tituloResumoItem
+              }, [tituloResumoItem])
             ]),
             el("div", {class:"kb-orcamento-item-resumo-linha"}, [
               el("div", {class:"kb-orcamento-item-resumo-campo"}, [
@@ -17660,7 +17702,12 @@ async function moverCard(idCard, idFasePara, posicao) {
             ]),
             el("div", {class:"kb-orcamento-dados-grid"}, [
               criarCampoOrcamento("Painel", safeStr(item.nome_painel || `Painel ${indice}`)),
-              criarCampoOrcamento("Período de campanha", safeStr(item.periodo_exibicao || "Período de campanha não informado") + (item.exibicoes_dia ? ` • ${item.exibicoes_dia} exibições/dia` : ""))
+              ...(
+                ehPainelDigital
+                  ? [criarCampoOrcamento("Inserções/Dia", insercoesDiaTexto)]
+                  : []
+              ),
+              criarCampoOrcamento("Período de campanha", periodoCampanhaTexto)
             ])
           ])
         ]);
@@ -18115,6 +18162,10 @@ async function moverCard(idCard, idFasePara, posicao) {
         letter-spacing:.04em;
         text-transform:uppercase;
         width:max-content;
+        max-width:100%;
+        white-space:normal;
+        overflow-wrap:anywhere;
+        text-align:left;
       }
       .kb-orcamento-item-resumo-linha{
         display:grid;
@@ -18218,14 +18269,14 @@ async function moverCard(idCard, idFasePara, posicao) {
         --kb-orcamento-faixa-bg:#6B6BF2;
         --kb-orcamento-faixa-label:#FFD000;
         display:grid;
-        grid-template-columns:minmax(0, 1fr) minmax(48mm, 72mm);
+        grid-template-columns:minmax(0, 1fr) minmax(40mm, 56mm);
         align-items:center;
         width:100%;
         min-width:100%;
         max-width:100%;
         min-height:28mm;
         max-height:28mm;
-        gap:5mm;
+        gap:4mm;
         margin:0;
         padding:3.5mm 7mm;
         border:0;
@@ -18251,6 +18302,9 @@ async function moverCard(idCard, idFasePara, posicao) {
         flex-wrap:wrap;
         column-gap:1.5mm;
         row-gap:.8mm;
+      }
+      .kb-orcamento-faixa-linha--valores{
+        flex-wrap:nowrap;
       }
       .kb-orcamento-faixa-campo{
         min-width:0;
@@ -18286,9 +18340,9 @@ async function moverCard(idCard, idFasePara, posicao) {
       .kb-orcamento-faixa-logo{
         display:block;
         width:100%;
-        max-width:72mm;
+        max-width:56mm;
         height:auto;
-        max-height:18mm;
+        max-height:15mm;
         object-fit:contain;
         object-position:right center;
       }
