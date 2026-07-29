@@ -11241,29 +11241,255 @@ function formatarNumeroParaInput(valor){
     return candidatos[0];
   }
 
-  function preencherSelectFiltroPainelFace(selectEl, valores, placeholder){
-    if (!selectEl) return;
-    const valorAtual = safeStr(selectEl.value || '').trim();
-    const valoresLista = Array.isArray(valores) ? valores : [];
-    const valoresValidos = new Set();
+  function normalizarValoresFiltroPainelFace(valores){
+    const lista = Array.isArray(valores) ? valores : [valores];
+    return Array.from(new Set(
+      lista
+        .map((valor) => safeStr(valor || '').trim())
+        .filter(Boolean)
+    ));
+  }
 
-    selectEl.innerHTML = '';
-    selectEl.appendChild(el('option', { value:'' }, [placeholder]));
-    valoresLista.forEach((valor) => {
-      const texto = safeStr(valor || '').trim();
-      if (!texto || valoresValidos.has(texto)) return;
-      valoresValidos.add(texto);
-      selectEl.appendChild(el('option', { value:texto }, [texto]));
+  function obterValoresFiltroPainelFace(selectEl){
+    if (!selectEl) return [];
+
+    if (selectEl.multiple || selectEl.hasAttribute?.('multiple')) {
+      return normalizarValoresFiltroPainelFace(
+        Array.from(selectEl.options || [])
+          .filter((option) => option?.selected)
+          .map((option) => option?.value || '')
+      );
+    }
+
+    return normalizarValoresFiltroPainelFace(selectEl.value || '');
+  }
+
+  function selecionarValoresFiltroPainelFace(selectEl, valores, opcoes = {}){
+    if (!selectEl) return;
+
+    const selecionados = new Set(normalizarValoresFiltroPainelFace(valores));
+    const opcoesSelect = Array.from(selectEl.options || []);
+
+    opcoesSelect.forEach((option) => {
+      option.selected = false;
+      option.removeAttribute?.('selected');
     });
 
-    // Não deixa o valor salvo sumir enquanto o catálogo ainda está carregando
-    // ou quando a lista dependente cidade/tipo ainda está sendo reconstruída.
-    if (valorAtual) {
-      if (!valoresValidos.has(valorAtual)) {
-        selectEl.appendChild(el('option', { value:valorAtual }, [valorAtual]));
-      }
-      selectEl.value = valorAtual;
+    opcoesSelect.forEach((option) => {
+      const valor = safeStr(option?.value || '').trim();
+      const selecionado = Boolean(valor && selecionados.has(valor));
+      if (!selecionado) return;
+      option.selected = true;
+      option.setAttribute?.('selected', 'selected');
+    });
+
+    if (opcoes.atualizarDropdown !== false) {
+      atualizarDropdownFiltroPainelFace(selectEl);
     }
+  }
+
+  function obterConfiguracaoFiltroPainelFace(selectEl){
+    const campo = safeStr(selectEl?.dataset?.filtroPainelCampo || '').trim().toLowerCase();
+    if (campo === 'cidade') {
+      return {
+        campo,
+        placeholder: '— Cidade —',
+        vazio: 'Nenhuma cidade disponível.',
+        naoEncontrado: 'Nenhuma cidade encontrada.',
+      };
+    }
+    if (campo === 'tipo') {
+      return {
+        campo,
+        placeholder: '— Tipo Produto —',
+        vazio: 'Nenhum tipo de produto disponível.',
+        naoEncontrado: 'Nenhum tipo de produto encontrado.',
+      };
+    }
+    return {
+      campo,
+      placeholder: '— Selecione —',
+      vazio: 'Nenhuma opção disponível.',
+      naoEncontrado: 'Nenhuma opção encontrada.',
+    };
+  }
+
+  function obterDropdownFiltroPainelFace(selectEl){
+    return selectEl?.closest?.('[data-role^="dd-filtro-"]') || null;
+  }
+
+  function atualizarResumoFiltroPainelFace(selectEl){
+    const dd = obterDropdownFiltroPainelFace(selectEl);
+    const resumo = dd?.querySelector('[data-role="filtro-painel-resumo"]');
+    if (!resumo) return;
+
+    const configuracao = obterConfiguracaoFiltroPainelFace(selectEl);
+    const selecionados = new Set(obterValoresFiltroPainelFace(selectEl));
+    const labels = Array.from(selectEl.options || [])
+      .filter((option) => selecionados.has(safeStr(option?.value || '').trim()))
+      .map((option) => safeStr(option?.textContent || option?.value || '').trim())
+      .filter(Boolean);
+
+    const texto = labels.length ? labels.join(', ') : configuracao.placeholder;
+    resumo.textContent = texto;
+    resumo.title = labels.length ? texto : '';
+  }
+
+  function atualizarDropdownFiltroPainelFace(selectEl){
+    const dd = obterDropdownFiltroPainelFace(selectEl);
+    if (!selectEl || !dd) return;
+
+    const configuracao = obterConfiguracaoFiltroPainelFace(selectEl);
+    const lista = dd.querySelector('[data-role="filtro-painel-lista"]');
+    const busca = dd.querySelector('[data-role="filtro-painel-busca"]');
+    if (!lista) return;
+
+    const termoBusca = normalizarTexto(busca?.value || '');
+    const selecionados = new Set(obterValoresFiltroPainelFace(selectEl));
+    const opcoes = Array.from(selectEl.options || [])
+      .map((option) => ({
+        valor: safeStr(option?.value || '').trim(),
+        label: safeStr(option?.textContent || option?.value || '').trim(),
+        disabled: Boolean(option?.disabled),
+      }))
+      .filter((option) => option.valor && !option.disabled);
+
+    lista.innerHTML = '';
+
+    const checkboxTodas = el('input', {
+      type:'checkbox',
+      'data-role':'filtro-painel-todas'
+    });
+    checkboxTodas.checked = selecionados.size === 0;
+
+    const labelTodas = el('label', { class:'dd-item dd-item-todos' }, [
+      checkboxTodas,
+      el('span', {}, ['(Todas)'])
+    ]);
+    lista.appendChild(labelTodas);
+
+    checkboxTodas.addEventListener('change', () => {
+      selecionarValoresFiltroPainelFace(selectEl, [], { atualizarDropdown: false });
+      selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    if (!opcoes.length) {
+      lista.appendChild(el('div', { class:'dd-vazio' }, [configuracao.vazio]));
+      atualizarResumoFiltroPainelFace(selectEl);
+      return;
+    }
+
+    let totalVisiveis = 0;
+    opcoes.forEach((opcao) => {
+      if (termoBusca && !normalizarTexto(`${opcao.label} ${opcao.valor}`).includes(termoBusca)) {
+        return;
+      }
+
+      totalVisiveis += 1;
+      const checkbox = el('input', {
+        type:'checkbox',
+        value:opcao.valor,
+        'data-role':'filtro-painel-opcao'
+      });
+      checkbox.checked = selecionados.has(opcao.valor);
+
+      const item = el('label', { class:'dd-item' }, [
+        checkbox,
+        el('span', {}, [opcao.label])
+      ]);
+
+      checkbox.addEventListener('change', (evento) => {
+        const atuais = new Set(obterValoresFiltroPainelFace(selectEl));
+        const valor = safeStr(evento.currentTarget?.value || '').trim();
+        if (!valor) return;
+
+        if (evento.currentTarget.checked) atuais.add(valor);
+        else atuais.delete(valor);
+
+        selecionarValoresFiltroPainelFace(selectEl, Array.from(atuais), { atualizarDropdown: false });
+        selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      lista.appendChild(item);
+    });
+
+    if (!totalVisiveis) {
+      lista.appendChild(el('div', { class:'dd-vazio' }, [configuracao.naoEncontrado]));
+    }
+
+    if (busca && busca.dataset.listenerFiltroPainel !== '1') {
+      busca.addEventListener('input', () => atualizarDropdownFiltroPainelFace(selectEl));
+      busca.dataset.listenerFiltroPainel = '1';
+    }
+
+    atualizarResumoFiltroPainelFace(selectEl);
+  }
+
+  function preencherSelectFiltroPainelFace(selectEl, valores, placeholder, valoresSelecionados = null){
+    if (!selectEl) return;
+
+    const selecionadosAtuais = valoresSelecionados === null
+      ? obterValoresFiltroPainelFace(selectEl)
+      : normalizarValoresFiltroPainelFace(valoresSelecionados);
+    const valoresLista = normalizarValoresFiltroPainelFace(valores);
+
+    selectEl.innerHTML = '';
+    selectEl.appendChild(el('option', { value:'', disabled:'disabled' }, [placeholder]));
+    valoresLista.forEach((valor) => {
+      selectEl.appendChild(el('option', { value:valor }, [valor]));
+    });
+
+    const valoresValidos = new Set(valoresLista);
+    selecionarValoresFiltroPainelFace(
+      selectEl,
+      selecionadosAtuais.filter((valor) => valoresValidos.has(valor)),
+      { atualizarDropdown: false }
+    );
+    atualizarDropdownFiltroPainelFace(selectEl);
+  }
+
+  function criarDropdownFiltroPainelFace(campo){
+    const configuracao = obterConfiguracaoFiltroPainelFace({
+      dataset: { filtroPainelCampo: campo }
+    });
+    const sufixo = configuracao.campo === 'cidade' ? 'cidade' : 'tipo';
+    const descricao = configuracao.campo === 'cidade'
+      ? 'Selecione uma ou mais cidades.'
+      : 'Selecione um ou mais tipos de produto.';
+
+    return el('details', {
+      class:'dd kb-exibicoes-dd kb-filtro-painel-dd',
+      'data-role':`dd-filtro-${sufixo}`
+    }, [
+      el('summary', { class:'dd-summary' }, [
+        el('span', {
+          class:'dd-label',
+          'data-role':'filtro-painel-resumo',
+          title:''
+        }, [configuracao.placeholder]),
+        el('span', { class:'dd-caret' }, ['▾'])
+      ]),
+      el('div', { class:'dd-panel' }, [
+        el('input', {
+          type:'text',
+          class:'dd-search',
+          placeholder:'Pesquisar...',
+          autocomplete:'off',
+          'data-role':'filtro-painel-busca'
+        }),
+        el('div', { class:'dd-hint' }, [descricao]),
+        el('div', { class:'dd-lista', 'data-role':'filtro-painel-lista' }),
+        el('select', {
+          class:'kb-select kb-select-hidden',
+          multiple:'multiple',
+          tabindex:'-1',
+          'aria-hidden':'true',
+          style:'display:none;',
+          'data-role':`select-filtro-${sufixo}`,
+          'data-filtro-painel-campo':configuracao.campo
+        })
+      ])
+    ]);
   }
 
   function obterPrimeiroCampoPainelFace(dados, campos){
@@ -11390,8 +11616,15 @@ function formatarNumeroParaInput(valor){
     const selectFace = bloco.querySelector('[data-role="select-face"]');
     const inputBusca = bloco.querySelector('[data-role="input-painel-busca"]');
 
-    if (cidadeSalva) selecionarValorSelectPreservandoOpcoes(selectCidade, cidadeSalva, cidadeSalva);
-    if (tipoSalvo) selecionarValorSelectPreservandoOpcoes(selectTipo, tipoSalvo, tipoSalvo);
+    if (cidadeSalva) {
+      garantirOpcaoSelectSemDuplicar(selectCidade, cidadeSalva, cidadeSalva);
+      selecionarValoresFiltroPainelFace(selectCidade, [cidadeSalva]);
+    }
+    if (tipoSalvo) {
+      garantirOpcaoSelectSemDuplicar(selectTipo, tipoSalvo, tipoSalvo);
+      selecionarValoresFiltroPainelFace(selectTipo, [tipoSalvo]);
+    }
+    sincronizarFiltrosPainelFaceDoBloco(bloco, { manterSelecionadoInvalido: true });
 
     if (idPainelSalvo) {
       const labelPainel = codPontoSalvo
@@ -11485,15 +11718,19 @@ function formatarNumeroParaInput(valor){
   function itemPainelFaceAtendeFiltros(item, filtros = {}, considerarTexto = true){
     if (!item) return false;
 
-    const cidadeFiltro = safeStr(filtros?.cidade || '').trim();
-    const tipoFiltro = safeStr(filtros?.tipo || '').trim();
+    const cidadesFiltro = new Set(normalizarValoresFiltroPainelFace(
+      filtros?.cidades ?? filtros?.cidade ?? []
+    ));
+    const tiposFiltro = new Set(normalizarValoresFiltroPainelFace(
+      filtros?.tipos ?? filtros?.tipo ?? []
+    ));
     const termo = safeStr(filtros?.texto || '').trim();
 
     const cidadeItem = safeStr(item?.Cidade ?? '').trim();
     const tipoItem = safeStr(item?.Tipo ?? item?.TipoPainel ?? '').trim();
 
-    if (cidadeFiltro && cidadeItem !== cidadeFiltro) return false;
-    if (tipoFiltro && tipoItem !== tipoFiltro) return false;
+    if (cidadesFiltro.size && !cidadesFiltro.has(cidadeItem)) return false;
+    if (tiposFiltro.size && !tiposFiltro.has(tipoItem)) return false;
 
     if (!considerarTexto || !termo) return true;
 
@@ -11511,14 +11748,18 @@ function formatarNumeroParaInput(valor){
     return campos.some((campo) => normalizarTexto(campo).includes(termoNormalizado));
   }
 
-  function listarCidadesPainelFaceDoBloco(bloco){
+  function listarCidadesPainelFaceDoBloco(bloco, tiposSelecionados = null){
     const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
-    const tipoSelecionado = safeStr(selectTipo?.value || '').trim();
+    const tiposAtivos = new Set(
+      tiposSelecionados === null
+        ? obterValoresFiltroPainelFace(selectTipo)
+        : normalizarValoresFiltroPainelFace(tiposSelecionados)
+    );
     const conjunto = new Set();
 
     for (const item of (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : [])) {
       const tipoItem = safeStr(item?.Tipo ?? item?.TipoPainel ?? '').trim();
-      if (tipoSelecionado && tipoItem !== tipoSelecionado) continue;
+      if (tiposAtivos.size && !tiposAtivos.has(tipoItem)) continue;
       const cidade = safeStr(item?.Cidade ?? '').trim();
       if (cidade) conjunto.add(cidade);
     }
@@ -11526,14 +11767,18 @@ function formatarNumeroParaInput(valor){
     return Array.from(conjunto).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }
 
-  function listarTiposPainelFaceDoBloco(bloco){
+  function listarTiposPainelFaceDoBloco(bloco, cidadesSelecionadas = null){
     const selectCidade = bloco?.querySelector('[data-role="select-filtro-cidade"]');
-    const cidadeSelecionada = safeStr(selectCidade?.value || '').trim();
+    const cidadesAtivas = new Set(
+      cidadesSelecionadas === null
+        ? obterValoresFiltroPainelFace(selectCidade)
+        : normalizarValoresFiltroPainelFace(cidadesSelecionadas)
+    );
     const conjunto = new Set();
 
     for (const item of (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : [])) {
       const cidadeItem = safeStr(item?.Cidade ?? '').trim();
-      if (cidadeSelecionada && cidadeItem !== cidadeSelecionada) continue;
+      if (cidadesAtivas.size && !cidadesAtivas.has(cidadeItem)) continue;
       const tipo = safeStr(item?.Tipo ?? item?.TipoPainel ?? '').trim();
       if (tipo) conjunto.add(tipo);
     }
@@ -11546,26 +11791,40 @@ function formatarNumeroParaInput(valor){
     const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
     if (!selectCidade || !selectTipo) return;
 
-    const cidadeAtual = safeStr(selectCidade.value || '').trim();
-    const tipoAtual = safeStr(selectTipo.value || '').trim();
+    let cidadesSelecionadas = obterValoresFiltroPainelFace(selectCidade);
+    let tiposSelecionados = obterValoresFiltroPainelFace(selectTipo);
+    const catalogoDisponivel = Array.isArray(painelFacesCatalogo) && painelFacesCatalogo.length > 0;
 
-    const cidades = listarCidadesPainelFaceDoBloco(bloco);
-    preencherSelectFiltroPainelFace(selectCidade, cidades, '— Cidade —');
-    if (cidadeAtual && cidades.includes(cidadeAtual)) {
-      selectCidade.value = cidadeAtual;
+    /*
+     * Os dois filtros formam facetas dependentes. O ciclo abaixo converge os
+     * valores disponíveis e remove somente seleções que deixaram de ter
+     * correspondência no filtro oposto, evitando combinações sem resultado.
+     */
+    for (let iteracao = 0; iteracao < 3 && catalogoDisponivel; iteracao += 1) {
+      const cidadesDisponiveis = new Set(listarCidadesPainelFaceDoBloco(bloco, tiposSelecionados));
+      cidadesSelecionadas = cidadesSelecionadas.filter((cidade) => cidadesDisponiveis.has(cidade));
+
+      const tiposDisponiveis = new Set(listarTiposPainelFaceDoBloco(bloco, cidadesSelecionadas));
+      tiposSelecionados = tiposSelecionados.filter((tipo) => tiposDisponiveis.has(tipo));
     }
 
-    const tipos = listarTiposPainelFaceDoBloco(bloco);
-    preencherSelectFiltroPainelFace(selectTipo, tipos, '— Tipo Produto —');
-    if (tipoAtual && tipos.includes(tipoAtual)) {
-      selectTipo.value = tipoAtual;
+    let cidades = listarCidadesPainelFaceDoBloco(bloco, tiposSelecionados);
+    let tipos = listarTiposPainelFaceDoBloco(bloco, cidadesSelecionadas);
+
+    // Enquanto o catálogo assíncrono não chegou, mantém filtros restaurados do card.
+    if (!catalogoDisponivel) {
+      cidades = normalizarValoresFiltroPainelFace([...cidades, ...cidadesSelecionadas]);
+      tipos = normalizarValoresFiltroPainelFace([...tipos, ...tiposSelecionados]);
     }
+
+    preencherSelectFiltroPainelFace(selectCidade, cidades, '— Cidade —', cidadesSelecionadas);
+    preencherSelectFiltroPainelFace(selectTipo, tipos, '— Tipo Produto —', tiposSelecionados);
 
     const selecionado = obterPainelFaceSelecionadoDoBloco(bloco);
     if (!opcoes.manterSelecionadoInvalido && selecionado) {
       const filtrosAtuais = {
-        cidade: safeStr(selectCidade.value || '').trim(),
-        tipo: safeStr(selectTipo.value || '').trim(),
+        cidades: obterValoresFiltroPainelFace(selectCidade),
+        tipos: obterValoresFiltroPainelFace(selectTipo),
       };
       if (!itemPainelFaceAtendeFiltros(selecionado, filtrosAtuais, false)) {
         limparSelecaoPainelFaceDoBloco(bloco, { resetarFiltros: false, manterBusca: false, dispararChange: true });
@@ -11581,8 +11840,8 @@ function formatarNumeroParaInput(valor){
     const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
 
     const filtros = {
-      cidade: safeStr(selectCidade?.value || '').trim(),
-      tipo: safeStr(selectTipo?.value || '').trim(),
+      cidades: obterValoresFiltroPainelFace(selectCidade),
+      tipos: obterValoresFiltroPainelFace(selectTipo),
       texto: safeStr(texto || '').trim(),
     };
 
@@ -11828,8 +12087,8 @@ function formatarNumeroParaInput(valor){
     atualizarSelectFaceVisualDoBloco(bloco);
 
     if (resetarFiltros) {
-      if (selectCidade) selectCidade.value = '';
-      if (selectTipo) selectTipo.value = '';
+      selecionarValoresFiltroPainelFace(selectCidade, [], { atualizarDropdown: false });
+      selecionarValoresFiltroPainelFace(selectTipo, [], { atualizarDropdown: false });
       sincronizarFiltrosPainelFaceDoBloco(bloco, { manterSelecionadoInvalido: true });
     }
 
@@ -11871,8 +12130,16 @@ function formatarNumeroParaInput(valor){
       return;
     }
 
-    if (selectCidade) selectCidade.value = safeStr(item?.Cidade ?? '').trim();
-    if (selectTipo) selectTipo.value = safeStr(item?.Tipo ?? item?.TipoPainel ?? '').trim();
+    selecionarValoresFiltroPainelFace(
+      selectCidade,
+      [safeStr(item?.Cidade ?? '').trim()],
+      { atualizarDropdown: false }
+    );
+    selecionarValoresFiltroPainelFace(
+      selectTipo,
+      [safeStr(item?.Tipo ?? item?.TipoPainel ?? '').trim()],
+      { atualizarDropdown: false }
+    );
     sincronizarFiltrosPainelFaceDoBloco(bloco, { manterSelecionadoInvalido: true });
 
     definirValorSelectOculto(selectPainel, String(idPainel), textoOpcaoPainel(item));
@@ -12563,7 +12830,6 @@ function formatarNumeroParaInput(valor){
       setTxt('pn-tipo', '—');
       setTxt('pn-cidadeuf', '—');
       setTxt('pn-endereco', '—');
-      setTxt('pn-faces', '—');
       return;
     }
 
@@ -12571,7 +12837,6 @@ function formatarNumeroParaInput(valor){
     setTxt('pn-tipo', String(painel.Tipo || '—'));
     setTxt('pn-cidadeuf', `${painel.Cidade || '—'}/${painel.UF || '—'}`);
     setTxt('pn-endereco', `${painel.Logradouro || ''}${painel.Numero ? (', ' + painel.Numero) : ''}${painel.Bairro ? (' - ' + painel.Bairro) : ''}`.trim() || '—');
-    setTxt('pn-faces', Number(painel.QuantidadeFaces || 0) ? String(painel.QuantidadeFaces) : '—');
   }
 
   function limparComercialBloco(bloco, mensagem = 'Selecione Cidade, Tipo Produto e CodFace para consultar custo e preços.', opcoes = {}){
@@ -13180,39 +13445,8 @@ async function aplicarReservaDigitadaNoBloco(bloco){
         ])
       ]),
       el('div', { class:'kb-painel-item-grid' }, [
-        el('select', { class:'kb-select', 'data-role':'select-filtro-cidade' }),
-        el('select', { class:'kb-select', 'data-role':'select-filtro-tipo' }),
-        el('div', { class:'kb-combobox grow', 'data-role':'combo-painel' }, [
-          el('input', {
-            class:'kb-input kb-combobox-input',
-            type:'text',
-            autocomplete:'off',
-            spellcheck:'false',
-            placeholder:'Digite CodPonto, logradouro, cidade, bairro, tipo ou CodFace...',
-            'data-role':'input-painel-busca'
-          }),
-          el('button', {
-            class:'kb-combobox-toggle',
-            type:'button',
-            'data-role':'btn-toggle-painel',
-            'aria-label':'Abrir lista de painéis e faces'
-          }, ['▾']),
-          el('div', { class:'kb-combobox-lista', hidden:'hidden', 'data-role':'lista-painel-busca' }),
-          el('select', {
-            class:'kb-select grow kb-select-hidden',
-            tabindex:'-1',
-            'aria-hidden':'true',
-            'data-role':'select-painel',
-            'data-placeholder':'— Selecione um painel —'
-          }),
-          el('select', {
-            class:'kb-select grow kb-select-hidden',
-            tabindex:'-1',
-            'aria-hidden':'true',
-            'data-role':'select-face',
-            'data-placeholder':'— Face (CodFace) —'
-          })
-        ]),
+        criarDropdownFiltroPainelFace('cidade'),
+        criarDropdownFiltroPainelFace('tipo'),
         el('div', { class:'kb-campo', 'data-role':'wrap-exibicoes-dia', hidden:'hidden' }, [
           el('div', { class:'kb-campo-label' }, ['Inserções / dia']),
           el('details', { class:'dd kb-exibicoes-dd', 'data-role':'dd-exibicoes-dia' }, [
@@ -13249,14 +13483,44 @@ async function aplicarReservaDigitadaNoBloco(bloco){
           el('select', { class:'kb-select', 'data-role':'select-periodo-exibicao' }, [
             el('option', { value:'' }, ['— Período de campanha —'])
           ])
+        ]),
+        el('div', { class:'kb-combobox grow', 'data-role':'combo-painel' }, [
+          el('input', {
+            class:'kb-input kb-combobox-input',
+            type:'text',
+            autocomplete:'off',
+            spellcheck:'false',
+            placeholder:'Digite ou selecione o CodFace...',
+            'data-role':'input-painel-busca'
+          }),
+          el('button', {
+            class:'kb-combobox-toggle',
+            type:'button',
+            'data-role':'btn-toggle-painel',
+            'aria-label':'Abrir lista de painéis e faces'
+          }, ['▾']),
+          el('div', { class:'kb-combobox-lista', hidden:'hidden', 'data-role':'lista-painel-busca' }),
+          el('select', {
+            class:'kb-select grow kb-select-hidden',
+            tabindex:'-1',
+            'aria-hidden':'true',
+            'data-role':'select-painel',
+            'data-placeholder':'— Selecione um painel —'
+          }),
+          el('select', {
+            class:'kb-select grow kb-select-hidden',
+            tabindex:'-1',
+            'aria-hidden':'true',
+            'data-role':'select-face',
+            'data-placeholder':'— Face (CodFace) —'
+          })
         ])
       ]),
       el('div', { class:'kb-painel-preview', 'data-role':'painel-preview', style:'display:none;' }, [
         el('div', { class:'linha' }, [el('span', { class:'k' }, ['CodPonto:']), el('span', { class:'v', 'data-role':'pn-codponto' }, ['—'])]),
         el('div', { class:'linha' }, [el('span', { class:'k' }, ['Tipo:']), el('span', { class:'v', 'data-role':'pn-tipo' }, ['—'])]),
         el('div', { class:'linha' }, [el('span', { class:'k' }, ['Cidade/UF:']), el('span', { class:'v', 'data-role':'pn-cidadeuf' }, ['—'])]),
-        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Endereço:']), el('span', { class:'v', 'data-role':'pn-endereco' }, ['—'])]),
-        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Faces:']), el('span', { class:'v', 'data-role':'pn-faces' }, ['—'])])
+        el('div', { class:'linha' }, [el('span', { class:'k' }, ['Endereço:']), el('span', { class:'v', 'data-role':'pn-endereco' }, ['—'])])
       ]),
       el('div', { 'data-role':'comercial-wrap' }, [
         el('div', { class:'kb-comercial-vazio' }, ['Selecione Cidade, Tipo Produto e CodFace para consultar custo e preços.'])
@@ -13319,8 +13583,6 @@ async function aplicarReservaDigitadaNoBloco(bloco){
     limparSelectFacesNoElemento(selectFace);
     atualizarSelectFaceVisualDoBloco(bloco);
     sincronizarFiltrosPainelFaceDoBloco(bloco, { manterSelecionadoInvalido: true });
-    preencherSelectFiltroPainelFace(selectFiltroCidade, listarCidadesPainelFaceDoBloco(bloco), '— Cidade —');
-    preencherSelectFiltroPainelFace(selectFiltroTipo, listarTiposPainelFaceDoBloco(bloco), '— Tipo Produto —');
     aplicarDadosSalvosRapidosPainelFace(bloco, dados);
 
     bloco.querySelector('[data-role="btn-orcamento-item"]')?.addEventListener('click', async (e) => {

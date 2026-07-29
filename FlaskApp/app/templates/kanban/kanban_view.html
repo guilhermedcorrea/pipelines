@@ -2466,15 +2466,52 @@
 
   .kb-painel-item-grid{
     display:grid;
-    grid-template-columns: minmax(150px, .9fr) minmax(180px, 1fr) minmax(0, 2fr) minmax(170px, 1.05fr);
+    /*
+     * Ordem e proporção no desktop:
+     * Cidade | Tipo | Inserções/dia | Período | Face.
+     * Inserções e Período recebem menos espaço porque possuem valores curtos;
+     * a Face mantém a maior fração, mas sem voltar a ocupar metade da linha.
+     */
+    grid-template-columns:
+      minmax(128px, .92fr)
+      minmax(145px, 1.05fr)
+      minmax(100px, .70fr)
+      minmax(132px, .88fr)
+      minmax(195px, 1.35fr);
     gap:10px;
     align-items:end;
   }
 
-  .kb-painel-item-grid [data-role="wrap-periodo-exibicao"]{
-    grid-column: 4 / 5;
-    grid-row: 2;
+  .kb-painel-item-grid > *{
     min-width: 0;
+  }
+
+  .kb-painel-item-grid [data-role="wrap-exibicoes-dia"] .dd-summary,
+  .kb-painel-item-grid [data-role="wrap-periodo-exibicao"] .kb-select{
+    padding-left:10px;
+    padding-right:10px;
+  }
+
+  .kb-painel-item-grid [data-role="combo-painel"]{
+    min-width:0;
+    width:100%;
+  }
+
+  .kb-painel-item-grid [data-role="combo-painel"] .kb-combobox-input{
+    padding-left:10px;
+    padding-right:40px;
+  }
+
+  /*
+   * Em produtos sem tabela de inserções/período, os dois wrappers ficam
+   * ocultos. A Face ocupa então todo o espaço restante, sem deixar duas
+   * colunas vazias no desktop.
+  */
+  @media (min-width: 901px){
+    .kb-painel-item-grid:has([data-role="wrap-exibicoes-dia"][hidden]):has([data-role="wrap-periodo-exibicao"][hidden])
+    [data-role="combo-painel"]{
+      grid-column:3 / 6;
+    }
   }
 
   .kb-painel-item-grid-2{
