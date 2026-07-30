@@ -2502,18 +2502,6 @@
     padding-right:40px;
   }
 
-  /*
-   * Em produtos sem tabela de inserções/período, os dois wrappers ficam
-   * ocultos. A Face ocupa então todo o espaço restante, sem deixar duas
-   * colunas vazias no desktop.
-  */
-  @media (min-width: 901px){
-    .kb-painel-item-grid:has([data-role="wrap-exibicoes-dia"][hidden]):has([data-role="wrap-periodo-exibicao"][hidden])
-    [data-role="combo-painel"]{
-      grid-column:3 / 6;
-    }
-  }
-
   .kb-painel-item-grid-2{
   display:grid;
   grid-template-columns: minmax(180px, 0.9fr) minmax(170px, 0.95fr) minmax(320px, 1.65fr);
@@ -3183,7 +3171,13 @@
     z-index:2;
     width:100%;
     height:100%;
-    object-fit:cover;
+    /*
+      A capa precisa permanecer integralmente visível. O JavaScript sincroniza
+      a proporção deste container com as dimensões naturais do arquivo; o
+      "contain" funciona também como proteção caso uma arte diferente seja
+      carregada antes dessa medição ou não permita a leitura pelo canvas.
+    */
+    object-fit:contain;
     object-position:center center;
     display:block;
     pointer-events:none;

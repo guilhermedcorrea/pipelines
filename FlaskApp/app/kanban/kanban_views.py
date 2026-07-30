@@ -14139,8 +14139,9 @@ def _obter_razao_social_empresa_reserva_kanban(id_empresa_relacionada: Any) -> s
     return str(valor or "").strip()
 
 
-# Ocupação criada/salva pelo Kanban antes da aprovação do contrato.
-# Reserva futura de preferência NÃO nasce aqui; ela é criada exclusivamente pela DAG.
+# Compatibilidade com registros antigos que nasceram como OCUPACAO antes da
+# aprovação. Novas ocupações do Kanban só podem ser criadas depois que o card
+# possui a tag oficial de Contrato Aprovado.
 ORIGEM_OCUPACAO_CARD_KANBAN = "OCUPACAO"
 ORIGEM_RESERVA_CARD_KANBAN = ORIGEM_OCUPACAO_CARD_KANBAN  # compatibilidade com nomes antigos do código
 ORIGEM_OCUPACAO_CONTRATO_KANBAN = "CONTRATO"
@@ -14162,14 +14163,17 @@ def _resolver_origem_ocupacao_card_kanban(id_card: int | None) -> str:
     """Origem canônica da ocupação criada pelo Kanban.
 
     Regra de negócio:
-    - card com tag Contrato Aprovado vira ocupação de CONTRATO;
-    - card ainda não aprovado fica como ocupação normal: Origem = OCUPACAO.
+    - somente card com tag Contrato Aprovado pode criar/alterar ocupação;
+    - fase 4 ou formulário preenchido, isoladamente, não autorizam ocupação;
+    - card aprovado usa Origem = CONTRATO;
     - reserva futura de preferência é criada somente pela DAG pipeline_prioridade_reservas.
     """
-    if _card_kanban_tem_contrato_aprovado(id_card):
-        return ORIGEM_OCUPACAO_CONTRATO_KANBAN
+    if not _card_kanban_tem_contrato_aprovado(id_card):
+        raise RuntimeError(
+            "O card ainda não possui contrato aprovado e não pode criar ou alterar ocupação."
+        )
 
-    return ORIGEM_RESERVA_CARD_KANBAN
+    return ORIGEM_OCUPACAO_CONTRATO_KANBAN
 
 
 def _garantir_tipo_reserva_zero_ocupacoes_card_kanban(
@@ -14274,11 +14278,12 @@ def _sincronizar_origem_ocupacao_contrato_aprovado_kanban(
     id_card: int,
     id_usuario: int | None = None,
 ) -> dict[str, Any]:
-    """Efetiva as ocupações do card aprovado como CONTRATO, sem criar reserva.
+    """Efetiva como CONTRATO eventuais ocupações legadas do card aprovado.
 
     Regra de negócio aplicada aqui:
-    - o Kanban cria/salva a ocupação da campanha;
-    - na aprovação, esta rotina apenas efetiva a própria ocupação como Origem = CONTRATO;
+    - novas ocupações só nascem no fluxo oficial de aprovação do contrato;
+    - esta rotina mantém compatibilidade com ocupações antigas do mesmo card,
+      convertendo-as para CONTRATO depois da aprovação;
     - a reserva futura de preferência é criada exclusivamente pela DAG pipeline_prioridade_reservas;
     - MarcaExibida, prazo, cota, vendedor e vínculo do contrato vêm do item oficial
       Integracao.Silver.FatoControleContratosItensEuromidia.
@@ -14784,28 +14789,91 @@ def _sincronizar_reservas_painel_faces_kanban(
     painel_faces_payload: list[Any] | None = None,
     vinculos_preparados: list[dict[str, Any]] | None = None,
     cancelar_todas: bool = False,
-) -> dict[str, int]:
-    """Sincroniza somente reservas informadas explicitamente pelo usuário.
+) -> dict[str, Any]:
+    """Sincroniza ocupações somente depois da aprovação oficial do contrato.
 
-    Regra corrigida:
+    Regra central:
+    - estar ou ter passado pela fase 4 não autoriza mexer em ocupação;
+    - antes da tag oficial Contrato Aprovado (ID 13), esta função retorna sem
+      consultar ou alterar FatoOcupacaoPaineisEuromidia;
+    - a mesma barreira vale para criar, salvar, mover e remover o card;
+    - depois da aprovação, permanecem as regras operacionais existentes.
+
+    Regras complementares:
     - o Kanban NÃO cria reserva automaticamente só porque o card tem painel, face e período;
     - o backend só busca/valida/vincula reserva quando veio um ID no campo Reserva do formulário;
     - ID de ocupação encontrado por CodFace/Card não é tratado como reserva digitada;
     - se o usuário limpar o campo Reserva, o IDReserva do card é limpo.
     """
+    id_card_int = int(id_card or 0)
+    if id_card_int <= 0:
+        return {
+            "ok": False,
+            "executada": False,
+            "motivo": "id_card_invalido",
+            "contrato_aprovado": False,
+            "ocupacoes_preservadas": True,
+            "criadas": 0,
+            "ids_criadas": [],
+            "ids_ocupacao": [],
+            "ids": [],
+            "segmentos_criados": 0,
+            "vinculadas": 0,
+            "canceladas": 0,
+            "desvinculadas": 0,
+            "mantidas": 0,
+            "id_reserva_card": None,
+            "sincronizacao_id_reserva_card": None,
+            "sincronizacao_tipo_reserva_zero": None,
+        }
+
+    if not _card_kanban_tem_contrato_aprovado(id_card_int):
+        current_app.logger.debug(
+            "KANBAN OCUPACAO IGNORADA | card sem contrato aprovado | "
+            "id_card=%s cancelar_todas=%s",
+            id_card_int,
+            bool(cancelar_todas),
+        )
+        return {
+            "ok": True,
+            "executada": False,
+            "motivo": "contrato_nao_aprovado_ocupacoes_preservadas",
+            "contrato_aprovado": False,
+            "ocupacoes_preservadas": True,
+            "acao_solicitada": "cancelar" if cancelar_todas else "sincronizar",
+            "criadas": 0,
+            "ids_criadas": [],
+            "ids_ocupacao": [],
+            "ids": [],
+            "segmentos_criados": 0,
+            "vinculadas": 0,
+            "canceladas": 0,
+            "desvinculadas": 0,
+            "mantidas": 0,
+            "id_reserva_card": None,
+            "sincronizacao_id_reserva_card": None,
+            "sincronizacao_tipo_reserva_zero": None,
+        }
+
     if cancelar_todas:
         canceladas = _cancelar_reservas_card_kanban(
-            id_card=int(id_card),
+            id_card=id_card_int,
             id_usuario=int(id_usuario),
             chaves_manter=set(),
-            motivo=f"[CARD_ID={int(id_card)}] Reserva cancelada porque o card foi removido/inativado.",
+            motivo=f"[CARD_ID={id_card_int}] Reserva cancelada porque o card foi removido/inativado.",
         )
         sincronizacao_id_reserva_card = _atualizar_id_reserva_card_kanban(
-            id_card=int(id_card),
+            id_card=id_card_int,
             id_reserva=None,
             atualizar_timestamp=True,
         )
         return {
+            "ok": True,
+            "executada": True,
+            "motivo": "ocupacoes_processadas_contrato_aprovado",
+            "contrato_aprovado": True,
+            "ocupacoes_preservadas": int(canceladas or 0) == 0,
+            "acao_solicitada": "cancelar",
             "criadas": 0,
             "vinculadas": 0,
             "canceladas": int(canceladas),
@@ -14816,7 +14884,7 @@ def _sincronizar_reservas_painel_faces_kanban(
         }
 
     payload_reservas_explicito = isinstance(painel_faces_payload, list)
-    id_reserva_card_atual = _obter_id_reserva_card_kanban(int(id_card))
+    id_reserva_card_atual = _obter_id_reserva_card_kanban(id_card_int)
 
     itens_para_sincronizar = _normalizar_payload_reservas_card_kanban(
         painel_faces_payload if isinstance(painel_faces_payload, list) else vinculos_preparados
@@ -14918,8 +14986,8 @@ def _sincronizar_reservas_painel_faces_kanban(
 
     vinculadas = len(ids_reservas_informadas)
     ids_criadas_auto = [int(x) for x in (criacao_reservas_auto.get("ids") or []) if int(x or 0) > 0]
-    # Importante: IDs criados automaticamente aqui são OCUPAÇÕES normais do Kanban,
-    # não reservas. Portanto eles não podem popular o campo IDReserva do card.
+    # Importante: IDs criados aqui, já depois da aprovação, são OCUPAÇÕES de
+    # contrato, não reservas. Portanto eles não podem popular IDReserva do card.
     # IDReserva só recebe valor quando o usuário informou uma reserva existente no input Reserva.
     id_reserva_payload_final = min(ids_reservas_informadas) if ids_reservas_informadas else None
 
@@ -14939,6 +15007,16 @@ def _sincronizar_reservas_painel_faces_kanban(
     )
 
     return {
+        "ok": True,
+        "executada": True,
+        "motivo": "ocupacoes_sincronizadas_contrato_aprovado",
+        "contrato_aprovado": True,
+        "ocupacoes_preservadas": (
+            int(criacao_reservas_auto.get("criadas") or 0) == 0
+            and int(vinculadas or 0) == 0
+            and int(reservas_informadas_desvinculadas or 0) == 0
+        ),
+        "acao_solicitada": "sincronizar",
         "criadas": int(criacao_reservas_auto.get("criadas") or 0),
         "ids_criadas": ids_criadas_auto,
         "ids_ocupacao": ids_criadas_auto,
@@ -20056,7 +20134,10 @@ def _obter_paineis_catalogo() -> list[dict[str, Any]]:
 
 
 def _obter_painel_faces_catalogo() -> list[dict[str, Any]]:
-    chave = _chave_cache_json("kanban:catalogo:painel_faces")
+    # v2: o catálogo também carrega as combinações comerciais de cada Face.
+    # A versão na chave impede que uma resposta antiga, sem OpcoesComerciais,
+    # permaneça ativa depois da publicação deste fluxo de filtros encadeados.
+    chave = _chave_cache_json("kanban:catalogo:painel_faces:v2")
     em_cache = _cache_json_get(chave)
     if em_cache is not None:
         return em_cache
@@ -20076,7 +20157,11 @@ def _obter_painel_faces_catalogo() -> list[dict[str, Any]]:
             painel.Numero,
             painel.CEP,
             painel.QuantidadeFaces,
-            painel.BitAtivo
+            painel.BitAtivo,
+            preco.IDDimTabelaPrecosEuromidia AS PrecoIDDimTabelaPrecosEuromidia,
+            preco.PeriodoExibicao AS PrecoPeriodoExibicao,
+            preco.ExibicoesDia AS PrecoExibicoesDia,
+            preco.BitAtivo AS PrecoBitAtivo
         FROM [Integracao].[Silver].[DimFacesPaineis] f
         OUTER APPLY (
             SELECT TOP (1)
@@ -20107,6 +20192,13 @@ def _obter_painel_faces_catalogo() -> list[dict[str, Any]]:
                 p.DataAtualizacao DESC,
                 p.IDDimPaineisEuromidia DESC
         ) painel
+        LEFT JOIN [Integracao].[Silver].[FatoTabelaPrecosEuromidia] preco
+          ON TRY_CONVERT(int, preco.IDDimPaineisEuromidia) = TRY_CONVERT(int, painel.IDDimPaineisEuromidia)
+         AND UPPER(LTRIM(RTRIM(ISNULL(preco.Tipo, '')))) = UPPER(LTRIM(RTRIM(ISNULL(painel.Tipo, ''))))
+         AND (
+                preco.IDDimFacesPaineis IS NULL
+                OR TRY_CONVERT(int, preco.IDDimFacesPaineis) = TRY_CONVERT(int, f.IDDimFacesPaineis)
+             )
         WHERE f.CodFace IS NOT NULL
           AND LTRIM(RTRIM(f.CodFace)) <> ''
           AND painel.IDDimPaineisEuromidia IS NOT NULL
@@ -20114,13 +20206,18 @@ def _obter_painel_faces_catalogo() -> list[dict[str, Any]]:
             painel.Cidade ASC,
             painel.Tipo ASC,
             f.CodFace ASC,
-            painel.Logradouro ASC;
+            painel.Logradouro ASC,
+            CASE WHEN ISNULL(preco.BitAtivo, 0) = 1 THEN 0 ELSE 1 END,
+            preco.PeriodoExibicao ASC,
+            preco.ExibicoesDia ASC,
+            preco.IDDimTabelaPrecosEuromidia DESC;
     """)
 
     rows = db.session.execute(sql).mappings().all()
 
     resultado: list[dict[str, Any]] = []
-    chaves_vistas: set[tuple[int, str]] = set()
+    resultado_por_chave: dict[tuple[int, str], dict[str, Any]] = {}
+    combinacoes_vistas_por_chave: dict[tuple[int, str], set[tuple[str, str]]] = {}
 
     for row in rows:
         id_painel = int(row.get("IDDimPaineisEuromidia") or 0) if row.get("IDDimPaineisEuromidia") is not None else 0
@@ -20129,12 +20226,9 @@ def _obter_painel_faces_catalogo() -> list[dict[str, Any]]:
             continue
 
         chave_face = (id_painel, cod_face)
-        if chave_face in chaves_vistas:
-            continue
-        chaves_vistas.add(chave_face)
-
-        resultado.append(
-            {
+        item_catalogo = resultado_por_chave.get(chave_face)
+        if item_catalogo is None:
+            item_catalogo = {
                 "IDDimFacesPaineis": int(row.get("IDDimFacesPaineis") or 0) if row.get("IDDimFacesPaineis") is not None else None,
                 "IDDimPaineisEuromidia": id_painel,
                 "CodPonto": _normalizar_texto(row.get("CodPonto")) or None,
@@ -20149,6 +20243,45 @@ def _obter_painel_faces_catalogo() -> list[dict[str, Any]]:
                 "CEP": _normalizar_texto(row.get("CEP")) or None,
                 "QuantidadeFaces": int(row.get("QuantidadeFaces") or 0) if row.get("QuantidadeFaces") is not None else None,
                 "BitAtivo": int(row.get("BitAtivo") or 0) if row.get("BitAtivo") is not None else 0,
+                "OpcoesComerciais": [],
+            }
+            resultado_por_chave[chave_face] = item_catalogo
+            combinacoes_vistas_por_chave[chave_face] = set()
+            resultado.append(item_catalogo)
+
+        id_preco = (
+            int(row.get("PrecoIDDimTabelaPrecosEuromidia") or 0)
+            if row.get("PrecoIDDimTabelaPrecosEuromidia") is not None
+            else 0
+        )
+        periodo_exibicao = _normalizar_texto(row.get("PrecoPeriodoExibicao"))
+        exibicoes_dia = _decimal_para_float(row.get("PrecoExibicoesDia"))
+
+        # Uma Face sem linha na tabela de preços continua no catálogo geográfico,
+        # porém não recebe combinação comercial e, por isso, não será oferecida
+        # depois que Inserções/Dia e Período forem selecionados.
+        if not id_preco and not periodo_exibicao:
+            continue
+
+        chave_combinacao = (
+            periodo_exibicao.casefold(),
+            "" if exibicoes_dia is None else str(exibicoes_dia),
+        )
+        combinacoes_vistas = combinacoes_vistas_por_chave[chave_face]
+        if chave_combinacao in combinacoes_vistas:
+            continue
+        combinacoes_vistas.add(chave_combinacao)
+
+        item_catalogo["OpcoesComerciais"].append(
+            {
+                "IDDimTabelaPrecosEuromidia": id_preco or None,
+                "PeriodoExibicao": periodo_exibicao or None,
+                "ExibicoesDia": exibicoes_dia,
+                "BitAtivo": (
+                    int(row.get("PrecoBitAtivo") or 0)
+                    if row.get("PrecoBitAtivo") is not None
+                    else 0
+                ),
             }
         )
 

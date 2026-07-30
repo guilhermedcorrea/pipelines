@@ -29,6 +29,14 @@ NOME_DAG = "pipeline_cancela_reserva"
 NOME_DAG_NOTIFICACOES = "pipeline_notificacoes_euromidia"
 CONN_ID_SQL_SERVER = "mssql_integracao"
 TIMEZONE_SAO_PAULO = pendulum.timezone("America/Sao_Paulo")
+NOME_TIMEZONE_SAO_PAULO = "America/Sao_Paulo"
+
+# As colunas de data/hora desta rotina representam o horário civil de
+# Campinas/São Paulo, sem informação de fuso no SQL Server. O instante atual
+# é calculado pelo Python/Pendulum e enviado como parâmetro para todas as
+# consultas. Assim, o DAG não depende do fuso configurado no servidor, no
+# container ou na instância do SQL Server.
+SQL_AGORA_SAO_PAULO = "CAST(:agora_sao_paulo AS datetime2)"
 
 NOME_USUARIO_INTEGRACAO = "INTEGRACAO"
 HORAS_MINIMAS_RESERVA_ABERTA = 48
@@ -248,7 +256,7 @@ SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA = f"""
     {SQL_CONDICAO_RESERVA_PREFERENCIA}
     AND reserva.DataFim IS NOT NULL
     AND {SQL_DATA_CANCELAMENTO_PREFERENCIA_VENCIDA}
-        <= CAST(SYSDATETIME() AS date)
+        <= CAST({SQL_AGORA_SAO_PAULO} AS date)
 )
 """
 
@@ -266,7 +274,7 @@ SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA = f"""
             AND ocupacao_origem.IDFatoControleContratosItemOrigem = reserva.IDFatoControleContratosItemOrigem
             AND ocupacao_origem.DataFim IS NOT NULL
             AND {SQL_DATA_CANCELAMENTO_PREFERENCIA_ORIGEM_NAO_RENOVADA}
-                <= CAST(SYSDATETIME() AS date)
+                <= CAST({SQL_AGORA_SAO_PAULO} AS date)
     )
 )
 """
@@ -293,7 +301,7 @@ SQL_CONDICAO_RESERVA_COMUM_MAIS_DE_48H = f"""
 (
     NOT {SQL_CONDICAO_RESERVA_PREFERENCIA}
     AND reserva.CriadoEm IS NOT NULL
-    AND {SQL_DATA_HORA_LIMITE_RESERVA_COMUM} <= SYSDATETIME()
+    AND {SQL_DATA_HORA_LIMITE_RESERVA_COMUM} <= {SQL_AGORA_SAO_PAULO}
 )
 """
 
@@ -425,7 +433,7 @@ SELECT TOP (30)
            AS DataHoraLimiteReservaComum,
        reserva.DataFim AS DataFimRegraCancelamento,
        {SQL_MOTIVO_CANCELAMENTO} AS MotivoCancelamento,
-       CAST(DATEDIFF(MINUTE, reserva.CriadoEm, SYSDATETIME()) / 60.0 AS DECIMAL(18, 2)) AS HorasDesdeCriacao
+       CAST(DATEDIFF(MINUTE, reserva.CriadoEm, {SQL_AGORA_SAO_PAULO}) / 60.0 AS DECIMAL(18, 2)) AS HorasDesdeCriacao
 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
 OUTER APPLY (
     SELECT TOP (1)
@@ -498,7 +506,7 @@ SELECT TOP (30)
        {SQL_DATA_HORA_LIMITE_RESERVA_COMUM}
            AS DataHoraLimiteReservaComum,
        reserva.DataFim AS DataFimRegraCancelamento,
-       CAST(DATEDIFF(MINUTE, reserva.CriadoEm, SYSDATETIME()) / 60.0 AS DECIMAL(18, 2)) AS HorasDesdeCriacao
+       CAST(DATEDIFF(MINUTE, reserva.CriadoEm, {SQL_AGORA_SAO_PAULO}) / 60.0 AS DECIMAL(18, 2)) AS HorasDesdeCriacao
 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (NOLOCK)
 OUTER APPLY (
     SELECT TOP (1)
@@ -578,11 +586,11 @@ ORDER BY
 SQL_CANCELAR_RESERVAS_ELEGIVEIS = f"""
 UPDATE reserva
 SET
-    reserva.CanceladoEm = SYSDATETIME(),
+    reserva.CanceladoEm = {SQL_AGORA_SAO_PAULO},
     reserva.CanceladoPorIDUsuario = :id_usuario_integracao,
     reserva.Status = N'CANCELADO',
     reserva.Observacao = {SQL_OBSERVACAO_CANCELAMENTO},
-    reserva.DataAtualizacao = SYSDATETIME()
+    reserva.DataAtualizacao = {SQL_AGORA_SAO_PAULO}
 OUTPUT
     INSERTED.IDFatoOcupacaoPaineisEuromidia AS IDReserva
 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva WITH (UPDLOCK, READPAST, ROWLOCK)
@@ -593,8 +601,9 @@ WHERE
 
 SQL_OBTER_DATA_HORA_SQL_SERVER = f"""
 SELECT
-    SYSDATETIME() AS DataExecucaoSqlServer,
-    CAST(SYSDATETIME() AS date) AS DataReferenciaCancelamentoPreferencia,
+    {SQL_AGORA_SAO_PAULO} AS DataExecucaoSaoPaulo,
+    SYSUTCDATETIME() AS DataExecucaoUtcSqlServer,
+    CAST({SQL_AGORA_SAO_PAULO} AS date) AS DataReferenciaCancelamentoPreferencia,
     {HORAS_MINIMAS_RESERVA_ABERTA} AS HorasUteisPrazoReservaComum,
     {DIAS_UTEIS_RESERVA_COMUM} AS DiasUteisPrazoReservaComum,
     {DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM}
@@ -714,6 +723,16 @@ O disparo é assíncrono: o DAG pai não mantém um worker ocupado aguardando o
 DAG de notificações. Isso evita bloqueio quando o executor ou o pool possui
 poucos slots disponíveis.
 
+## Horário de negócio
+
+O servidor e os containers podem permanecer em UTC. No início de cada
+execução, o DAG calcula o horário civil de Campinas/SP usando
+`America/Sao_Paulo` e envia esse mesmo valor, sem fuso, como parâmetro para
+todas as consultas e para o `UPDATE`.
+
+Isso evita que `SYSDATETIME()` compare uma hora UTC com colunas gravadas no
+horário local e cancele reservas aproximadamente 3 horas antes do prazo.
+
 ## Agendamento
 
 Executa todos os dias a cada 8 minutos:
@@ -779,6 +798,21 @@ def pipeline_cancela_reserva():
         hook_sql_server = HookSqlServer(conn_id=CONN_ID_SQL_SERVER)
         engine = hook_sql_server.obter_engine()
 
+        # O relógio físico do servidor pode estar em UTC. Pendulum converte o
+        # instante atual para Campinas/São Paulo e removemos apenas o tzinfo
+        # porque as colunas datetime/datetime2 da base guardam horário local
+        # sem offset. O mesmo valor é reutilizado em toda a transação.
+        agora_sao_paulo_com_fuso = pendulum.now(TIMEZONE_SAO_PAULO)
+        agora_sao_paulo = agora_sao_paulo_com_fuso.naive()
+        parametros_tempo = {"agora_sao_paulo": agora_sao_paulo}
+
+        logger.info(
+            "Relógio do cancelamento: timezone=%s | agora_sao_paulo=%s | offset_utc=%s",
+            NOME_TIMEZONE_SAO_PAULO,
+            agora_sao_paulo_com_fuso.isoformat(),
+            agora_sao_paulo_com_fuso.utcoffset(),
+        )
+
         with engine.begin() as conexao:
             usuario_integracao = conexao.execute(
                 text(SQL_BUSCAR_USUARIO_INTEGRACAO),
@@ -796,52 +830,62 @@ def pipeline_cancela_reserva():
             nome_usuario_encontrado = str(usuario_integracao["NomeUsuario"])
 
             datas_execucao = conexao.execute(
-                text(SQL_OBTER_DATA_HORA_SQL_SERVER)
+                text(SQL_OBTER_DATA_HORA_SQL_SERVER),
+                parametros_tempo,
             ).mappings().first()
 
-            data_execucao_sql_server = datas_execucao["DataExecucaoSqlServer"]
+            data_execucao_sao_paulo = datas_execucao["DataExecucaoSaoPaulo"]
+            data_execucao_utc_sql_server = datas_execucao[
+                "DataExecucaoUtcSqlServer"
+            ]
             data_referencia_cancelamento_preferencia = datas_execucao[
                 "DataReferenciaCancelamentoPreferencia"
             ]
 
             total_elegivel_antes = int(
                 conexao.execute(
-                    text(SQL_CONTAR_RESERVAS_ELEGIVEIS_CANCELAMENTO)
+                    text(SQL_CONTAR_RESERVAS_ELEGIVEIS_CANCELAMENTO),
+                    parametros_tempo,
                 ).scalar_one()
                 or 0
             )
 
             total_reserva_comum_elegivel = int(
                 conexao.execute(
-                    text(SQL_CONTAR_RESERVAS_COMUNS_ELEGIVEIS)
+                    text(SQL_CONTAR_RESERVAS_COMUNS_ELEGIVEIS),
+                    parametros_tempo,
                 ).scalar_one()
                 or 0
             )
 
             total_preferencia_protegida = int(
                 conexao.execute(
-                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_PROTEGIDAS)
+                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_PROTEGIDAS),
+                    parametros_tempo,
                 ).scalar_one()
                 or 0
             )
 
             total_preferencia_vencida_elegivel = int(
                 conexao.execute(
-                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_VENCIDAS)
+                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_VENCIDAS),
+                    parametros_tempo,
                 ).scalar_one()
                 or 0
             )
 
             total_preferencia_origem_nao_renovada = int(
                 conexao.execute(
-                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_ORIGEM_NAO_RENOVADA)
+                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_ORIGEM_NAO_RENOVADA),
+                    parametros_tempo,
                 ).scalar_one()
                 or 0
             )
 
             total_preferencia_sem_data_fim = int(
                 conexao.execute(
-                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_SEM_DATA_FIM)
+                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_SEM_DATA_FIM),
+                    parametros_tempo,
                 ).scalar_one()
                 or 0
             )
@@ -849,21 +893,24 @@ def pipeline_cancela_reserva():
             amostra_elegiveis = [
                 dict(linha)
                 for linha in conexao.execute(
-                    text(SQL_LISTAR_AMOSTRA_RESERVAS_ELEGIVEIS_CANCELAMENTO)
+                    text(SQL_LISTAR_AMOSTRA_RESERVAS_ELEGIVEIS_CANCELAMENTO),
+                    parametros_tempo,
                 ).mappings().all()
             ]
 
             amostra_preferencia_protegida = [
                 dict(linha)
                 for linha in conexao.execute(
-                    text(SQL_LISTAR_AMOSTRA_RESERVAS_PREFERENCIA_PROTEGIDAS)
+                    text(SQL_LISTAR_AMOSTRA_RESERVAS_PREFERENCIA_PROTEGIDAS),
+                    parametros_tempo,
                 ).mappings().all()
             ]
 
             amostra_preferencia_sem_data_fim = [
                 dict(linha)
                 for linha in conexao.execute(
-                    text(SQL_LISTAR_AMOSTRA_RESERVAS_PREFERENCIA_SEM_DATA_FIM)
+                    text(SQL_LISTAR_AMOSTRA_RESERVAS_PREFERENCIA_SEM_DATA_FIM),
+                    parametros_tempo,
                 ).mappings().all()
             ]
 
@@ -887,7 +934,10 @@ def pipeline_cancela_reserva():
 
             resultado_update = conexao.execute(
                 text(SQL_CANCELAR_RESERVAS_ELEGIVEIS),
-                {"id_usuario_integracao": id_usuario_integracao},
+                {
+                    "id_usuario_integracao": id_usuario_integracao,
+                    **parametros_tempo,
+                },
             )
 
             reservas_canceladas = [
@@ -926,10 +976,26 @@ def pipeline_cancela_reserva():
             "total_preferencia_sem_data_fim": total_preferencia_sem_data_fim,
             "total_cancelado": int(total_cancelado or 0),
             "ids_reservas_canceladas": ids_reservas_canceladas,
+            # Mantido para compatibilidade com o DAG de notificações. Agora
+            # este campo representa o horário de negócio de Campinas/SP.
             "data_execucao_sql_server": (
-                data_execucao_sql_server.isoformat()
-                if hasattr(data_execucao_sql_server, "isoformat")
-                else str(data_execucao_sql_server)
+                data_execucao_sao_paulo.isoformat()
+                if hasattr(data_execucao_sao_paulo, "isoformat")
+                else str(data_execucao_sao_paulo)
+            ),
+            "data_execucao_sao_paulo": (
+                data_execucao_sao_paulo.isoformat()
+                if hasattr(data_execucao_sao_paulo, "isoformat")
+                else str(data_execucao_sao_paulo)
+            ),
+            "data_execucao_utc_sql_server": (
+                data_execucao_utc_sql_server.isoformat()
+                if hasattr(data_execucao_utc_sql_server, "isoformat")
+                else str(data_execucao_utc_sql_server)
+            ),
+            "timezone_negocio": NOME_TIMEZONE_SAO_PAULO,
+            "offset_utc_timezone_negocio": str(
+                agora_sao_paulo_com_fuso.utcoffset()
             ),
             "data_referencia_cancelamento_preferencia": (
                 data_referencia_cancelamento_preferencia.isoformat()
@@ -981,11 +1047,7 @@ def pipeline_cancela_reserva():
             ),
             "run_id_origem": "{{ run_id }}",
         },
-        # O cancelamento já foi confirmado antes deste ponto. O DAG de
-        # notificações deve ser disparado sem manter um worker ocupado
-        # esperando o DAG filho. Em ambientes com apenas um slot de worker ou
-        # de pool, wait_for_completion=True cria um bloqueio: o pai espera e o
-        # filho não consegue iniciar.
+  
         wait_for_completion=False,
         retries=0,
     )

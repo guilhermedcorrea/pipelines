@@ -11683,8 +11683,10 @@ function formatarNumeroParaInput(valor){
             console.warn('sincronizarPainelFacesVisiveisAposCatalogo: falhou ao reconciliar bloco', erro);
           });
         } else {
+          sincronizarFiltrosPainelFaceDoBloco(bloco, { manterSelecionadoInvalido: true });
           sincronizarBuscaPainelComSelect(bloco);
           preencherSeletoresTabelaPrecoComDadosSalvos(bloco, dadosSalvos, { atualizarResumo: true });
+          atualizarDisponibilidadeSeletorFacePorFiltros(bloco);
         }
       } catch (erro) {
         console.warn('sincronizarPainelFacesVisiveisAposCatalogo: falhou', erro);
@@ -11715,6 +11717,56 @@ function formatarNumeroParaInput(valor){
     return painelFacesPorChave.get(`${idPainel}|${codFace}`) || null;
   }
 
+  function obterOpcoesComerciaisPainelFaceCatalogo(item){
+    const opcoes = item?.OpcoesComerciais ?? item?.opcoes_comerciais ?? [];
+    return Array.isArray(opcoes) ? opcoes : [];
+  }
+
+  function itemCatalogoPainelFaceUsaInsercoesDigitais(item){
+    const tipoNormalizado = normalizarTextoComparacaoPainelContrato(
+      item?.Tipo ?? item?.TipoPainel ?? ''
+    );
+    if (tipoNormalizado === 'PAINEL DIGITAL') return true;
+
+    return obterOpcoesComerciaisPainelFaceCatalogo(item).some((opcao) => {
+      const valor = opcao?.ExibicoesDia ?? opcao?.exibicoes_dia;
+      return valor !== null && valor !== undefined && safeStr(valor).trim() !== '';
+    });
+  }
+
+  function chaveExibicoesDiaOpcaoCatalogo(item, opcao){
+    if (!itemCatalogoPainelFaceUsaInsercoesDigitais(item)) return 'FULL';
+    const exibicoes = safeStr(opcao?.ExibicoesDia ?? opcao?.exibicoes_dia ?? '').trim();
+    return exibicoes || 'FULL';
+  }
+
+  function periodoExibicaoOpcaoCatalogo(opcao){
+    return safeStr(
+      opcao?.PeriodoExibicao ??
+      opcao?.periodo_exibicao ??
+      ''
+    ).trim();
+  }
+
+  function itemPainelFacePossuiCombinacaoComercial(item, filtros = {}){
+    const exibicoesFiltro = new Set(normalizarValoresFiltroPainelFace(
+      filtros?.exibicoes ?? filtros?.exibicoes_dia ?? []
+    ));
+    const periodoFiltro = safeStr(
+      filtros?.periodo ?? filtros?.periodo_exibicao ?? ''
+    ).trim();
+
+    if (!exibicoesFiltro.size && !periodoFiltro) return true;
+
+    return obterOpcoesComerciaisPainelFaceCatalogo(item).some((opcao) => {
+      const chaveExibicoes = chaveExibicoesDiaOpcaoCatalogo(item, opcao);
+      const periodo = periodoExibicaoOpcaoCatalogo(opcao);
+      if (exibicoesFiltro.size && !exibicoesFiltro.has(chaveExibicoes)) return false;
+      if (periodoFiltro && periodo !== periodoFiltro) return false;
+      return true;
+    });
+  }
+
   function itemPainelFaceAtendeFiltros(item, filtros = {}, considerarTexto = true){
     if (!item) return false;
 
@@ -11731,6 +11783,7 @@ function formatarNumeroParaInput(valor){
 
     if (cidadesFiltro.size && !cidadesFiltro.has(cidadeItem)) return false;
     if (tiposFiltro.size && !tiposFiltro.has(tipoItem)) return false;
+    if (!itemPainelFacePossuiCombinacaoComercial(item, filtros)) return false;
 
     if (!considerarTexto || !termo) return true;
 
@@ -11748,18 +11801,10 @@ function formatarNumeroParaInput(valor){
     return campos.some((campo) => normalizarTexto(campo).includes(termoNormalizado));
   }
 
-  function listarCidadesPainelFaceDoBloco(bloco, tiposSelecionados = null){
-    const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
-    const tiposAtivos = new Set(
-      tiposSelecionados === null
-        ? obterValoresFiltroPainelFace(selectTipo)
-        : normalizarValoresFiltroPainelFace(tiposSelecionados)
-    );
+  function listarCidadesPainelFaceDoBloco(){
     const conjunto = new Set();
 
     for (const item of (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : [])) {
-      const tipoItem = safeStr(item?.Tipo ?? item?.TipoPainel ?? '').trim();
-      if (tiposAtivos.size && !tiposAtivos.has(tipoItem)) continue;
       const cidade = safeStr(item?.Cidade ?? '').trim();
       if (cidade) conjunto.add(cidade);
     }
@@ -11786,6 +11831,204 @@ function formatarNumeroParaInput(valor){
     return Array.from(conjunto).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }
 
+  function listarOpcoesExibicoesDiaCatalogoDoBloco(bloco){
+    const selectCidade = bloco?.querySelector('[data-role="select-filtro-cidade"]');
+    const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
+    const cidades = obterValoresFiltroPainelFace(selectCidade);
+    const tipos = obterValoresFiltroPainelFace(selectTipo);
+    if (!cidades.length || !tipos.length) return [];
+
+    const mapa = new Map();
+    const filtrosGeograficos = { cidades, tipos };
+
+    for (const item of (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : [])) {
+      if (!itemPainelFaceAtendeFiltros(item, filtrosGeograficos, false)) continue;
+
+      for (const opcao of obterOpcoesComerciaisPainelFaceCatalogo(item)) {
+        const chave = chaveExibicoesDiaOpcaoCatalogo(item, opcao);
+        if (!chave || mapa.has(chave)) continue;
+        mapa.set(chave, {
+          valor: chave,
+          label: labelExibicoesDiaDoPreco(chave),
+        });
+      }
+    }
+
+    return Array.from(mapa.values()).sort((a, b) => {
+      return a.label.localeCompare(b.label, 'pt-BR', { numeric: true });
+    });
+  }
+
+  function listarOpcoesPeriodoCatalogoDoBloco(bloco, exibicoesSelecionadas = null){
+    const selectCidade = bloco?.querySelector('[data-role="select-filtro-cidade"]');
+    const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
+    const selectExibicoes = bloco?.querySelector('[data-role="select-exibicoes-dia"]');
+    const cidades = obterValoresFiltroPainelFace(selectCidade);
+    const tipos = obterValoresFiltroPainelFace(selectTipo);
+    const exibicoes = exibicoesSelecionadas === null
+      ? obterValoresSelecionadosSelect(selectExibicoes)
+      : normalizarValoresFiltroPainelFace(exibicoesSelecionadas);
+
+    if (!cidades.length || !tipos.length || !exibicoes.length) return [];
+
+    const exibicoesSet = new Set(exibicoes);
+    const mapa = new Map();
+    const filtrosGeograficos = { cidades, tipos };
+
+    for (const item of (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : [])) {
+      if (!itemPainelFaceAtendeFiltros(item, filtrosGeograficos, false)) continue;
+
+      for (const opcao of obterOpcoesComerciaisPainelFaceCatalogo(item)) {
+        const chaveExibicoes = chaveExibicoesDiaOpcaoCatalogo(item, opcao);
+        if (!exibicoesSet.has(chaveExibicoes)) continue;
+
+        const periodo = periodoExibicaoOpcaoCatalogo(opcao);
+        if (!periodo || mapa.has(periodo)) continue;
+        mapa.set(periodo, { valor: periodo, label: periodo });
+      }
+    }
+
+    return Array.from(mapa.values()).sort((a, b) => {
+      return a.label.localeCompare(b.label, 'pt-BR');
+    });
+  }
+
+  function obterEstadoFluxoFiltrosPainelFace(bloco){
+    const cidades = obterValoresFiltroPainelFace(
+      bloco?.querySelector('[data-role="select-filtro-cidade"]')
+    );
+    const tipos = obterValoresFiltroPainelFace(
+      bloco?.querySelector('[data-role="select-filtro-tipo"]')
+    );
+    const exibicoes = obterValoresSelecionadosSelect(
+      bloco?.querySelector('[data-role="select-exibicoes-dia"]')
+    );
+    const periodo = safeStr(
+      bloco?.querySelector('[data-role="select-periodo-exibicao"]')?.value || ''
+    ).trim();
+
+    let mensagem = '';
+    if (!cidades.length) mensagem = 'Selecione uma ou mais cidades.';
+    else if (!tipos.length) mensagem = 'Selecione um ou mais tipos de produto.';
+    else if (!exibicoes.length) mensagem = 'Selecione Inserções / dia.';
+    else if (!periodo) mensagem = 'Selecione o Período de campanha.';
+
+    return {
+      cidades,
+      tipos,
+      exibicoes,
+      periodo,
+      completo: !mensagem,
+      mensagem,
+    };
+  }
+
+  function atualizarDisponibilidadeSeletorFacePorFiltros(bloco){
+    const estado = obterEstadoFluxoFiltrosPainelFace(bloco);
+    const combo = bloco?.querySelector('[data-role="combo-painel"]');
+    const input = bloco?.querySelector('[data-role="input-painel-busca"]');
+    const botao = bloco?.querySelector('[data-role="btn-toggle-painel"]');
+    const temFaceSelecionada = Boolean(obterPainelFaceSelecionadoDoBloco(bloco));
+
+    combo?.classList.toggle('is-disabled', !estado.completo);
+
+    if (input) {
+      input.disabled = !estado.completo;
+      input.placeholder = estado.completo
+        ? 'Digite ou selecione o CodFace...'
+        : estado.mensagem;
+      if (!temFaceSelecionada && !estado.completo) input.value = '';
+    }
+
+    if (botao) {
+      botao.disabled = !estado.completo;
+      botao.setAttribute('aria-disabled', estado.completo ? 'false' : 'true');
+    }
+
+    if (!estado.completo) fecharListaPaineisCombobox(bloco);
+    return estado;
+  }
+
+  function sincronizarFiltrosComerciaisCatalogoDoBloco(bloco, opcoes = {}){
+    const selectExibicoes = bloco?.querySelector('[data-role="select-exibicoes-dia"]');
+    const selectPeriodo = bloco?.querySelector('[data-role="select-periodo-exibicao"]');
+    const wrapExibicoes = bloco?.querySelector('[data-role="wrap-exibicoes-dia"]');
+    const wrapPeriodo = bloco?.querySelector('[data-role="wrap-periodo-exibicao"]');
+    if (!selectExibicoes || !selectPeriodo) return obterEstadoFluxoFiltrosPainelFace(bloco);
+
+    if (wrapExibicoes) wrapExibicoes.hidden = false;
+    if (wrapPeriodo) wrapPeriodo.hidden = false;
+
+    const catalogoDisponivel = Array.isArray(painelFacesCatalogo) && painelFacesCatalogo.length > 0;
+    if (!catalogoDisponivel) {
+      atualizarDropdownExibicoesDia(selectExibicoes);
+      return atualizarDisponibilidadeSeletorFacePorFiltros(bloco);
+    }
+
+    const exibicoesAtuais = obterValoresSelecionadosSelect(selectExibicoes);
+    const periodoAtual = safeStr(selectPeriodo.value || '').trim();
+    const opcoesExibicoes = listarOpcoesExibicoesDiaCatalogoDoBloco(bloco);
+    const valoresExibicoesValidos = new Set(opcoesExibicoes.map((item) => item.valor));
+    let exibicoesSelecionadas = exibicoesAtuais.filter((valor) => valoresExibicoesValidos.has(valor));
+
+    // Painéis não digitais têm uma única modalidade comercial: Full.
+    // Nesse caso não há decisão útil para o usuário, então o valor é aplicado.
+    if (
+      !exibicoesSelecionadas.length &&
+      opcoesExibicoes.length === 1 &&
+      safeStr(opcoesExibicoes[0]?.valor || '').trim().toUpperCase() === 'FULL'
+    ) {
+      exibicoesSelecionadas = ['FULL'];
+    }
+
+    preencherSelectOpcoesSimples(selectExibicoes, opcoesExibicoes, '— Inserções / dia —');
+    selecionarValoresNoSelect(selectExibicoes, exibicoesSelecionadas);
+
+    const opcoesPeriodo = listarOpcoesPeriodoCatalogoDoBloco(bloco, exibicoesSelecionadas);
+    const periodosValidos = new Set(opcoesPeriodo.map((item) => item.valor));
+    const periodoSelecionado = periodosValidos.has(periodoAtual) ? periodoAtual : '';
+
+    preencherSelectOpcoesSimples(selectPeriodo, opcoesPeriodo, '— Período de campanha —');
+    selectPeriodo.value = periodoSelecionado;
+
+    const estado = atualizarDisponibilidadeSeletorFacePorFiltros(bloco);
+    const selecionado = obterPainelFaceSelecionadoDoBloco(bloco);
+
+    if (!opcoes.manterSelecionadoInvalido && selecionado && estado.completo) {
+      const atende = itemPainelFaceAtendeFiltros(
+        selecionado,
+        {
+          cidades: estado.cidades,
+          tipos: estado.tipos,
+          exibicoes: estado.exibicoes,
+          periodo: estado.periodo,
+        },
+        false
+      );
+
+      if (!atende) {
+        limparSelecaoPainelFaceDoBloco(bloco, {
+          resetarFiltros: false,
+          manterBusca: false,
+          dispararChange: false,
+        });
+        return sincronizarFiltrosComerciaisCatalogoDoBloco(
+          bloco,
+          Object.assign({}, opcoes, { manterSelecionadoInvalido: true })
+        );
+      }
+    }
+
+    if (bloco?.querySelector('[data-role="combo-painel"]')?.classList.contains('is-open')) {
+      renderizarListaPaineisCombobox(
+        bloco,
+        bloco.querySelector('[data-role="input-painel-busca"]')?.value || ''
+      );
+    }
+
+    return estado;
+  }
+
   function sincronizarFiltrosPainelFaceDoBloco(bloco, opcoes = {}){
     const selectCidade = bloco?.querySelector('[data-role="select-filtro-cidade"]');
     const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
@@ -11796,20 +12039,24 @@ function formatarNumeroParaInput(valor){
     const catalogoDisponivel = Array.isArray(painelFacesCatalogo) && painelFacesCatalogo.length > 0;
 
     /*
-     * Os dois filtros formam facetas dependentes. O ciclo abaixo converge os
-     * valores disponíveis e remove somente seleções que deixaram de ter
-     * correspondência no filtro oposto, evitando combinações sem resultado.
+     * Fluxo direcional obrigatório:
+     * Cidade é a primeira faceta; Tipo Produto depende das cidades escolhidas.
+     * Os filtros comerciais e a Face são sincronizados na sequência.
      */
-    for (let iteracao = 0; iteracao < 3 && catalogoDisponivel; iteracao += 1) {
-      const cidadesDisponiveis = new Set(listarCidadesPainelFaceDoBloco(bloco, tiposSelecionados));
+    if (catalogoDisponivel) {
+      const cidadesDisponiveis = new Set(listarCidadesPainelFaceDoBloco());
       cidadesSelecionadas = cidadesSelecionadas.filter((cidade) => cidadesDisponiveis.has(cidade));
 
-      const tiposDisponiveis = new Set(listarTiposPainelFaceDoBloco(bloco, cidadesSelecionadas));
+      const tiposDisponiveis = cidadesSelecionadas.length
+        ? new Set(listarTiposPainelFaceDoBloco(bloco, cidadesSelecionadas))
+        : new Set();
       tiposSelecionados = tiposSelecionados.filter((tipo) => tiposDisponiveis.has(tipo));
     }
 
-    let cidades = listarCidadesPainelFaceDoBloco(bloco, tiposSelecionados);
-    let tipos = listarTiposPainelFaceDoBloco(bloco, cidadesSelecionadas);
+    let cidades = listarCidadesPainelFaceDoBloco();
+    let tipos = cidadesSelecionadas.length
+      ? listarTiposPainelFaceDoBloco(bloco, cidadesSelecionadas)
+      : [];
 
     // Enquanto o catálogo assíncrono não chegou, mantém filtros restaurados do card.
     if (!catalogoDisponivel) {
@@ -11820,13 +12067,10 @@ function formatarNumeroParaInput(valor){
     preencherSelectFiltroPainelFace(selectCidade, cidades, '— Cidade —', cidadesSelecionadas);
     preencherSelectFiltroPainelFace(selectTipo, tipos, '— Tipo Produto —', tiposSelecionados);
 
+    const estado = sincronizarFiltrosComerciaisCatalogoDoBloco(bloco, opcoes);
     const selecionado = obterPainelFaceSelecionadoDoBloco(bloco);
-    if (!opcoes.manterSelecionadoInvalido && selecionado) {
-      const filtrosAtuais = {
-        cidades: obterValoresFiltroPainelFace(selectCidade),
-        tipos: obterValoresFiltroPainelFace(selectTipo),
-      };
-      if (!itemPainelFaceAtendeFiltros(selecionado, filtrosAtuais, false)) {
+    if (!opcoes.manterSelecionadoInvalido && selecionado && estado?.completo) {
+      if (!itemPainelFaceAtendeFiltros(selecionado, estado, false)) {
         limparSelecaoPainelFaceDoBloco(bloco, { resetarFiltros: false, manterBusca: false, dispararChange: true });
         return;
       }
@@ -11836,14 +12080,25 @@ function formatarNumeroParaInput(valor){
   }
 
   function filtrarPaineisCombobox(bloco, texto){
-    const selectCidade = bloco?.querySelector('[data-role="select-filtro-cidade"]');
-    const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
+    const estadoAtual = obterEstadoFluxoFiltrosPainelFace(bloco);
+    const filtrosPersistidos = bloco?.__filtrosCatalogoSelecaoFaces
+      ? capturarEstadoFiltrosPainelFace(bloco)
+      : null;
+    const estado = filtrosPersistidos
+      ? Object.assign({}, filtrosPersistidos, {
+          completo: Boolean(
+            filtrosPersistidos.cidades.length &&
+            filtrosPersistidos.tipos.length &&
+            filtrosPersistidos.exibicoes.length &&
+            filtrosPersistidos.periodo
+          ),
+        })
+      : estadoAtual;
+    if (!estado.completo) return [];
 
-    const filtros = {
-      cidades: obterValoresFiltroPainelFace(selectCidade),
-      tipos: obterValoresFiltroPainelFace(selectTipo),
+    const filtros = Object.assign({}, estado, {
       texto: safeStr(texto || '').trim(),
-    };
+    });
 
     return (Array.isArray(painelFacesCatalogo) ? painelFacesCatalogo : [])
       .filter((item) => itemPainelFaceAtendeFiltros(item, filtros, true))
@@ -11860,6 +12115,9 @@ function formatarNumeroParaInput(valor){
     const lista = bloco?.querySelector('[data-role="lista-painel-busca"]');
     const input = bloco?.querySelector('[data-role="input-painel-busca"]');
     if (!combo || !lista) return;
+
+    const estado = atualizarDisponibilidadeSeletorFacePorFiltros(bloco);
+    if (!estado.completo) return;
 
     combo.classList.add('is-open');
     lista.hidden = false;
@@ -11927,6 +12185,61 @@ function formatarNumeroParaInput(valor){
     return null;
   }
 
+  function capturarEstadoFiltrosPainelFace(bloco){
+    const persistido = bloco?.__filtrosCatalogoSelecaoFaces;
+    if (persistido && typeof persistido === 'object') {
+      return {
+        cidades: normalizarValoresFiltroPainelFace(persistido.cidades || []),
+        tipos: normalizarValoresFiltroPainelFace(persistido.tipos || []),
+        exibicoes: normalizarValoresFiltroPainelFace(persistido.exibicoes || []),
+        periodo: safeStr(persistido.periodo || '').trim(),
+      };
+    }
+
+    return {
+      cidades: obterValoresFiltroPainelFace(
+        bloco?.querySelector('[data-role="select-filtro-cidade"]')
+      ),
+      tipos: obterValoresFiltroPainelFace(
+        bloco?.querySelector('[data-role="select-filtro-tipo"]')
+      ),
+      exibicoes: obterValoresSelecionadosSelect(
+        bloco?.querySelector('[data-role="select-exibicoes-dia"]')
+      ),
+      periodo: safeStr(
+        bloco?.querySelector('[data-role="select-periodo-exibicao"]')?.value || ''
+      ).trim(),
+    };
+  }
+
+  function aplicarEstadoFiltrosPainelFace(bloco, estado = {}){
+    const selectCidade = bloco?.querySelector('[data-role="select-filtro-cidade"]');
+    const selectTipo = bloco?.querySelector('[data-role="select-filtro-tipo"]');
+    const selectExibicoes = bloco?.querySelector('[data-role="select-exibicoes-dia"]');
+    const selectPeriodo = bloco?.querySelector('[data-role="select-periodo-exibicao"]');
+    if (!selectCidade || !selectTipo || !selectExibicoes || !selectPeriodo) return;
+
+    selecionarValoresFiltroPainelFace(selectCidade, estado.cidades || [], { atualizarDropdown: false });
+    selecionarValoresFiltroPainelFace(selectTipo, estado.tipos || [], { atualizarDropdown: false });
+    sincronizarFiltrosPainelFaceDoBloco(bloco, { manterSelecionadoInvalido: true });
+
+    selecionarValoresNoSelect(selectExibicoes, estado.exibicoes || []);
+    sincronizarFiltrosComerciaisCatalogoDoBloco(bloco, { manterSelecionadoInvalido: true });
+
+    const periodo = safeStr(estado.periodo || '').trim();
+    if (periodo && Array.from(selectPeriodo.options || []).some((opcao) => opcao.value === periodo)) {
+      selectPeriodo.value = periodo;
+    }
+
+    bloco.__filtrosCatalogoSelecaoFaces = {
+      cidades: obterValoresFiltroPainelFace(selectCidade),
+      tipos: obterValoresFiltroPainelFace(selectTipo),
+      exibicoes: obterValoresSelecionadosSelect(selectExibicoes),
+      periodo: safeStr(selectPeriodo.value || '').trim(),
+    };
+    atualizarDisponibilidadeSeletorFacePorFiltros(bloco);
+  }
+
   async function garantirBlocoPainelFaceSelecionado(blocoOrigem, item){
     if (!painelFaceLista || !item) return null;
 
@@ -11936,6 +12249,7 @@ function formatarNumeroParaInput(valor){
     const blocoExistente = encontrarBlocoPainelFacePorChave(chave);
     if (blocoExistente) return blocoExistente;
 
+    const estadoFiltros = capturarEstadoFiltrosPainelFace(blocoOrigem);
     let blocoDestino = encontrarBlocoPainelFaceVazio(blocoOrigem);
 
     if (!blocoDestino) {
@@ -11944,6 +12258,7 @@ function formatarNumeroParaInput(valor){
       atualizarVisibilidadeContratoAditivoDoBloco(blocoDestino);
     }
 
+    aplicarEstadoFiltrosPainelFace(blocoDestino, estadoFiltros);
     await selecionarPainelCombobox(blocoDestino, item, true);
     atualizarTitulosPainelFace();
 
@@ -11951,20 +12266,31 @@ function formatarNumeroParaInput(valor){
   }
 
   function removerBlocoPainelFaceSelecionadoPorChave(chave){
-    const blocoSelecionado = encontrarBlocoPainelFacePorChave(chave);
-    if (!blocoSelecionado) return;
-
+    const chaveBusca = safeStr(chave || '').trim().toUpperCase();
     const blocos = [...(painelFaceLista?.querySelectorAll('.kb-painel-item') || [])];
+    const blocosSelecionados = blocos.filter((blocoItem) => {
+      return obterChavePainelFaceSelecionadaDoBloco(blocoItem).toUpperCase() === chaveBusca;
+    });
+    if (!blocosSelecionados.length) return;
 
-    if (blocos.length <= 1) {
-      limparSelecaoPainelFaceDoBloco(blocoSelecionado, {
+    const outrosBlocos = blocos.filter((blocoItem) => !blocosSelecionados.includes(blocoItem));
+
+    if (!outrosBlocos.length) {
+      const [blocoMantido, ...duplicados] = blocosSelecionados;
+      limparSelecaoPainelFaceDoBloco(blocoMantido, {
         resetarFiltros: false,
         manterBusca: false,
         dispararChange: true,
       });
+      duplicados.forEach((blocoItem) => {
+        destruirCalendariosReservaDoBloco(blocoItem);
+        blocoItem.remove();
+      });
     } else {
-      destruirCalendariosReservaDoBloco(blocoSelecionado);
-      blocoSelecionado.remove();
+      blocosSelecionados.forEach((blocoItem) => {
+        destruirCalendariosReservaDoBloco(blocoItem);
+        blocoItem.remove();
+      });
     }
 
     atualizarTitulosPainelFace();
@@ -12023,7 +12349,11 @@ function formatarNumeroParaInput(valor){
     lista.innerHTML = '';
 
     if (!filtrados.length) {
-      lista.appendChild(el('div', { class:'kb-combobox-vazio' }, ['Nenhuma face encontrada para os filtros selecionados.']));
+      const estado = obterEstadoFluxoFiltrosPainelFace(bloco);
+      const mensagem = estado.completo
+        ? 'Nenhuma face encontrada para os filtros selecionados.'
+        : estado.mensagem;
+      lista.appendChild(el('div', { class:'kb-combobox-vazio' }, [mensagem]));
       return;
     }
 
@@ -12130,16 +12460,25 @@ function formatarNumeroParaInput(valor){
       return;
     }
 
-    selecionarValoresFiltroPainelFace(
-      selectCidade,
-      [safeStr(item?.Cidade ?? '').trim()],
-      { atualizarDropdown: false }
-    );
-    selecionarValoresFiltroPainelFace(
-      selectTipo,
-      [safeStr(item?.Tipo ?? item?.TipoPainel ?? '').trim()],
-      { atualizarDropdown: false }
-    );
+    /*
+     * Na seleção manual, os filtros podem representar várias cidades/tipos.
+     * Reduzi-los aos dados da primeira face faria as próximas opções sumirem.
+     * Preenche pelo item apenas quando o bloco ainda não possui aquela faceta.
+     */
+    if (!obterValoresFiltroPainelFace(selectCidade).length) {
+      selecionarValoresFiltroPainelFace(
+        selectCidade,
+        [safeStr(item?.Cidade ?? '').trim()],
+        { atualizarDropdown: false }
+      );
+    }
+    if (!obterValoresFiltroPainelFace(selectTipo).length) {
+      selecionarValoresFiltroPainelFace(
+        selectTipo,
+        [safeStr(item?.Tipo ?? item?.TipoPainel ?? '').trim()],
+        { atualizarDropdown: false }
+      );
+    }
     sincronizarFiltrosPainelFaceDoBloco(bloco, { manterSelecionadoInvalido: true });
 
     definirValorSelectOculto(selectPainel, String(idPainel), textoOpcaoPainel(item));
@@ -12934,6 +13273,9 @@ function formatarNumeroParaInput(valor){
   async function atualizarComercialDoBloco(bloco, dadosSalvos = null){
     const selectPainel = bloco.querySelector('[data-role="select-painel"]');
     const selectFace = bloco.querySelector('[data-role="select-face"]');
+    const filtrosCatalogoPendentes = bloco?.__filtrosCatalogoSelecaoFaces
+      ? capturarEstadoFiltrosPainelFace(bloco)
+      : null;
 
     if (dadosSalvos && typeof dadosSalvos === 'object') {
       bloco.__dadosPainelFaceOriginais = Object.assign({}, bloco.__dadosPainelFaceOriginais || {}, dadosSalvos || {});
@@ -12968,6 +13310,25 @@ function formatarNumeroParaInput(valor){
     }
 
     renderizarComercialBloco(bloco, comercial, dadosSalvos || bloco.__dadosPainelFaceOriginais || null);
+
+    /*
+     * O carregamento comercial reconstrói os selects. Na seleção manual, repõe
+     * as facetas escolhidas antes da Face para que a rotina seguinte consiga
+     * separar corretamente todas as Inserções/dia escolhidas.
+     */
+    if (filtrosCatalogoPendentes && !dadosSalvos) {
+      const selectExibicoes = bloco.querySelector('[data-role="select-exibicoes-dia"]');
+      const selectPeriodo = bloco.querySelector('[data-role="select-periodo-exibicao"]');
+
+      selecionarValoresNoSelect(selectExibicoes, filtrosCatalogoPendentes.exibicoes || []);
+      if (
+        filtrosCatalogoPendentes.periodo &&
+        Array.from(selectPeriodo?.options || []).some((opcao) => opcao.value === filtrosCatalogoPendentes.periodo)
+      ) {
+        selectPeriodo.value = filtrosCatalogoPendentes.periodo;
+      }
+      sincronizarSeletoresTabelaPrecoDoBloco(bloco, { origem: 'filtros_catalogo' });
+    }
   }
 
 
@@ -13359,6 +13720,18 @@ async function aplicarReservaDigitadaNoBloco(bloco){
     if (unicas.length <= 1) return false;
 
     const periodoAtual = safeStr(selectPeriodoExibicao?.value || '').trim();
+    const estadoFiltrosCatalogo = {
+      cidades: obterValoresFiltroPainelFace(
+        bloco.querySelector('[data-role="select-filtro-cidade"]')
+      ),
+      tipos: obterValoresFiltroPainelFace(
+        bloco.querySelector('[data-role="select-filtro-tipo"]')
+      ),
+      exibicoes: unicas.slice(),
+      periodo: periodoAtual,
+    };
+    bloco.__filtrosCatalogoSelecaoFaces = estadoFiltrosCatalogo;
+
     const exibicoesJaRepresentadas = listarExibicoesJaRepresentadasEmOutrosBlocos(bloco, periodoAtual);
     const exibicaoMantidaNoBloco = unicas.find((valor) => !exibicoesJaRepresentadas.has(valor)) || unicas[0];
     const dadosMantidos = montarDadosPainelFaceParaExibicao(bloco, exibicaoMantidaNoBloco, periodoAtual);
@@ -13381,6 +13754,12 @@ async function aplicarReservaDigitadaNoBloco(bloco){
         const dadosClone = montarDadosPainelFaceParaExibicao(bloco, exibicoesDia, periodoAtual);
         const novoBloco = criarPainelFaceItem(dadosClone);
         novoBloco.dataset.origemDivisaoExibicoesDia = '1';
+        novoBloco.__filtrosCatalogoSelecaoFaces = {
+          cidades: estadoFiltrosCatalogo.cidades.slice(),
+          tipos: estadoFiltrosCatalogo.tipos.slice(),
+          exibicoes: estadoFiltrosCatalogo.exibicoes.slice(),
+          periodo: estadoFiltrosCatalogo.periodo,
+        };
         aplicarGrupoVisualExibicoesDiaNoBloco(novoBloco, unicas, exibicoesDia);
         referenciaInsercao.insertAdjacentElement('afterend', novoBloco);
         referenciaInsercao = novoBloco;
@@ -13722,6 +14101,7 @@ async function aplicarReservaDigitadaNoBloco(bloco){
     });
 
     selectFiltroCidade?.addEventListener('change', () => {
+      delete bloco.__filtrosCatalogoSelecaoFaces;
       sincronizarFiltrosPainelFaceDoBloco(bloco);
       atualizarSelectFaceVisualDoBloco(bloco, { permitirSemPainel: true });
       if (comboPainel?.classList.contains('is-open')) {
@@ -13730,6 +14110,7 @@ async function aplicarReservaDigitadaNoBloco(bloco){
     });
 
     selectFiltroTipo?.addEventListener('change', () => {
+      delete bloco.__filtrosCatalogoSelecaoFaces;
       sincronizarFiltrosPainelFaceDoBloco(bloco);
       atualizarSelectFaceVisualDoBloco(bloco, { permitirSemPainel: true });
       if (comboPainel?.classList.contains('is-open')) {
@@ -13790,6 +14171,15 @@ async function aplicarReservaDigitadaNoBloco(bloco){
       await atualizarComercialDoBloco(bloco);
       await validarPainelFaceManualAditivoNoBloco(bloco);
 
+      /*
+       * A seleção múltipla de Inserções/dia ocorre antes da Face. Somente agora,
+       * com a tabela comercial específica carregada, cada inserção pode virar
+       * seu bloco sem perder preço, período ou CodFace.
+       */
+      if (codFaceManual && dividirBlocoPorMultiplasExibicoesDia(bloco)) {
+        return;
+      }
+
       const dataInicioAtual = safeStr(bloco.querySelector('[data-role="input-data-inicio"]')?.value || '').trim();
       const dataFimAtual = safeStr(bloco.querySelector('[data-role="input-data-fim"]')?.value || '').trim();
       limparCacheCalendarioOcupacao(codFaceManual);
@@ -13800,6 +14190,23 @@ async function aplicarReservaDigitadaNoBloco(bloco){
     });
 
     selectExibicoesDia?.addEventListener('change', () => {
+      const temFaceSelecionada = Boolean(obterPainelFaceSelecionadoDoBloco(bloco));
+
+      /*
+       * Antes da Face, este controle é uma faceta do catálogo. Recalcula
+       * Período e Faces, sem executar a rotina comercial específica de CodFace.
+       */
+      if (!temFaceSelecionada) {
+        delete bloco.__filtrosCatalogoSelecaoFaces;
+        sincronizarFiltrosComerciaisCatalogoDoBloco(bloco);
+        atualizarResumoDropdownExibicoesDia(selectExibicoesDia);
+        atualizarTitulosPainelFace();
+        agendarSincronizacaoFormularioSolicitacao();
+        return;
+      }
+
+      delete bloco.__filtrosCatalogoSelecaoFaces;
+
       /*
        * Regra de negócio: cada inserção/dia selecionada precisa virar um bloco visual
        * separado do mesmo CodPonto/CodFace. Ex.: 540 e 1080 = dois itens.
@@ -13819,6 +14226,15 @@ async function aplicarReservaDigitadaNoBloco(bloco){
     });
 
     selectPeriodoExibicao?.addEventListener('change', () => {
+      if (!obterPainelFaceSelecionadoDoBloco(bloco)) {
+        delete bloco.__filtrosCatalogoSelecaoFaces;
+        sincronizarFiltrosComerciaisCatalogoDoBloco(bloco);
+        atualizarTitulosPainelFace();
+        agendarSincronizacaoFormularioSolicitacao();
+        return;
+      }
+
+      delete bloco.__filtrosCatalogoSelecaoFaces;
       sincronizarSeletoresTabelaPrecoDoBloco(bloco, { origem: 'periodo' });
       atualizarResumoComercial(bloco, { formatarCampos: true });
       atualizarTitulosPainelFace();
@@ -17634,6 +18050,24 @@ async function moverCard(idCard, idFasePara, posicao) {
     }
   }
 
+  function sincronizarProporcaoCabecalhoOrcamento(imagem){
+    const container = imagem?.closest?.(".kb-orcamento-head-marca");
+    const larguraNatural = Number(imagem?.naturalWidth || 0);
+    const alturaNatural = Number(imagem?.naturalHeight || 0);
+
+    if (!container || !larguraNatural || !alturaNatural) {
+      return false;
+    }
+
+    /*
+      A proporção deve vir da própria arte carregada, e não de uma dimensão
+      fixa no CSS. Assim o cabeçalho cresce na altura correta para a largura
+      disponível e nenhuma borda do PNG é descartada.
+    */
+    container.style.aspectRatio = `${larguraNatural} / ${alturaNatural}`;
+    return true;
+  }
+
   function aplicarEncaixeCabecalhoOrcamento(imagem, preenchimento, caixaRecorte){
     const container = imagem?.closest?.(".kb-orcamento-head-marca");
     if (!container || !preenchimento || !caixaRecorte) {
@@ -17650,11 +18084,11 @@ async function moverCard(idCard, idFasePara, posicao) {
     const alturaNatural = caixaRecorte.alturaNatural;
 
     /*
-      A imagem usa object-fit: cover. Portanto calculo exatamente a escala e
-      o corte central que o navegador aplica antes de converter o recorte para
-      percentuais do container.
+      A imagem usa object-fit: contain. Portanto calculo exatamente a escala e
+      a centralização aplicadas pelo navegador antes de converter o recorte
+      transparente para percentuais do container.
     */
-    const escala = Math.max(
+    const escala = Math.min(
       larguraContainer / larguraNatural,
       alturaContainer / alturaNatural
     );
@@ -17715,6 +18149,8 @@ async function moverCard(idCard, idFasePara, posicao) {
     };
 
     const medirImagem = () => {
+      sincronizarProporcaoCabecalhoOrcamento(imagem);
+
       if (!caixaRecorte) {
         caixaRecorte = detectarCaixaTransparenteCabecalho(imagem);
       }
@@ -18176,7 +18612,7 @@ async function moverCard(idCard, idFasePara, posicao) {
         z-index:2;
         width:100%;
         height:100%;
-        object-fit:cover;
+        object-fit:contain;
         object-position:center center;
         display:block;
       }
