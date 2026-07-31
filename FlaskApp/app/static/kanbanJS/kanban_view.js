@@ -18904,7 +18904,12 @@ async function moverCard(idCard, idFasePara, posicao) {
       .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva{
         display:grid;
         grid-template-columns:minmax(0, 1fr);
-        grid-template-rows:minmax(0, 1fr) auto;
+        /*
+         * A arte exclusiva usa proporcao horizontal (16:9). Em uma folha A4
+         * paisagem, 42 mm para a faixa deixam 167 mm para a imagem, eliminando
+         * o vao que era criado pelo object-fit:contain dentro da linha flexivel.
+         */
+        grid-template-rows:minmax(0, 1fr) 42mm;
         width:100%;
         min-width:100%;
         max-width:100%;
@@ -18955,7 +18960,9 @@ async function moverCard(idCard, idFasePara, posicao) {
         max-height:100%;
         margin:0;
         object-fit:contain;
-        object-position:center center;
+        /* Mantem a borda inferior da arte encostada na faixa, mesmo se uma
+           imagem futura tiver proporcao ligeiramente diferente de 16:9. */
+        object-position:center bottom;
         background:#ffffff;
       }
       .kb-orcamento-item.kb-orcamento-item--imagem-exclusiva .kb-orcamento-item-info,
@@ -18972,11 +18979,12 @@ async function moverCard(idCard, idFasePara, posicao) {
         width:100%;
         min-width:100%;
         max-width:100%;
-        min-height:28mm;
-        max-height:28mm;
+        height:42mm;
+        min-height:42mm;
+        max-height:42mm;
         gap:4mm;
         margin:0;
-        padding:3.5mm 7mm;
+        padding:5mm 7mm;
         border:0;
         border-radius:0;
         overflow:hidden;
@@ -18989,9 +18997,9 @@ async function moverCard(idCard, idFasePara, posicao) {
       .kb-orcamento-faixa-texto{
         min-width:0;
         display:grid;
-        gap:1.2mm;
-        font-size:8.5pt;
-        line-height:1.2;
+        gap:1.8mm;
+        font-size:11pt;
+        line-height:1.25;
       }
       .kb-orcamento-faixa-linha{
         min-width:0;
@@ -19038,9 +19046,9 @@ async function moverCard(idCard, idFasePara, posicao) {
       .kb-orcamento-faixa-logo{
         display:block;
         width:100%;
-        max-width:56mm;
+        max-width:62mm;
         height:auto;
-        max-height:15mm;
+        max-height:22mm;
         object-fit:contain;
         object-position:right center;
       }
