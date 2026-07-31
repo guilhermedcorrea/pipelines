@@ -5240,7 +5240,6 @@
       valorNegociado === null
       && valorCheio !== null
       && percentualDesconto !== null
-      && percentualDesconto >= 0
       && percentualDesconto <= 100
     ) {
       valorNegociado = valorCheio * (1 - (percentualDesconto / 100));
@@ -5257,10 +5256,40 @@
       && valorNegociado !== null
     ) {
       const descontoCalculado = ((valorCheio - valorNegociado) / valorCheio) * 100;
-      if (descontoCalculado >= 0 && descontoCalculado <= 100) {
+      if (descontoCalculado <= 100) {
         percentualDesconto = descontoCalculado;
       }
     }
+
+    /*
+     * A apresentação deve refletir o efeito comercial do ajuste:
+     * - redução: valor cheio, desconto e valor negociado;
+     * - sem alteração: somente valor cheio;
+     * - acréscimo (desconto negativo): somente valor negociado.
+     *
+     * A tolerância de meio centavo evita classificar como desconto/acréscimo
+     * diferenças residuais de ponto flutuante que não alteram o valor exibido.
+     */
+    const toleranciaMonetaria = 0.005;
+    const diferencaValores = (
+      valorCheio !== null && valorNegociado !== null
+        ? valorCheio - valorNegociado
+        : null
+    );
+    const temAcrescimo = (
+      (percentualDesconto !== null && percentualDesconto < 0)
+      || (diferencaValores !== null && diferencaValores < -toleranciaMonetaria)
+    );
+    const temDescontoRedutor = (
+      !temAcrescimo
+      && percentualDesconto !== null
+      && percentualDesconto > 0
+      && diferencaValores !== null
+      && diferencaValores > toleranciaMonetaria
+    );
+    const tipoApresentacaoValores = temAcrescimo
+      ? "acrescimo"
+      : (temDescontoRedutor ? "desconto" : "sem-desconto");
 
     const valorCheioTexto = formatarMoeda(valorCheio);
     const descontoTexto = formatarPercentual(percentualDesconto);
@@ -5274,6 +5303,7 @@
       valorCheioTexto,
       descontoTexto,
       valorNegociadoTexto,
+      tipoApresentacaoValores,
       urlLogoEuromidia
     ]);
 
@@ -5305,16 +5335,30 @@
       );
     }
 
+    const camposValores = [];
+    if (temAcrescimo || valorCheio === null) {
+      camposValores.push(
+        criarCampoFaixa("Valor Período Negociado", valorNegociadoTexto, true)
+      );
+    } else {
+      camposValores.push(
+        criarCampoFaixa("Valor Período", valorCheioTexto)
+      );
+
+      if (temDescontoRedutor) {
+        camposValores.push(
+          criarCampoFaixa("Desconto", descontoTexto),
+          criarCampoFaixa("Valor Período Negociado", valorNegociadoTexto, true)
+        );
+      }
+    }
+
     texto.append(
       criarLinhaFaixa(camposPrimeiraLinha),
       criarLinhaFaixa([
         criarCampoFaixa("Período de Campanha", periodoCampanha)
       ]),
-      criarLinhaFaixa([
-        criarCampoFaixa("Valor Período", valorCheioTexto),
-        criarCampoFaixa("Desconto", descontoTexto),
-        criarCampoFaixa("Valor Período Negociado", valorNegociadoTexto, true)
-      ], "kb-orcamento-faixa-linha--valores")
+      criarLinhaFaixa(camposValores, "kb-orcamento-faixa-linha--valores")
     );
     faixa.appendChild(texto);
 
