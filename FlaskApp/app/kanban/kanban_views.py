@@ -35,6 +35,7 @@ TABELA_PERMISSAO_DESCONTO = "[Kanban].[Silver].[DimKanbanPermissaoDesconto]"
 TABELA_CARD_APROVA_PRECO = "[Kanban].[Silver].[FatoAprovaPreco]"
 
 TABELA_CARD_PAINEL_FACE = "[Kanban].[Silver].[FatoKanbanCardPainelFace]"
+TABELA_VINCULA_MARCAS_OCUPACAO_CARD = "[Integracao].[Silver].[FatoVinculaMarcasOcupacaoCard]"
 TABELA_OCUPACAO_PAINEIS_EUROMIDIA = "[Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]"
 TABELA_DIM_PAINEIS_EUROMIDIA = "[Integracao].[Silver].[DimPaineisEuromidia]"
 TABELA_DIM_FACES_PAINEIS = "[Integracao].[Silver].[DimFacesPaineis]"
@@ -6160,6 +6161,12 @@ def _executar_movimento_card_core(
         else None
     )
     id_reserva_payload_movimento = _primeiro_id_reserva_payload_kanban(painel_faces_payload_movimento)
+    marcas_movimento_informadas = _marcas_card_foram_informadas(payload)
+    marcas_movimento = (
+        _normalizar_marcas_card_payload(payload.get("marcas"), payload.get("marca"))
+        if marcas_movimento_informadas
+        else []
+    )
 
     if not id_fase_para:
         raise ValueError("Fase de destino inválida.")
@@ -6337,11 +6344,9 @@ def _executar_movimento_card_core(
     campos_complementares_movimento: list[str] = []
     params_complementares_movimento: dict[str, Any] = {"id_card": int(id_card)}
 
-    if "marca" in payload and _coluna_existe(TABELA_CARD, "Marca"):
-        marca_movimento = _texto_ou_none(payload.get("marca"), 100)
-        if marca_movimento:
-            campos_complementares_movimento.append("Marca = :marca_movimento")
-            params_complementares_movimento["marca_movimento"] = marca_movimento
+    if marcas_movimento_informadas and _coluna_existe(TABELA_CARD, "Marca"):
+        campos_complementares_movimento.append("Marca = :marca_movimento")
+        params_complementares_movimento["marca_movimento"] = marcas_movimento[0] if marcas_movimento else None
 
     if "telefone" in payload and _coluna_existe(TABELA_CARD, "Telefone"):
         telefone_movimento = _normalizar_telefone_card(payload.get("telefone"), 30)
@@ -6367,6 +6372,9 @@ def _executar_movimento_card_core(
             """),
             params_complementares_movimento,
         )
+
+    if marcas_movimento_informadas:
+        _sincronizar_marcas_ocupacao_card(int(id_card), marcas_movimento)
 
     sincronizacao_id_reserva_card_movimento = None
     if isinstance(painel_faces_payload_movimento, list):
@@ -6907,6 +6915,139 @@ def _objeto_existe(nome_objeto: str) -> bool:
     existe = bool(db.session.execute(sql, {"nome_objeto": nome_objeto}).scalar() or 0)
     cache.set(chave, existe, timeout=TIMEOUT_CACHE_LONGO * 100)
     return existe
+
+
+def _normalizar_marcas_card_payload(valor_marcas: Any, marca_legada: Any = None) -> list[str]:
+    """Normaliza a coleção de marcas mantendo a ordem e removendo duplicidades."""
+
+    valores = list(valor_marcas) if isinstance(valor_marcas, (list, tuple)) else []
+    if marca_legada not in (None, ""):
+        valores.append(marca_legada)
+
+    marcas: list[str] = []
+    chaves_vistas: set[str] = set()
+
+    for item in valores:
+        valor = item
+        if isinstance(item, Mapping):
+            valor = item.get("Marca") if item.get("Marca") is not None else item.get("marca")
+
+        marca = str(valor or "").strip()
+        if not marca:
+            continue
+        if len(marca) > 100:
+            raise ValueError(f"A marca '{marca[:40]}...' ultrapassa o limite de 100 caracteres.")
+
+        chave = unicodedata.normalize("NFKD", marca)
+        chave = "".join(caractere for caractere in chave if not unicodedata.combining(caractere)).casefold()
+        if chave in chaves_vistas:
+            continue
+
+        chaves_vistas.add(chave)
+        marcas.append(marca)
+
+    return marcas
+
+
+def _marcas_card_foram_informadas(payload: Mapping[str, Any] | None) -> bool:
+    return isinstance(payload, Mapping) and ("marcas" in payload or "marca" in payload)
+
+
+def _sincronizar_marcas_ocupacao_card(id_card: int, marcas: list[str]) -> dict[str, Any]:
+    """Substitui atomicamente as marcas temporárias do card antes da aprovação."""
+
+    id_card_int = int(id_card or 0)
+    if id_card_int <= 0:
+        raise ValueError("ID do card inválido para sincronizar marcas.")
+
+    if not _objeto_existe(TABELA_VINCULA_MARCAS_OCUPACAO_CARD):
+        raise RuntimeError(
+            "A tabela Kanban.Silver.FatoVinculaMarcasOcupacaoCard não foi encontrada. "
+            "Crie a tabela informada antes de salvar múltiplas marcas no card."
+        )
+
+    marcas_normalizadas = _normalizar_marcas_card_payload(marcas)
+
+    resultado_exclusao = db.session.execute(
+        text(f"""
+            DELETE FROM {TABELA_VINCULA_MARCAS_OCUPACAO_CARD}
+             WHERE IDFatoKanbanCard = :id_card;
+        """),
+        {"id_card": id_card_int},
+    )
+
+    for marca in marcas_normalizadas:
+        db.session.execute(
+            text(f"""
+                INSERT INTO {TABELA_VINCULA_MARCAS_OCUPACAO_CARD}
+                (
+                    IDFatoKanbanCard,
+                    IDFatoOcupacaoPaineisEuromidia,
+                    IDEmpresa,
+                    IDDimPaineisEuromidia,
+                    IDDimFacesPaineis,
+                    ReferenciaContrato,
+                    ReferenciaLogycWare,
+                    Marca,
+                    DataAtualizado
+                )
+                VALUES
+                (
+                    :id_card,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL,
+                    :marca,
+                    SYSDATETIME()
+                );
+            """),
+            {"id_card": id_card_int, "marca": marca},
+        )
+
+    return {
+        "ok": True,
+        "id_card": id_card_int,
+        "marcas": marcas_normalizadas,
+        "quantidade": len(marcas_normalizadas),
+        "linhas_removidas": max(int(resultado_exclusao.rowcount or 0), 0),
+    }
+
+
+def _listar_marcas_ocupacao_card(id_card: int) -> list[str]:
+    """Lista as marcas ainda vinculadas ao card na tabela temporária."""
+
+    id_card_int = int(id_card or 0)
+    if id_card_int <= 0 or not _objeto_existe(TABELA_VINCULA_MARCAS_OCUPACAO_CARD):
+        return []
+
+    rows = db.session.execute(
+        text(f"""
+            SELECT Marca, MIN(DataAtualizado) AS PrimeiraAtualizacao
+              FROM {TABELA_VINCULA_MARCAS_OCUPACAO_CARD} WITH (NOLOCK)
+             WHERE IDFatoKanbanCard = :id_card
+               AND NULLIF(LTRIM(RTRIM(Marca)), '') IS NOT NULL
+             GROUP BY Marca
+             ORDER BY MIN(DataAtualizado), Marca;
+        """),
+        {"id_card": id_card_int},
+    ).mappings().all()
+
+    return _normalizar_marcas_card_payload([row.get("Marca") for row in rows])
+
+
+def _apagar_marcas_ocupacao_card(id_card: int) -> int:
+    id_card_int = int(id_card or 0)
+    if id_card_int <= 0 or not _objeto_existe(TABELA_VINCULA_MARCAS_OCUPACAO_CARD):
+        return 0
+
+    resultado = db.session.execute(
+        text(f"DELETE FROM {TABELA_VINCULA_MARCAS_OCUPACAO_CARD} WHERE IDFatoKanbanCard = :id_card;"),
+        {"id_card": id_card_int},
+    )
+    return max(int(resultado.rowcount or 0), 0)
 
 
 
@@ -7544,6 +7685,13 @@ def _obter_card_quadro_payload_minimo(id_card: int) -> dict[str, Any]:
 
     card_dict = _aplicar_tipo_cliente_desconto_no_card_dict(card_dict)
     card_dict = _aplicar_origem_atendimento_no_card_dict(card_dict)
+
+    marcas_temporarias_card = _listar_marcas_ocupacao_card(int(id_card))
+    marcas_card = _normalizar_marcas_card_payload(
+        [card_dict.get("Marca"), *marcas_temporarias_card]
+    )
+    card_dict["Marcas"] = marcas_card
+    card_dict["marcas"] = marcas_card
 
     sql_tags = text("""
         SELECT
@@ -19421,6 +19569,13 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
 
     _aplicar_versao_concorrencia_dict(card_dict, versao_hex_convertida)
 
+    marcas_temporarias_card = _listar_marcas_ocupacao_card(int(id_card))
+    marcas_card = _normalizar_marcas_card_payload(
+        [card_dict.get("Marca"), *marcas_temporarias_card]
+    )
+    card_dict["Marcas"] = marcas_card
+    card_dict["marcas"] = marcas_card
+
     sql_tags = text("""
         SELECT
             ct.IDFatoKanbanCard,
@@ -19483,6 +19638,7 @@ def _obter_card_detalhe_payload(id_card: int) -> dict[str, Any]:
         "paineis_vinculados": paineis_vinculados,
         "painel_faces": paineis_vinculados,
         "painelFaces": paineis_vinculados,
+        "marcas": marcas_card,
         "solicitacao_snapshot_editavel": snapshot_solicitacao_editavel,
         "vendedor_logado_solicitacao": dict(vendedor_logado_solicitacao) if vendedor_logado_solicitacao else None,
     }
@@ -23922,6 +24078,7 @@ def api_card_inativar(id_card: int):
         sincronizacao_contato_contrato = _apagar_contatos_card_antes_aprovacao(
             id_card=int(id_card),
         )
+        marcas_temporarias_removidas = _apagar_marcas_ocupacao_card(int(id_card))
 
         _registrar_ocorrencia_card_tipo_documento_kanban(
             id_fato_kanban_card=id_card,
@@ -23967,6 +24124,7 @@ def api_card_inativar(id_card: int):
                 "descricao": descricao or None,
                 "sincronizacao_reservas": sincronizacao_reservas,
                 "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
+                "marcas_temporarias_removidas": int(marcas_temporarias_removidas or 0),
                 "payload_minimo": True,
                 "id_movimento": int(row_mov.get("IDFatoKanbanCardMovimento") or 0) if row_mov else None,
                 "id_observacao": int(row_observacao.get("IDFatoKanbanCardObservacoes") or 0) if row_observacao else None,
@@ -23990,6 +24148,7 @@ def api_card_inativar(id_card: int):
                 "id_motivo_encerramento": id_motivo_encerramento,
                 "sincronizacao_reservas": sincronizacao_reservas,
                 "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
+                "marcas_temporarias_removidas": int(marcas_temporarias_removidas or 0),
                 "payload_minimo": True,
                 "id_movimento": int(row_mov.get("IDFatoKanbanCardMovimento") or 0) if row_mov else None,
                 "id_observacao": int(row_observacao.get("IDFatoKanbanCardObservacoes") or 0) if row_observacao else None,
@@ -34233,7 +34392,13 @@ def api_card_criar(id_kanban: int):
         id_empresa_bureau = payload.get("id_empresa_bureau")
         id_empresa_intermediario = payload.get("id_empresa_intermediario")
         id_empresa_cliente_direto = payload.get("id_empresa_cliente_direto")
-        marca_card = payload.get("marca")
+        marcas_card_informadas = _marcas_card_foram_informadas(payload)
+        marcas_card = (
+            _normalizar_marcas_card_payload(payload.get("marcas"), payload.get("marca"))
+            if marcas_card_informadas
+            else []
+        )
+        marca_card = marcas_card[0] if marcas_card else payload.get("marca")
         telefone_card = payload.get("telefone")
         email_card = payload.get("email")
         id_dim_cnaes = payload.get("id_dim_cnaes") if "id_dim_cnaes" in payload else None
@@ -34614,6 +34779,10 @@ def api_card_criar(id_kanban: int):
         novo_id = db.session.execute(text(sql_insert), params).scalar()
         if not novo_id:
             raise RuntimeError("O INSERT não retornou IDFatoKanbanCard.")
+
+        if marcas_card_informadas:
+            etapa = "sincronizar_marcas_card"
+            _sincronizar_marcas_ocupacao_card(int(novo_id), marcas_card)
 
         etapa = "sincronizar_tipo_contrato"
         aplicar_tags_automaticas_tipo_contrato = not (
@@ -35038,7 +35207,13 @@ def api_card_atualizar(id_card: int):
         id_empresa_bureau = payload.get("id_empresa_bureau")
         id_empresa_intermediario = payload.get("id_empresa_intermediario")
         id_empresa_cliente_direto = payload.get("id_empresa_cliente_direto")
-        marca_card = payload.get("marca")
+        marcas_card_informadas = _marcas_card_foram_informadas(payload)
+        marcas_card = (
+            _normalizar_marcas_card_payload(payload.get("marcas"), payload.get("marca"))
+            if marcas_card_informadas
+            else []
+        )
+        marca_card = marcas_card[0] if marcas_card else payload.get("marca")
         telefone_card = payload.get("telefone")
         email_card = payload.get("email")
         solicitacao_contrato_payload = payload.get("solicitacao_contrato") if isinstance(payload.get("solicitacao_contrato"), dict) else None
@@ -35427,6 +35602,9 @@ def api_card_atualizar(id_card: int):
                     motivo="versao_concorrencia_desatualizada",
                 )
             ), 409
+
+        if marcas_card_informadas:
+            _sincronizar_marcas_ocupacao_card(int(id_card), marcas_card)
 
         sincronizacao_tipo = _sincronizar_tipo_contrato_card(
             id_card=int(id_card),

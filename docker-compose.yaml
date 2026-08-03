@@ -27,7 +27,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 1
     AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: 1
 
-    AIRFLOW__CELERY__WORKER_CONCURRENCY: 1
+    AIRFLOW__CELERY__WORKER_CONCURRENCY: 2
     AIRFLOW__SCHEDULER__TASK_QUEUED_TIMEOUT: 3600
 
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager

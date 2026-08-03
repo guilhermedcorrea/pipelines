@@ -2012,8 +2012,9 @@
               {% set usuario_pode_renovar_linha = row.UsuarioPodeRenovarLinha if row.UsuarioPodeRenovarLinha is defined else (not usuario_logado_eh_vendedor and row.PodeRenovar) %}
               {% set usuario_pode_efetivar_reserva = row.UsuarioPodeEfetivarReserva if row.UsuarioPodeEfetivarReserva is defined else false %}
               {% set usuario_pode_cancelar_reserva = row.UsuarioPodeCancelarReserva if row.UsuarioPodeCancelarReserva is defined else false %}
+              {% set usuario_pode_cancelar_ocupacao = row.UsuarioPodeCancelarOcupacao if row.UsuarioPodeCancelarOcupacao is defined else false %}
               {% set linha_eh_reserva = row.FonteLinha == 'RESERVA' and row.IDReservaOcupacao %}
-              {% set linha_tem_acao = usuario_pode_efetivar_reserva or usuario_pode_cancelar_reserva or usuario_pode_renovar_linha %}
+              {% set linha_tem_acao = usuario_pode_efetivar_reserva or usuario_pode_cancelar_reserva or usuario_pode_cancelar_ocupacao or usuario_pode_renovar_linha %}
               <tr
                 data-fonte-linha="{{ row.FonteLinha }}"
                 data-id-reserva="{{ row.IDReservaOcupacao or '' }}"
@@ -2102,6 +2103,7 @@
                     data-linha-reserva="{{ 1 if linha_eh_reserva else 0 }}"
                     data-pode-efetivar="{{ 1 if usuario_pode_efetivar_reserva else 0 }}"
                     data-pode-cancelar="{{ 1 if linha_eh_reserva and usuario_pode_cancelar_reserva else 0 }}"
+                    data-pode-cancelar-ocupacao="{{ 1 if not linha_eh_reserva and usuario_pode_cancelar_ocupacao and row.IDOcupacaoContrato else 0 }}"
                     data-pode-renovar="{{ 1 if not linha_eh_reserva and usuario_pode_renovar_linha and row.IDFatoVencimentoCampanhaEuromidia else 0 }}"
                   >
                     <button
@@ -2156,6 +2158,18 @@
                       </label>
                       {% endif %}
 
+                      {% if not linha_eh_reserva and usuario_pode_cancelar_ocupacao and row.IDOcupacaoContrato %}
+                      <label class="vc-acao-opcao">
+                        <input
+                          type="checkbox"
+                          class="js-acao-opcao"
+                          data-acao="cancelar-ocupacao"
+                          autocomplete="off"
+                        >
+                        <span class="vc-acao-opcao-texto">Cancelar Ocupação</span>
+                      </label>
+                      {% endif %}
+
                       {% if not linha_eh_reserva and usuario_pode_renovar_linha and row.IDFatoVencimentoCampanhaEuromidia %}
                       <label class="vc-acao-opcao">
                         <input
@@ -2193,6 +2207,19 @@
                           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         {% endif %}
                       </form>
+                    {% endif %}
+
+                    {% if not linha_eh_reserva and usuario_pode_cancelar_ocupacao and row.IDOcupacaoContrato %}
+                    <form
+                      class="vc-acao-form js-form-cancelar-ocupacao"
+                      method="post"
+                      action="{{ url_for('admin.vencimentos_campanhas_cancelar_ocupacao', id_ocupacao=row.IDOcupacaoContrato) }}"
+                      hidden
+                    >
+                      {% if csrf_token is defined %}
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      {% endif %}
+                    </form>
                     {% endif %}
 
                     {% if not linha_eh_reserva and usuario_pode_renovar_linha and row.IDFatoVencimentoCampanhaEuromidia %}
@@ -3312,6 +3339,7 @@
     const linhaEhReserva = wrap.dataset.linhaReserva === '1';
     const podeEfetivar = wrap.dataset.podeEfetivar === '1';
     const podeCancelar = wrap.dataset.podeCancelar === '1';
+    const podeCancelarOcupacao = wrap.dataset.podeCancelarOcupacao === '1';
     const podeRenovar = wrap.dataset.podeRenovar === '1';
 
     if(acao === 'efetivar'){
@@ -3343,6 +3371,24 @@
       const confirmouCancelamento = await vcAcaoConfirmar('Deseja Cancelar essa Reserva?');
       if(confirmouCancelamento){
         await vcAcaoEnviarFormulario(wrap, '.js-form-cancelar-reserva');
+      }
+      return;
+    }
+
+    if(acao === 'cancelar-ocupacao'){
+      if(linhaEhReserva){
+        await vcAcaoExibirMensagem('Esta ação está disponível somente para Ocupações.');
+        return;
+      }
+
+      if(!podeCancelarOcupacao){
+        await vcAcaoExibirMensagem('Somente usuários com perfil ADMIN podem cancelar esta Ocupação.');
+        return;
+      }
+
+      const confirmouCancelamentoOcupacao = await vcAcaoConfirmar('Deseja Cancelar esta Ocupação?');
+      if(confirmouCancelamentoOcupacao){
+        await vcAcaoEnviarFormulario(wrap, '.js-form-cancelar-ocupacao');
       }
       return;
     }

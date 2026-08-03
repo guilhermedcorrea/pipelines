@@ -1154,7 +1154,7 @@ DROP TABLE #CampanhaAgrupada;
     start_date=pendulum.datetime(2026, 5, 7, tz=TZ),
     catchup=False,
     max_active_runs=1,
-    dagrun_timeout=timedelta(minutes=8),
+    dagrun_timeout=timedelta(minutes=20),
     tags=[
         "euromidia",
         "contratos",

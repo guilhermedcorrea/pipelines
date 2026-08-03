@@ -3,6 +3,7 @@ from ..extensions import db, limiter, csrf, cache
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify,current_app,abort, send_file
 from ..models.admin_models import FatoMovimentoFinanceiroEmpresas, DimEmpresaProprietaria,DimProdutoAuvo
 from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
 from sqlalchemy import func, case,text
 from flask_login import login_required, current_user
 from werkzeug.exceptions import HTTPException
@@ -58,6 +59,8 @@ ID_FASE_FORMULARIO_CONTRATO = 4
 TABELA_CARD_OCORRENCIA = "[Integracao].[Silver].[FatoCardOCorrencia]"
 TABELA_VENCIMENTO_CAMPANHA = "[Integracao].[Silver].[FatoVencimentoCampanhaEuromidia]"
 TABELA_OCUPACAO_PAINEIS_EUROMIDIA_ADMIN = "[Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]"
+TABELA_VINCULA_MARCAS_OCUPACAO_CARD_ADMIN = "[Integracao].[Silver].[FatoVinculaMarcasOcupacaoCard]"
+TABELA_VINCULA_MARCAS_OCUPACAO_ADMIN = "[Integracao].[Silver].[FatoVinculaMarcasOcupacao]"
 TABELA_KANBAN_CARD_RENOVACAO = "[Kanban].[Silver].[FatoKanbanCard]"
 TABELA_KANBAN_CARD_TAG_RENOVACAO = "[Kanban].[Silver].[FatoKanbanCardTag]"
 TABELA_KANBAN_CARD_PAINEL_FACE_RENOVACAO = "[Kanban].[Silver].[FatoKanbanCardPainelFace]"
@@ -8266,6 +8269,278 @@ def _efetivar_reservas_card_kanban_admin(
 
     return int(resultado.rowcount or 0)
 
+def _migrar_marcas_card_para_ocupacoes_aprovadas_admin(
+    *,
+    id_fato_kanban_card: int | None,
+    id_contrato_controle: int | None,
+) -> dict:
+    """Move as marcas temporárias do card para cada ocupação definitiva do contrato."""
+
+    id_card = _int_ou_none(id_fato_kanban_card)
+    id_contrato = _int_ou_none(id_contrato_controle)
+
+    if id_card in (None, "", 0) or id_contrato in (None, "", 0):
+        return {
+            "ok": True,
+            "acao": "ignorado",
+            "motivo": "card_ou_contrato_nao_resolvido",
+            "id_card": id_card,
+            "id_contrato": id_contrato,
+        }
+
+    row = db.session.execute(
+        text(f"""
+            SET NOCOUNT ON;
+
+            IF OBJECT_ID(N'{TABELA_VINCULA_MARCAS_OCUPACAO_CARD_ADMIN}') IS NULL
+                THROW 50031, 'A tabela Integracao.Silver.FatoVinculaMarcasOcupacaoCard nao foi encontrada.', 1;
+
+            IF OBJECT_ID(N'{TABELA_VINCULA_MARCAS_OCUPACAO_ADMIN}') IS NULL
+                THROW 50032, 'A tabela Integracao.Silver.FatoVinculaMarcasOcupacao nao foi encontrada.', 1;
+
+            IF OBJECT_ID('tempdb..#MarcasCardAprovado') IS NOT NULL
+                DROP TABLE #MarcasCardAprovado;
+
+            IF OBJECT_ID('tempdb..#OcupacoesCardAprovado') IS NOT NULL
+                DROP TABLE #OcupacoesCardAprovado;
+
+            ;WITH MarcasFonte AS
+            (
+                SELECT
+                    src.IDEmpresa,
+                    src.ReferenciaContrato,
+                    src.ReferenciaLogycWare,
+                    src.Marca,
+                    src.DataAtualizado,
+                    PrioridadeFonte = 0
+                FROM {TABELA_VINCULA_MARCAS_OCUPACAO_CARD_ADMIN} AS src WITH (UPDLOCK, HOLDLOCK)
+                WHERE src.IDFatoKanbanCard = :id_card
+                  AND NULLIF(LTRIM(RTRIM(src.Marca)), '') IS NOT NULL
+
+                UNION ALL
+
+                -- Compatibilidade com cards criados antes da tabela temporária:
+                -- uso a Marca principal somente quando ainda não existem linhas na nova tabela.
+                SELECT
+                    card.IDEmpresa,
+                    CAST(NULL AS nvarchar(100)) AS ReferenciaContrato,
+                    CAST(NULL AS nvarchar(100)) AS ReferenciaLogycWare,
+                    card.Marca,
+                    CAST(NULL AS datetime2) AS DataAtualizado,
+                    PrioridadeFonte = 1
+                FROM [Kanban].[Silver].[FatoKanbanCard] AS card WITH (NOLOCK)
+                WHERE card.IDFatoKanbanCard = :id_card
+                  AND NULLIF(LTRIM(RTRIM(card.Marca)), '') IS NOT NULL
+                  AND NOT EXISTS
+                  (
+                      SELECT 1
+                      FROM {TABELA_VINCULA_MARCAS_OCUPACAO_CARD_ADMIN} AS src_existente WITH (HOLDLOCK)
+                      WHERE src_existente.IDFatoKanbanCard = :id_card
+                        AND NULLIF(LTRIM(RTRIM(src_existente.Marca)), '') IS NOT NULL
+                  )
+            ),
+            MarcasOrdenadas AS
+            (
+                SELECT
+                    IDEmpresa,
+                    ReferenciaContrato,
+                    ReferenciaLogycWare,
+                    Marca,
+                    ROW_NUMBER() OVER
+                    (
+                        PARTITION BY UPPER(LTRIM(RTRIM(Marca)))
+                        ORDER BY
+                            PrioridadeFonte ASC,
+                            CASE WHEN DataAtualizado IS NULL THEN 1 ELSE 0 END,
+                            DataAtualizado DESC
+                    ) AS rn
+                FROM MarcasFonte
+                WHERE NULLIF(LTRIM(RTRIM(Marca)), '') IS NOT NULL
+            )
+            SELECT
+                IDEmpresa = TRY_CONVERT(int, fonte.IDEmpresa),
+                ReferenciaContrato = CONVERT(nvarchar(100), LEFT(NULLIF(LTRIM(RTRIM(fonte.ReferenciaContrato)), ''), 100)),
+                ReferenciaLogycWare = CONVERT(nvarchar(100), LEFT(NULLIF(LTRIM(RTRIM(fonte.ReferenciaLogycWare)), ''), 100)),
+                Marca = CONVERT(nvarchar(100), LEFT(LTRIM(RTRIM(fonte.Marca)), 100))
+            INTO #MarcasCardAprovado
+            FROM MarcasOrdenadas AS fonte
+            WHERE fonte.rn = 1;
+
+            SELECT DISTINCT
+                ocup.IDFatoOcupacaoPaineisEuromidia,
+                IDEmpresa = ocup.IDCliente,
+                IDFatoControleContratosEuromidia = :id_contrato,
+                IDFatoControleContratosItensEuromidia = item.IDFatoControleContratosItensEuromidia,
+                IDDimPaineisEuromidia = COALESCE(ocup.IDPainelEuromidia, item.IDPainelEuromidia, face.IDDimPaineisEuromidia),
+                IDDimFacesPaineis = COALESCE(item.IDDimFacesPaineis, face.IDDimFacesPaineis),
+                ReferenciaContrato = CONVERT(nvarchar(100), LEFT(NULLIF(LTRIM(RTRIM(ocup.NumeroContrato)), ''), 100)),
+                ReferenciaLogycWare = CONVERT(nvarchar(100), LEFT(NULLIF(LTRIM(RTRIM(ocup.NumeroPrevia)), ''), 100))
+            INTO #OcupacoesCardAprovado
+            FROM {TABELA_OCUPACAO_PAINEIS_EUROMIDIA_ADMIN} AS ocup WITH (UPDLOCK, HOLDLOCK)
+            INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
+                ON item.IDFatoControleContratosItensEuromidia = ocup.IDFatoControleContratosItemOrigem
+               AND item.IDFatoControleContratoEuromidia = :id_contrato
+            OUTER APPLY
+            (
+                SELECT TOP (1)
+                    f.IDDimPaineisEuromidia,
+                    f.IDDimFacesPaineis
+                FROM [Integracao].[Silver].[DimFacesPaineis] AS f
+                WHERE
+                    (
+                        item.IDDimFacesPaineis IS NOT NULL
+                        AND f.IDDimFacesPaineis = item.IDDimFacesPaineis
+                    )
+                    OR
+                    (
+                        COALESCE(ocup.IDPainelEuromidia, item.IDPainelEuromidia) IS NOT NULL
+                        AND f.IDDimPaineisEuromidia = COALESCE(ocup.IDPainelEuromidia, item.IDPainelEuromidia)
+                        AND UPPER(LTRIM(RTRIM(COALESCE(f.CodFace, '')))) = UPPER(LTRIM(RTRIM(COALESCE(ocup.CodFace, item.CodFace, ''))))
+                    )
+                    OR
+                    (
+                        TRY_CONVERT(int, f.CodPonto) = TRY_CONVERT(int, ocup.CodPonto)
+                        AND UPPER(LTRIM(RTRIM(COALESCE(f.CodFace, '')))) = UPPER(LTRIM(RTRIM(COALESCE(ocup.CodFace, ''))))
+                    )
+                ORDER BY
+                    CASE WHEN item.IDDimFacesPaineis IS NOT NULL AND f.IDDimFacesPaineis = item.IDDimFacesPaineis THEN 0 ELSE 1 END,
+                    f.IDDimFacesPaineis DESC
+            ) AS face
+            WHERE ocup.IDFatoControleContratos = :id_contrato
+              AND UPPER(LTRIM(RTRIM(COALESCE(ocup.Status, '')))) <> 'CANCELADO'
+              AND ocup.CanceladoEm IS NULL
+              AND (
+                    item.IDFatoKanbanCard = :id_card
+                    OR EXISTS
+                    (
+                        SELECT 1
+                        FROM [Integracao].[Silver].[FatoContratoCardEuromidia] AS vinc_card WITH (NOLOCK)
+                        WHERE vinc_card.IDFatoKanbanCard = :id_card
+                          AND vinc_card.IDFatoControleContratosEuromidia = :id_contrato
+                          AND vinc_card.IDFatoControleContratosItensEuromidia = item.IDFatoControleContratosItensEuromidia
+                    )
+              );
+
+            DECLARE @QuantidadeMarcas int = (SELECT COUNT(1) FROM #MarcasCardAprovado);
+            DECLARE @QuantidadeOcupacoes int = (SELECT COUNT(1) FROM #OcupacoesCardAprovado);
+            DECLARE @RelacionamentosAtualizados int = 0;
+            DECLARE @MarcasInseridas int = 0;
+            DECLARE @MarcasTemporariasRemovidas int = 0;
+
+            UPDATE destino
+               SET destino.IDEmpresa = COALESCE(marca.IDEmpresa, ocup.IDEmpresa, destino.IDEmpresa),
+                   destino.IDFatoControleContratosEuromidia = ocup.IDFatoControleContratosEuromidia,
+                   destino.IDFatoControleContratosItensEuromidia = ocup.IDFatoControleContratosItensEuromidia,
+                   destino.IDDimPaineisEuromidia = COALESCE(ocup.IDDimPaineisEuromidia, destino.IDDimPaineisEuromidia),
+                   destino.IDDimFacesPaineis = COALESCE(ocup.IDDimFacesPaineis, destino.IDDimFacesPaineis),
+                   destino.ReferenciaContrato = COALESCE(marca.ReferenciaContrato, ocup.ReferenciaContrato, destino.ReferenciaContrato),
+                   destino.ReferenciaLogycWare = COALESCE(marca.ReferenciaLogycWare, ocup.ReferenciaLogycWare, destino.ReferenciaLogycWare),
+                   destino.DataAtualizado = SYSDATETIME()
+            FROM {TABELA_VINCULA_MARCAS_OCUPACAO_ADMIN} AS destino WITH (UPDLOCK, HOLDLOCK)
+            INNER JOIN #OcupacoesCardAprovado AS ocup
+                ON ocup.IDFatoOcupacaoPaineisEuromidia = destino.IDFatoOcupacaoPaineisEuromidia
+            INNER JOIN #MarcasCardAprovado AS marca
+                ON UPPER(LTRIM(RTRIM(COALESCE(destino.Marca, '')))) = UPPER(LTRIM(RTRIM(marca.Marca)));
+
+            SET @RelacionamentosAtualizados = @@ROWCOUNT;
+
+            INSERT INTO {TABELA_VINCULA_MARCAS_OCUPACAO_ADMIN}
+            (
+                IDFatoOcupacaoPaineisEuromidia,
+                IDEmpresa,
+                IDFatoControleContratosEuromidia,
+                IDFatoControleContratosItensEuromidia,
+                IDDimPaineisEuromidia,
+                IDDimFacesPaineis,
+                ReferenciaContrato,
+                ReferenciaLogycWare,
+                Marca,
+                DataAtualizado
+            )
+            SELECT
+                ocup.IDFatoOcupacaoPaineisEuromidia,
+                COALESCE(marca.IDEmpresa, ocup.IDEmpresa),
+                ocup.IDFatoControleContratosEuromidia,
+                ocup.IDFatoControleContratosItensEuromidia,
+                ocup.IDDimPaineisEuromidia,
+                ocup.IDDimFacesPaineis,
+                COALESCE(marca.ReferenciaContrato, ocup.ReferenciaContrato),
+                COALESCE(marca.ReferenciaLogycWare, ocup.ReferenciaLogycWare),
+                marca.Marca,
+                SYSDATETIME()
+            FROM #OcupacoesCardAprovado AS ocup
+            CROSS JOIN #MarcasCardAprovado AS marca
+            WHERE NOT EXISTS
+            (
+                SELECT 1
+                FROM {TABELA_VINCULA_MARCAS_OCUPACAO_ADMIN} AS destino WITH (UPDLOCK, HOLDLOCK)
+                WHERE destino.IDFatoOcupacaoPaineisEuromidia = ocup.IDFatoOcupacaoPaineisEuromidia
+                  AND UPPER(LTRIM(RTRIM(COALESCE(destino.Marca, '')))) = UPPER(LTRIM(RTRIM(marca.Marca)))
+            );
+
+            SET @MarcasInseridas = @@ROWCOUNT;
+
+            IF @QuantidadeMarcas > 0
+               AND @QuantidadeOcupacoes > 0
+               AND NOT EXISTS
+               (
+                    SELECT 1
+                    FROM #OcupacoesCardAprovado AS ocup
+                    CROSS JOIN #MarcasCardAprovado AS marca
+                    WHERE NOT EXISTS
+                    (
+                        SELECT 1
+                        FROM {TABELA_VINCULA_MARCAS_OCUPACAO_ADMIN} AS destino WITH (HOLDLOCK)
+                        WHERE destino.IDFatoOcupacaoPaineisEuromidia = ocup.IDFatoOcupacaoPaineisEuromidia
+                          AND UPPER(LTRIM(RTRIM(COALESCE(destino.Marca, '')))) = UPPER(LTRIM(RTRIM(marca.Marca)))
+                    )
+               )
+            BEGIN
+                DELETE FROM {TABELA_VINCULA_MARCAS_OCUPACAO_CARD_ADMIN}
+                 WHERE IDFatoKanbanCard = :id_card;
+
+                SET @MarcasTemporariasRemovidas = @@ROWCOUNT;
+            END;
+
+            SELECT
+                @QuantidadeMarcas AS QuantidadeMarcas,
+                @QuantidadeOcupacoes AS QuantidadeOcupacoes,
+                @RelacionamentosAtualizados AS RelacionamentosAtualizados,
+                @MarcasInseridas AS MarcasInseridas,
+                @MarcasTemporariasRemovidas AS MarcasTemporariasRemovidas;
+        """),
+        {"id_card": int(id_card), "id_contrato": int(id_contrato)},
+    ).mappings().first() or {}
+
+    quantidade_marcas = int(row.get("QuantidadeMarcas") or 0)
+    quantidade_ocupacoes = int(row.get("QuantidadeOcupacoes") or 0)
+    removidas = int(row.get("MarcasTemporariasRemovidas") or 0)
+    relacionamentos_processados = int(row.get("RelacionamentosAtualizados") or 0) + int(row.get("MarcasInseridas") or 0)
+
+    if quantidade_marcas == 0:
+        acao = "sem_marcas"
+    elif quantidade_ocupacoes == 0:
+        acao = "aguardando_ocupacao"
+    elif removidas > 0:
+        acao = "migrado"
+    elif relacionamentos_processados > 0:
+        acao = "relacionado_por_compatibilidade"
+    else:
+        acao = "ja_sincronizado"
+
+    return {
+        "ok": True,
+        "acao": acao,
+        "id_card": int(id_card),
+        "id_contrato": int(id_contrato),
+        "quantidade_marcas": quantidade_marcas,
+        "quantidade_ocupacoes": quantidade_ocupacoes,
+        "relacionamentos_atualizados": int(row.get("RelacionamentosAtualizados") or 0),
+        "relacionamentos_inseridos": int(row.get("MarcasInseridas") or 0),
+        "marcas_temporarias_removidas": removidas,
+    }
+
+
 def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario_logado: int | None, executar_efeitos_operacionais: bool = True) -> dict:
     cab = _obter_cabecalho_solicitacao_bruta(int(id_solicitacao))
     if not cab:
@@ -8281,6 +8556,10 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
     vencimentos_campanha: list[dict] = []
     vencimentos_origem_renovados: list[dict] = []
     ocupacoes_sincronizadas: list[dict] = []
+    marcas_ocupacao_sincronizadas: dict = {
+        "ok": True,
+        "acao": "nao_executado",
+    }
 
     id_card_cabecalho = _resolver_id_card_aprovacao_solicitacao_admin(cab, itens_solicitacao)
     if id_card_cabecalho not in (None, "", 0) and _int_ou_none(cab.get("IDFatoKanbanCard")) in (None, "", 0):
@@ -9129,14 +9408,28 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
                 },
             )
 
+    id_card_aprovacao = _int_ou_none(cab.get("IDFatoKanbanCard")) or _int_ou_none(id_card_cabecalho)
+
     if executar_efeitos_operacionais:
+        marcas_ocupacao_sincronizadas = _migrar_marcas_card_para_ocupacoes_aprovadas_admin(
+            id_fato_kanban_card=id_card_aprovacao,
+            id_contrato_controle=int(id_contrato_controle),
+        )
+
         reservas_efetivadas = _efetivar_reservas_card_kanban_admin(
-            id_card=_int_ou_none(cab.get("IDFatoKanbanCard")) or _int_ou_none(id_card_cabecalho),
+            id_card=id_card_aprovacao,
             id_contrato_controle=int(id_contrato_controle),
             id_usuario_logado=id_usuario_logado,
         )
     else:
         reservas_efetivadas = 0
+        marcas_ocupacao_sincronizadas = {
+            "ok": True,
+            "acao": "adiado",
+            "motivo": "efeitos_operacionais_nao_executados",
+            "id_card": id_card_aprovacao,
+            "id_contrato": int(id_contrato_controle),
+        }
 
     db.session.execute(text("""
         UPDATE [Integracao].[Silver].[FatoSolicitacaoContratoEuromidia]
@@ -9171,6 +9464,7 @@ def _mover_solicitacao_aprovada_para_controle(*, id_solicitacao: int, id_usuario
         "vencimentos_campanha": vencimentos_campanha,
         "vencimentos_origem_renovados": vencimentos_origem_renovados,
         "ocupacoes_sincronizadas": ocupacoes_sincronizadas,
+        "marcas_ocupacao_sincronizadas": marcas_ocupacao_sincronizadas,
         "reservas_efetivadas": int(reservas_efetivadas or 0),
         "id_card": _int_ou_none(cab.get("IDFatoKanbanCard")) or _int_ou_none(id_card_cabecalho),
         "id_empresa": _int_ou_none(cab.get("IDEmpresa")),
@@ -12073,6 +12367,251 @@ def _sincronizar_dim_email_contrato_por_formulario_admin(
     }
 
 
+def _buscar_marcas_ocupacao_card_admin(id_fato_kanban_card: int | None) -> list[dict]:
+    """Carrega as marcas temporárias vinculadas ao card exibido na aprovação."""
+
+    id_card = _int_ou_none(id_fato_kanban_card)
+    if id_card in (None, "", 0):
+        return []
+
+    rows = db.session.execute(
+        text(f"""
+            ;WITH MarcasCard AS
+            (
+                SELECT
+                     IDFatoKanbanCard
+                    ,IDFatoOcupacaoPaineisEuromidia
+                    ,IDEmpresa
+                    ,IDDimPaineisEuromidia
+                    ,IDDimFacesPaineis
+                    ,ReferenciaContrato
+                    ,ReferenciaLogycWare
+                    ,Marca
+                    ,DataAtualizado
+                    ,ROW_NUMBER() OVER
+                    (
+                        PARTITION BY UPPER(LTRIM(RTRIM(COALESCE(Marca, ''))))
+                        ORDER BY
+                            CASE WHEN DataAtualizado IS NULL THEN 1 ELSE 0 END,
+                            DataAtualizado DESC,
+                            ReferenciaContrato DESC,
+                            ReferenciaLogycWare DESC
+                    ) AS rn
+                FROM {TABELA_VINCULA_MARCAS_OCUPACAO_CARD_ADMIN}
+                WHERE IDFatoKanbanCard = :id_card
+                  AND NULLIF(LTRIM(RTRIM(Marca)), '') IS NOT NULL
+            )
+            SELECT
+                 mc.IDFatoKanbanCard
+                ,mc.IDFatoOcupacaoPaineisEuromidia
+                ,mc.IDEmpresa
+                ,mc.IDDimPaineisEuromidia
+                ,mc.IDDimFacesPaineis
+                ,mc.ReferenciaContrato
+                ,mc.ReferenciaLogycWare
+                ,mc.Marca
+                ,mc.DataAtualizado
+                ,empresa.RazaoSocial AS RazaoSocialEmpresaMarca
+                ,empresa.NomeFantasia AS NomeFantasiaEmpresaMarca
+                ,empresa.CNPJ AS CNPJEmpresaMarca
+            FROM MarcasCard AS mc
+            LEFT JOIN [Integracao].[Silver].[DimEmpresas] AS empresa WITH (NOLOCK)
+                   ON empresa.IDEmpresa = mc.IDEmpresa
+            WHERE mc.rn = 1
+            ORDER BY
+                CASE WHEN mc.DataAtualizado IS NULL THEN 1 ELSE 0 END,
+                mc.DataAtualizado ASC,
+                mc.Marca ASC,
+                mc.ReferenciaContrato ASC,
+                mc.ReferenciaLogycWare ASC
+        """),
+        {"id_card": int(id_card)},
+    ).mappings().all()
+
+    resultado = []
+    for row in rows:
+        vinculo = dict(row)
+        nome_empresa = _texto_ou_vazio(
+            vinculo.get("NomeFantasiaEmpresaMarca") or vinculo.get("RazaoSocialEmpresaMarca")
+        ).strip()
+        cnpj_empresa = _texto_ou_vazio(vinculo.get("CNPJEmpresaMarca")).strip()
+
+        if nome_empresa and cnpj_empresa:
+            vinculo["EmpresaExibicao"] = f"{nome_empresa} | CNPJ: {cnpj_empresa}"
+        elif nome_empresa:
+            vinculo["EmpresaExibicao"] = nome_empresa
+        elif vinculo.get("IDEmpresa") not in (None, "", 0):
+            vinculo["EmpresaExibicao"] = f"Empresa #{int(vinculo['IDEmpresa'])}"
+        else:
+            vinculo["EmpresaExibicao"] = ""
+
+        resultado.append(vinculo)
+
+    return resultado
+
+
+def _extrair_marcas_ocupacao_card_formulario_admin(form) -> tuple[bool, list[dict]]:
+    """Valida e normaliza as linhas dinâmicas do bloco Marcas."""
+
+    indices = [str(valor or "").strip() for valor in _form_getlist_admin(form, "marca_ocupacao_card_idx")]
+    indices = [idx for idx in indices if idx]
+    if not indices:
+        return False, []
+
+    marcas = []
+    marcas_normalizadas = set()
+
+    for idx in indices:
+        marca = _texto_ou_vazio(_form_get_first_admin(form, f"marca_ocupacao_card_{idx}__Marca")).strip()
+        empresa_busca = _texto_ou_vazio(
+            _form_get_first_admin(form, f"marca_ocupacao_card_{idx}__EmpresaBusca")
+        ).strip()
+        id_empresa = _int_ou_none(
+            _form_get_first_admin(form, f"marca_ocupacao_card_{idx}__IDEmpresa")
+        )
+        referencia_contrato = _texto_ou_vazio(
+            _form_get_first_admin(form, f"marca_ocupacao_card_{idx}__ReferenciaContrato")
+        ).strip()
+        referencia_logycware = _texto_ou_vazio(
+            _form_get_first_admin(form, f"marca_ocupacao_card_{idx}__ReferenciaLogycWare")
+        ).strip()
+
+        if not marca and not referencia_contrato and not referencia_logycware:
+            continue
+
+        if not marca:
+            raise ValueError("Informe a Marca nas linhas que possuem referência de contrato ou LogycWare.")
+        if empresa_busca and id_empresa in (None, "", 0):
+            raise ValueError(
+                f"Selecione uma empresa válida na lista para a marca '{marca}'. Apenas digitar o nome ou CNPJ não define o IDEmpresa."
+            )
+        if len(marca) > 100:
+            raise ValueError(f"A marca '{marca[:30]}...' ultrapassa o limite de 100 caracteres.")
+        if len(empresa_busca) > 300:
+            raise ValueError(f"A identificação da empresa da marca '{marca}' ultrapassa 300 caracteres.")
+        if len(referencia_contrato) > 100:
+            raise ValueError(f"A Referência do Contrato da marca '{marca}' ultrapassa 100 caracteres.")
+        if len(referencia_logycware) > 100:
+            raise ValueError(f"A Referência LogycWare da marca '{marca}' ultrapassa 100 caracteres.")
+
+        chave_marca = marca.casefold()
+        if chave_marca in marcas_normalizadas:
+            raise ValueError(f"A marca '{marca}' foi informada mais de uma vez. Mantenha somente uma linha por marca.")
+        marcas_normalizadas.add(chave_marca)
+
+        marcas.append(
+            {
+                "IDFatoOcupacaoPaineisEuromidia": _int_ou_none(
+                    _form_get_first_admin(form, f"marca_ocupacao_card_{idx}__IDFatoOcupacaoPaineisEuromidia")
+                ),
+                "IDEmpresa": id_empresa,
+                "IDDimPaineisEuromidia": _int_ou_none(
+                    _form_get_first_admin(form, f"marca_ocupacao_card_{idx}__IDDimPaineisEuromidia")
+                ),
+                "IDDimFacesPaineis": _int_ou_none(
+                    _form_get_first_admin(form, f"marca_ocupacao_card_{idx}__IDDimFacesPaineis")
+                ),
+                "ReferenciaContrato": referencia_contrato or None,
+                "ReferenciaLogycWare": referencia_logycware or None,
+                "Marca": marca,
+            }
+        )
+
+    return True, marcas
+
+
+def _sincronizar_marcas_ocupacao_card_por_formulario_admin(
+    *,
+    id_fato_kanban_card: int | None,
+    form,
+) -> dict:
+    """Substitui, na mesma transação do formulário, as marcas temporárias do card."""
+
+    campos_presentes, marcas = _extrair_marcas_ocupacao_card_formulario_admin(form)
+    if not campos_presentes:
+        return {"ok": True, "status": "sem_campos_no_formulario", "quantidade": 0}
+
+    id_card = _int_ou_none(id_fato_kanban_card)
+    if id_card in (None, "", 0):
+        if marcas:
+            raise ValueError("Não foi possível identificar o card responsável para salvar as marcas.")
+        return {"ok": True, "status": "sem_card_e_sem_marcas", "quantidade": 0}
+
+    for linha in marcas:
+        id_empresa_linha = _int_ou_none(linha.get("IDEmpresa"))
+        if id_empresa_linha in (None, "", 0):
+            continue
+
+        empresa_existe = db.session.execute(
+            text("""
+                SELECT TOP (1) IDEmpresa
+                FROM [Integracao].[Silver].[DimEmpresas] WITH (NOLOCK)
+                WHERE IDEmpresa = :id_empresa
+            """),
+            {"id_empresa": int(id_empresa_linha)},
+        ).scalar()
+
+        if empresa_existe in (None, "", 0):
+            raise ValueError(
+                f"A empresa #{int(id_empresa_linha)} vinculada à marca '{linha.get('Marca')}' não existe em Integracao.Silver.DimEmpresas."
+            )
+
+    db.session.execute(
+        text(f"""
+            DELETE FROM {TABELA_VINCULA_MARCAS_OCUPACAO_CARD_ADMIN}
+            WHERE IDFatoKanbanCard = :id_card
+        """),
+        {"id_card": int(id_card)},
+    )
+
+    for linha in marcas:
+        db.session.execute(
+            text(f"""
+                INSERT INTO {TABELA_VINCULA_MARCAS_OCUPACAO_CARD_ADMIN}
+                (
+                     IDFatoKanbanCard
+                    ,IDFatoOcupacaoPaineisEuromidia
+                    ,IDEmpresa
+                    ,IDDimPaineisEuromidia
+                    ,IDDimFacesPaineis
+                    ,ReferenciaContrato
+                    ,ReferenciaLogycWare
+                    ,Marca
+                    ,DataAtualizado
+                )
+                VALUES
+                (
+                     :id_card
+                    ,:id_ocupacao
+                    ,:id_empresa
+                    ,:id_painel
+                    ,:id_face
+                    ,:referencia_contrato
+                    ,:referencia_logycware
+                    ,:marca
+                    ,SYSDATETIME()
+                )
+            """),
+            {
+                "id_card": int(id_card),
+                "id_ocupacao": linha.get("IDFatoOcupacaoPaineisEuromidia"),
+                "id_empresa": linha.get("IDEmpresa"),
+                "id_painel": linha.get("IDDimPaineisEuromidia"),
+                "id_face": linha.get("IDDimFacesPaineis"),
+                "referencia_contrato": linha.get("ReferenciaContrato"),
+                "referencia_logycware": linha.get("ReferenciaLogycWare"),
+                "marca": linha.get("Marca"),
+            },
+        )
+
+    return {
+        "ok": True,
+        "status": "sincronizado",
+        "id_card": int(id_card),
+        "quantidade": len(marcas),
+    }
+
+
 # ==========================================================
 # ANEXOS DO CONTRATO - UPLOAD ASSÍNCRONO COM CELERY
 # ==========================================================
@@ -12958,6 +13497,19 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     cab["DataCriacaoInput"] = _data_para_input_date(cab.get("DataCriacao"))
     cab["DataEnvioAvaliacaoInput"] = _data_para_input_date(cab.get("DataEnvioAvaliacao"))
 
+    nome_empresa_padrao = _texto_ou_vazio(
+        cab.get("NomeFantasiaEmpresa") or cab.get("RazaoSocialEmpresa")
+    ).strip()
+    cnpj_empresa_padrao = _texto_ou_vazio(cab.get("CNPJEmpresa")).strip()
+    if nome_empresa_padrao and cnpj_empresa_padrao:
+        cab["EmpresaExibicaoPadrao"] = f"{nome_empresa_padrao} | CNPJ: {cnpj_empresa_padrao}"
+    elif nome_empresa_padrao:
+        cab["EmpresaExibicaoPadrao"] = nome_empresa_padrao
+    elif cab.get("IDEmpresa") not in (None, "", 0):
+        cab["EmpresaExibicaoPadrao"] = f"Empresa #{int(cab['IDEmpresa'])}"
+    else:
+        cab["EmpresaExibicaoPadrao"] = ""
+
     itens_rows = db.session.execute(
         sql_itens,
         {"id_solicitacao": int(id_solicitacao)}
@@ -13048,6 +13600,14 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
         item["TemAgendamentoFaceContrato"] = qtd_ag > 0
         item["QuantidadeAgendamentosFaceContrato"] = qtd_ag
 
+    id_card_resolvido = _resolver_id_card_aprovacao_solicitacao_admin(cab, itens)
+    if id_card_resolvido not in (None, "", 0) and _int_ou_none(cab.get("IDFatoKanbanCard")) in (None, "", 0):
+        cab["IDFatoKanbanCard"] = int(id_card_resolvido)
+
+    marcas_ocupacao_card = _buscar_marcas_ocupacao_card_admin(
+        id_card_resolvido or cab.get("IDFatoKanbanCard")
+    )
+
     contatos_contrato = _buscar_dim_email_contrato_admin(
         id_fato_controle_contratos=cab.get("IDFatoControleContratosEuromidia"),
         id_fato_kanban_card=cab.get("IDFatoKanbanCard"),
@@ -13061,6 +13621,7 @@ def _obter_solicitacao_contrato_detalhe(id_solicitacao: int):
     return {
         "solicitacao": cab,
         "itens": itens,
+        "marcas_ocupacao_card": marcas_ocupacao_card,
         "contatos_contrato": contatos_contrato,
         "anexos_contrato": anexos_contrato,
         "diagrama_status": _montar_diagrama_status_contrato(
@@ -19081,6 +19642,86 @@ def _enfileirar_processamento_aprovacao_contrato_admin(
             "origem": origem,
         }
 
+@admin.route("/aprovacao/contratos/empresas/buscar", methods=["GET"])
+@login_required
+@requer_permissao("ADMIN_TUDO")
+@limiter.limit("180 per minute", methods=["GET"])
+def buscar_empresas_marcas_ocupacao_card():
+    """Autocomplete de empresas por CNPJ, razão social ou nome fantasia."""
+
+    termo = _texto_ou_vazio(request.args.get("q")).strip()[:120]
+    if len(termo) < 2:
+        return jsonify({"ok": True, "empresas": []})
+
+    termo_like = (
+        termo
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+        .replace("[", "\\[")
+    )
+    termo_cnpj = "".join(caractere for caractere in termo if caractere.isdigit())
+
+    rows = db.session.execute(
+        text("""
+            SELECT TOP (30)
+                 empresa.IDEmpresa
+                ,empresa.CNPJ
+                ,empresa.RazaoSocial
+                ,empresa.NomeFantasia
+            FROM [Integracao].[Silver].[DimEmpresas] AS empresa WITH (NOLOCK)
+            WHERE
+                   COALESCE(empresa.RazaoSocial, '') COLLATE Latin1_General_CI_AI LIKE :busca_nome ESCAPE '\\'
+                OR COALESCE(empresa.NomeFantasia, '') COLLATE Latin1_General_CI_AI LIKE :busca_nome ESCAPE '\\'
+                OR
+                (
+                    :tem_cnpj = 1
+                    AND REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(CONVERT(varchar(30), empresa.CNPJ), ''), '.', ''), '/', ''), '-', ''), ' ', '')
+                        LIKE :busca_cnpj
+                )
+            ORDER BY
+                CASE
+                    WHEN :tem_cnpj = 1
+                     AND REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(CONVERT(varchar(30), empresa.CNPJ), ''), '.', ''), '/', ''), '-', ''), ' ', '') = :cnpj_exato
+                        THEN 0
+                    WHEN COALESCE(empresa.RazaoSocial, '') COLLATE Latin1_General_CI_AI = :termo_exato
+                        THEN 0
+                    WHEN COALESCE(empresa.NomeFantasia, '') COLLATE Latin1_General_CI_AI = :termo_exato
+                        THEN 0
+                    WHEN COALESCE(empresa.RazaoSocial, '') COLLATE Latin1_General_CI_AI LIKE :busca_inicio ESCAPE '\\'
+                        THEN 1
+                    WHEN COALESCE(empresa.NomeFantasia, '') COLLATE Latin1_General_CI_AI LIKE :busca_inicio ESCAPE '\\'
+                        THEN 1
+                    ELSE 2
+                END,
+                COALESCE(NULLIF(LTRIM(RTRIM(empresa.NomeFantasia)), ''), empresa.RazaoSocial) ASC,
+                empresa.IDEmpresa ASC
+        """),
+        {
+            "busca_nome": f"%{termo_like}%",
+            "busca_inicio": f"{termo_like}%",
+            "termo_exato": termo,
+            "tem_cnpj": 1 if len(termo_cnpj) >= 2 else 0,
+            "busca_cnpj": f"%{termo_cnpj}%" if termo_cnpj else "",
+            "cnpj_exato": termo_cnpj,
+        },
+    ).mappings().all()
+
+    empresas = []
+    for row in rows:
+        empresa = dict(row)
+        empresas.append(
+            {
+                "id_empresa": int(empresa["IDEmpresa"]),
+                "cnpj": _texto_ou_vazio(empresa.get("CNPJ")).strip(),
+                "razao_social": _texto_ou_vazio(empresa.get("RazaoSocial")).strip(),
+                "nome_fantasia": _texto_ou_vazio(empresa.get("NomeFantasia")).strip(),
+            }
+        )
+
+    return jsonify({"ok": True, "empresas": empresas})
+
+
 @admin.route("/aprovacao/contratos/<int:id_solicitacao>", methods=["GET", "POST"])
 @login_required
 @requer_permissao("ADMIN_TUDO")
@@ -19118,6 +19759,15 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
             id_empresa_proprietaria = _int_ou_none(cab_atualizada.get("IDEmpresaProprietaria"))
             tipo_solicitacao = _tipo_solicitacao_normalizado(cab_atualizada.get("TipoSolicitacao"))
             id_fato_controle = _int_ou_none(cab_atualizada.get("IDFatoControleContratosEuromidia"))
+
+            if id_card in (None, "", 0):
+                itens_atualizados = _obter_itens_solicitacao_brutos(int(id_solicitacao))
+                id_card = _resolver_id_card_aprovacao_solicitacao_admin(cab_atualizada, itens_atualizados)
+
+            resultado_marcas_card = _sincronizar_marcas_ocupacao_card_por_formulario_admin(
+                id_fato_kanban_card=id_card,
+                form=request.form,
+            )
 
             resultado_agendamentos_face = _sincronizar_agendamentos_face_contrato_por_formulario(
                 id_solicitacao=int(id_solicitacao),
@@ -19483,6 +20133,7 @@ def detalhe_aprovacao_contrato(id_solicitacao: int):
         "admin/aprovacao_contrato_detalhe.html",
         solicitacao=dados["solicitacao"],
         itens=dados["itens"],
+        marcas_ocupacao_card=dados.get("marcas_ocupacao_card") or [],
         contatos_contrato=dados.get("contatos_contrato") or [],
         anexos_contrato=dados.get("anexos_contrato") or [],
         diagrama_status=dados["diagrama_status"],
@@ -21129,6 +21780,16 @@ def _campanhas_vencimentos_usuario_pode_operar_reservas_proprias() -> bool:
         ids_permitidos={2, 3},
     )
 
+
+def _campanhas_vencimentos_usuario_pode_cancelar_ocupacao() -> bool:
+    """Permite cancelar ocupação somente ao usuário cujo perfil ativo é ADMIN."""
+
+    return _campanhas_vencimentos_usuario_tem_perfil(
+        nomes_permitidos={"ADMIN"},
+        ids_permitidos={1},
+    )
+
+
 def _campanhas_vencimentos_classe_status(nome_status: str | None) -> str:
     """Converte o nome do status em classe CSS segura para o badge."""
 
@@ -21779,6 +22440,89 @@ def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
     d["ReservaExpiraEmTexto"] = _campanhas_vencimentos_datetime_pt(reserva_expira_em) if fonte_linha == "RESERVA" else None
 
     return d
+
+
+def _campanhas_vencimentos_ocupacoes_ativas_por_item(ids_itens) -> dict[int, int]:
+    """Relaciona os itens exibidos na página às ocupações de contrato ainda ativas."""
+
+    ids_normalizados = _campanhas_vencimentos_normalizar_lista_int(ids_itens)
+    if not ids_normalizados:
+        return {}
+
+    params = {
+        f"id_item_{indice}": int(id_item)
+        for indice, id_item in enumerate(ids_normalizados)
+    }
+    valores_sql = ",\n                    ".join(
+        f"(:id_item_{indice})"
+        for indice in range(len(ids_normalizados))
+    )
+
+    def _executar(*, considerar_vinculos: bool):
+        filtro_vinculo = ""
+        if considerar_vinculos:
+            filtro_vinculo = """
+                        OR EXISTS
+                        (
+                            SELECT 1
+                            FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc WITH (NOLOCK)
+                            WHERE vinc.IDFatoOcupacaoPaineisEuromidia = ocup.IDFatoOcupacaoPaineisEuromidia
+                              AND vinc.IDFatoControleContratosItensEuromidia = alvo.IDItem
+                        )
+            """
+
+        return db.session.execute(
+            text(f"""
+                SELECT
+                    alvo.IDItem,
+                    ocupacao_ativa.IDFatoOcupacaoPaineisEuromidia
+                FROM
+                (
+                    VALUES
+                    {valores_sql}
+                ) AS alvo(IDItem)
+                OUTER APPLY
+                (
+                    SELECT TOP (1)
+                        ocup.IDFatoOcupacaoPaineisEuromidia
+                    FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS ocup WITH (NOLOCK)
+                    WHERE ocup.CanceladoEm IS NULL
+                      AND UPPER(LTRIM(RTRIM(ISNULL(ocup.Origem, '')))) COLLATE Latin1_General_CI_AI = 'CONTRATO'
+                      AND UPPER(LTRIM(RTRIM(ISNULL(ocup.Status, '')))) COLLATE Latin1_General_CI_AI = 'ATIVO'
+                      AND
+                      (
+                            ocup.IDFatoControleContratosItemOrigem = alvo.IDItem
+                            {filtro_vinculo}
+                      )
+                    ORDER BY
+                        CASE
+                            WHEN ocup.IDFatoControleContratosItemOrigem = alvo.IDItem THEN 0
+                            ELSE 1
+                        END,
+                        ocup.IDFatoOcupacaoPaineisEuromidia DESC
+                ) AS ocupacao_ativa
+                WHERE ocupacao_ativa.IDFatoOcupacaoPaineisEuromidia IS NOT NULL;
+            """),
+            params,
+        ).mappings().all()
+
+    try:
+        rows = _executar(considerar_vinculos=True)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Falha ao consultar vínculos multimarca das ocupações; aplicando vínculo direto do item."
+        )
+        rows = _executar(considerar_vinculos=False)
+
+    resultado: dict[int, int] = {}
+    for row in rows:
+        id_item = _parse_int(row.get("IDItem")) or 0
+        id_ocupacao = _parse_int(row.get("IDFatoOcupacaoPaineisEuromidia")) or 0
+        if id_item > 0 and id_ocupacao > 0:
+            resultado[int(id_item)] = int(id_ocupacao)
+
+    return resultado
 
 
 def _campanhas_vencimentos_opcoes_marca(
@@ -24273,6 +25017,171 @@ def vencimentos_campanhas_cancelar_reserva(id_reserva: int):
         )
 
 
+@admin.route("/vencimentos-campanhas/ocupacao/<int:id_ocupacao>/cancelar", methods=["POST"])
+@login_required
+@limiter.limit("60 per minute", methods=["POST"])
+def vencimentos_campanhas_cancelar_ocupacao(id_ocupacao: int):
+    """Cancela uma ocupação de CONTRATO; operação exclusiva do perfil ADMIN."""
+
+    url_retorno = request.referrer or url_for("admin.vencimentos_campanhas_euromidia")
+    id_ocupacao_int = int(id_ocupacao or 0)
+    id_usuario_logado = int(_campanhas_vencimentos_usuario_logado_id() or 0)
+
+    if id_ocupacao_int <= 0:
+        return _campanhas_vencimentos_resposta_acao(
+            mensagem="Ocupação inválida para cancelamento.",
+            categoria="warning",
+            url_destino=url_retorno,
+            status_http=400,
+        )
+
+    if not _campanhas_vencimentos_usuario_pode_cancelar_ocupacao():
+        return _campanhas_vencimentos_resposta_acao(
+            mensagem="Somente usuários com perfil ADMIN podem cancelar ocupações.",
+            categoria="danger",
+            url_destino=url_retorno,
+            status_http=403,
+        )
+
+    if id_usuario_logado <= 0:
+        return _campanhas_vencimentos_resposta_acao(
+            mensagem="Não foi possível identificar o usuário logado para cancelar a ocupação.",
+            categoria="danger",
+            url_destino=url_retorno,
+            status_http=403,
+        )
+
+    try:
+        try:
+            agora_campinas = datetime.now(ZoneInfo("America/Sao_Paulo")).replace(tzinfo=None)
+        except Exception:
+            agora_campinas = datetime.now()
+
+        ocupacao = db.session.execute(
+            text("""
+                SELECT TOP (1)
+                    ocup.IDFatoOcupacaoPaineisEuromidia,
+                    ocup.CodPonto,
+                    ocup.CodFace,
+                    ocup.MarcaExibida,
+                    ocup.Status,
+                    ocup.Origem,
+                    ocup.CanceladoEm
+                FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS ocup WITH (UPDLOCK, ROWLOCK)
+                WHERE ocup.IDFatoOcupacaoPaineisEuromidia = :id_ocupacao
+                  AND ocup.CanceladoEm IS NULL
+                  AND UPPER(LTRIM(RTRIM(ISNULL(ocup.Origem, '')))) COLLATE Latin1_General_CI_AI = 'CONTRATO'
+                  AND UPPER(LTRIM(RTRIM(ISNULL(ocup.Status, '')))) COLLATE Latin1_General_CI_AI = 'ATIVO'
+            """),
+            {"id_ocupacao": id_ocupacao_int},
+        ).mappings().first()
+
+        if not ocupacao:
+            db.session.rollback()
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="Não encontrei uma ocupação ativa para cancelar. Ela pode já ter sido cancelada.",
+                categoria="warning",
+                url_destino=url_retorno,
+                status_http=409,
+            )
+
+        ocupacao_cancelada = db.session.execute(
+            text("""
+                SET NOCOUNT ON;
+
+                DECLARE @OcupacoesCanceladas TABLE
+                (
+                    IDOcupacao INT NOT NULL,
+                    StatusAtual NVARCHAR(20) NULL,
+                    CanceladoEm DATETIME2 NULL,
+                    CanceladoPorIDUsuario INT NULL
+                );
+
+                UPDATE [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
+                   SET Status = 'CANCELADO',
+                       CanceladoEm = :cancelado_em,
+                       CanceladoPorIDUsuario = :id_usuario_logado
+                OUTPUT
+                    inserted.IDFatoOcupacaoPaineisEuromidia,
+                    inserted.Status,
+                    inserted.CanceladoEm,
+                    inserted.CanceladoPorIDUsuario
+                INTO @OcupacoesCanceladas
+                (
+                    IDOcupacao,
+                    StatusAtual,
+                    CanceladoEm,
+                    CanceladoPorIDUsuario
+                )
+                 WHERE IDFatoOcupacaoPaineisEuromidia = :id_ocupacao
+                   AND CanceladoEm IS NULL
+                   AND UPPER(LTRIM(RTRIM(ISNULL(Origem, '')))) COLLATE Latin1_General_CI_AI = 'CONTRATO'
+                   AND UPPER(LTRIM(RTRIM(ISNULL(Status, '')))) COLLATE Latin1_General_CI_AI = 'ATIVO';
+
+                SELECT TOP (1)
+                    IDOcupacao,
+                    StatusAtual,
+                    CanceladoEm,
+                    CanceladoPorIDUsuario
+                FROM @OcupacoesCanceladas;
+            """),
+            {
+                "id_ocupacao": id_ocupacao_int,
+                "id_usuario_logado": id_usuario_logado,
+                "cancelado_em": agora_campinas,
+            },
+        ).mappings().first()
+
+        if not ocupacao_cancelada:
+            db.session.rollback()
+            return _campanhas_vencimentos_resposta_acao(
+                mensagem="A ocupação não foi cancelada porque o status mudou antes da confirmação.",
+                categoria="warning",
+                url_destino=url_retorno,
+                status_http=409,
+            )
+
+        db.session.commit()
+        mensagem_sucesso = f"Ocupação #{id_ocupacao_int} cancelada com sucesso."
+        payload_atualizacao = {
+            "acao": "CANCELAR_OCUPACAO",
+            "fonte_linha": "CAMPANHA",
+            "id_ocupacao": int(id_ocupacao_int),
+            "status": "CANCELADO",
+            "mensagem": mensagem_sucesso,
+        }
+        _campanhas_vencimentos_publicar_atualizacao(payload_atualizacao)
+        return _campanhas_vencimentos_resposta_acao(
+            mensagem=mensagem_sucesso,
+            categoria="success",
+            url_destino=url_retorno,
+            payload=payload_atualizacao,
+        )
+
+    except HTTPException as exc:
+        db.session.rollback()
+        if _campanhas_vencimentos_requisicao_assincrona():
+            return jsonify({
+                "ok": False,
+                "mensagem": str(exc.description or "Ação não autorizada."),
+                "categoria": "danger",
+            }), int(exc.code or 500)
+        raise
+
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Erro ao cancelar ocupação pela tela de vencimentos. id_ocupacao=%s",
+            id_ocupacao_int,
+        )
+        return _campanhas_vencimentos_resposta_acao(
+            mensagem=f"Erro ao cancelar ocupação: {exc}",
+            categoria="danger",
+            url_destino=url_retorno,
+            status_http=500,
+        )
+
+
 @admin.route("/vencimentos-campanhas/reserva/<int:id_reserva>/renovar", methods=["POST"])
 @login_required
 @limiter.limit("60 per minute", methods=["POST"])
@@ -24710,6 +25619,7 @@ def vencimentos_campanhas_euromidia():
 
     usuario_logado_eh_vendedor = _campanhas_vencimentos_usuario_eh_vendedor()
     usuario_logado_eh_admin = _campanhas_vencimentos_usuario_eh_admin()
+    usuario_logado_pode_cancelar_ocupacao = _campanhas_vencimentos_usuario_pode_cancelar_ocupacao()
     usuario_logado_pode_cancelar_todas_reservas = _campanhas_vencimentos_usuario_pode_cancelar_todas_reservas()
     usuario_logado_pode_operar_reservas_proprias = _campanhas_vencimentos_usuario_pode_operar_reservas_proprias()
     id_usuario_logado = _campanhas_vencimentos_usuario_logado_id()
@@ -24821,6 +25731,16 @@ def vencimentos_campanhas_euromidia():
     rows = db.session.execute(sql_rows, params_rows).mappings().all()
     itens = [_campanhas_vencimentos_enriquecer_item(dict(r)) for r in rows]
 
+    ids_itens_campanha = [
+        _parse_int(item.get("IDFatoControleContratosItensEuromidia"))
+        for item in itens
+        if str(item.get("FonteLinha") or "").strip().upper() == "CAMPANHA"
+    ]
+    ocupacoes_ativas_por_item = _campanhas_vencimentos_ocupacoes_ativas_por_item(ids_itens_campanha)
+    for item in itens:
+        id_item = _parse_int(item.get("IDFatoControleContratosItensEuromidia")) or 0
+        item["IDOcupacaoContrato"] = ocupacoes_ativas_por_item.get(int(id_item)) if id_item > 0 else None
+
     id_usuario_logado_int = int(id_usuario_logado or 0)
     for item in itens:
         fonte_linha = str(item.get("FonteLinha") or "").strip().upper()
@@ -24854,6 +25774,11 @@ def vencimentos_campanhas_euromidia():
             fonte_linha == "CAMPANHA"
             and linha_pertence_ao_usuario_logado
             and bool(item.get("PodeRenovar"))
+        )
+        item["UsuarioPodeCancelarOcupacao"] = bool(
+            fonte_linha == "CAMPANHA"
+            and usuario_logado_pode_cancelar_ocupacao
+            and (_parse_int(item.get("IDOcupacaoContrato")) or 0) > 0
         )
         item["UsuarioPodeEfetivarReserva"] = bool(
             fonte_linha == "RESERVA"
@@ -24930,6 +25855,7 @@ def vencimentos_campanhas_euromidia():
         vendedor_opcoes=vendedor_opcoes,
         usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
         usuario_logado_eh_admin=usuario_logado_eh_admin,
+        usuario_logado_pode_cancelar_ocupacao=usuario_logado_pode_cancelar_ocupacao,
         usuario_logado_pode_cancelar_todas_reservas=usuario_logado_pode_cancelar_todas_reservas,
         id_usuario_logado=id_usuario_logado_int,
         q=q,

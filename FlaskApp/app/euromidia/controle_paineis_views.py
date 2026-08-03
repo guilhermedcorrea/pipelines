@@ -5015,16 +5015,25 @@ def grade_painel(codponto: int):
 
     def _fim_efetivo_item(df_prev, dc=None):
         """
-        Eu uso somente DataTerminoPrevisto na grade de ocupação.
+        Define o último dia operacional da ocupação exibida na grade.
 
-        Regra correta da tela /paineis/<codponto>/grade:
-        - DataInicioPrevisto define o início da ocupação.
-        - DataTerminoPrevisto define o fim da ocupação.
-        - Nenhum outro campo de data entra no cálculo nem no desenho da barra.
+        - ocupação ativa: usa a DataFim original;
+        - ocupação de CONTRATO cancelada: usa o menor valor entre DataFim e
+          CanceladoEm, mantendo o dia do cancelamento como ocupado e liberando
+          os dias seguintes;
+        - reservas continuam em consulta separada e não passam por esta regra.
         """
         try:
-            return _coerce_to_date(df_prev)
-        except:
+            data_fim = _coerce_to_date(df_prev)
+            data_cancelamento = _coerce_to_date(dc)
+
+            if data_fim is None:
+                return data_cancelamento
+            if data_cancelamento is None:
+                return data_fim
+
+            return min(data_fim, data_cancelamento)
+        except Exception:
             return None
 
     def _like_param(s: str):
@@ -6086,7 +6095,12 @@ def grade_painel(codponto: int):
                  )
                 ,DataInicio = TRY_CONVERT(date, oc.DataInicio)
                 ,DataFim = TRY_CONVERT(date, oc.DataFim)
-                ,DataAuxiliarIgnorada = CAST(NULL AS date)
+                ,DataCancelamento = CASE
+                     WHEN UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Status), ''))))
+                              COLLATE Latin1_General_CI_AI IN ('CANCELADO', 'CANCELADA')
+                         THEN TRY_CONVERT(date, oc.CanceladoEm)
+                     ELSE CAST(NULL AS date)
+                 END
                 ,Cota = oc.Cota
                 ,NumeroContrato = COALESCE(
                      NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(150), oc.NumeroContrato))), ''),
@@ -6189,13 +6203,53 @@ def grade_painel(codponto: int):
             WHERE TRY_CONVERT(int, oc.CodPonto) = :codponto
               AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Origem), ''))))
                     COLLATE Latin1_General_CI_AI = 'CONTRATO'
-              AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Status), ''))))
-                    COLLATE Latin1_General_CI_AI NOT IN ('CANCELADO', 'CANCELADA')
-              AND oc.CanceladoEm IS NULL
+              AND
+              (
+                    (
+                        UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Status), ''))))
+                            COLLATE Latin1_General_CI_AI NOT IN ('CANCELADO', 'CANCELADA')
+                        AND oc.CanceladoEm IS NULL
+                    )
+                    OR
+                    (
+                        UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Status), ''))))
+                            COLLATE Latin1_General_CI_AI IN ('CANCELADO', 'CANCELADA')
+                        AND oc.CanceladoEm IS NOT NULL
+                    )
+              )
               AND TRY_CONVERT(date, oc.DataInicio) IS NOT NULL
               AND TRY_CONVERT(date, oc.DataFim) IS NOT NULL
               AND TRY_CONVERT(date, oc.DataInicio) < :dt_fim_exclusivo
-              AND TRY_CONVERT(date, oc.DataFim) >= :dt_ini
+              AND
+              (
+                    CASE
+                        WHEN UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Status), ''))))
+                                 COLLATE Latin1_General_CI_AI IN ('CANCELADO', 'CANCELADA')
+                             AND oc.CanceladoEm IS NOT NULL
+                            THEN
+                                CASE
+                                    WHEN TRY_CONVERT(date, oc.CanceladoEm) < TRY_CONVERT(date, oc.DataFim)
+                                        THEN TRY_CONVERT(date, oc.CanceladoEm)
+                                    ELSE TRY_CONVERT(date, oc.DataFim)
+                                END
+                        ELSE TRY_CONVERT(date, oc.DataFim)
+                    END
+              ) >= :dt_ini
+              AND
+              (
+                    CASE
+                        WHEN UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Status), ''))))
+                                 COLLATE Latin1_General_CI_AI IN ('CANCELADO', 'CANCELADA')
+                             AND oc.CanceladoEm IS NOT NULL
+                            THEN
+                                CASE
+                                    WHEN TRY_CONVERT(date, oc.CanceladoEm) < TRY_CONVERT(date, oc.DataFim)
+                                        THEN TRY_CONVERT(date, oc.CanceladoEm)
+                                    ELSE TRY_CONVERT(date, oc.DataFim)
+                                END
+                        ELSE TRY_CONVERT(date, oc.DataFim)
+                    END
+              ) >= TRY_CONVERT(date, oc.DataInicio)
             """
         ]
 
@@ -8399,7 +8453,10 @@ def grade_painel(codponto: int):
 
             df_reserva_preferencia = _coerce_to_date(df_reserva_preferencia)
 
-            if df_reserva_preferencia is not None and (df is None or df_reserva_preferencia > df):
+            # Uma ocupação de contrato cancelada termina definitivamente em
+            # CanceladoEm. Uma preferência vinculada não pode prolongar novamente
+            # o consumo de capacidade dessa ocupação após o cancelamento.
+            if dc is None and df_reserva_preferencia is not None and (df is None or df_reserva_preferencia > df):
                 df = df_reserva_preferencia
 
             if df is None:

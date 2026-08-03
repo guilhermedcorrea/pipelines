@@ -465,7 +465,8 @@
   const selectIntermediarioCard = document.getElementById("selectIntermediarioCard");
   const btnLimparIntermediario = document.getElementById("btnLimparIntermediario");
   const inputCnpjIntermediarioCard = document.getElementById("inputCnpjIntermediarioCard");
-  const inputMarcaCard = document.getElementById("inputMarcaCard");
+  const marcaCardLista = document.getElementById("marcaCardLista");
+  let inputMarcaCard = document.getElementById("inputMarcaCard");
   const inputTelefoneCard = document.getElementById("inputTelefoneCard");
   const inputEmailCard = document.getElementById("inputEmailCard");
   const btnAbrirCadastroEmpresa = document.getElementById("btnAbrirCadastroEmpresa");
@@ -1818,6 +1819,113 @@
 
   function obterInputFormularioSolicitacao(secao, nomeCampo, indice = null){
     return document.getElementById(idCampoSolicitacao(secao, nomeCampo, indice));
+  }
+
+  function chaveComparacaoMarcaCard(valor){
+    return safeStr(valor || "")
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleUpperCase("pt-BR");
+  }
+
+  function coletarMarcasCardFormulario(){
+    const marcas = [];
+    const chavesVistas = new Set();
+    const inputs = marcaCardLista?.querySelectorAll('[data-role="input-marca-card"]') || [];
+
+    inputs.forEach((input) => {
+      const marca = safeStr(input?.value || "").trim();
+      if (!marca) return;
+
+      const chave = chaveComparacaoMarcaCard(marca);
+      if (!chave || chavesVistas.has(chave)) return;
+
+      chavesVistas.add(chave);
+      marcas.push(marca.slice(0, 100));
+    });
+
+    return marcas;
+  }
+
+  function criarLinhaMarcaCard(valor = ""){
+    const linha = document.createElement("div");
+    linha.className = "kb-marca-card-linha";
+    linha.dataset.role = "marca-card-linha";
+
+    const input = document.createElement("input");
+    input.className = "kb-input";
+    input.type = "text";
+    input.maxLength = 100;
+    input.placeholder = "Ex: Coca-Cola";
+    input.dataset.role = "input-marca-card";
+    input.value = safeStr(valor || "").slice(0, 100);
+
+    const btnAdicionar = document.createElement("button");
+    btnAdicionar.className = "kb-btn sm kb-marca-card-acao";
+    btnAdicionar.type = "button";
+    btnAdicionar.dataset.action = "adicionar-marca";
+    btnAdicionar.title = "Adicionar outra marca";
+    btnAdicionar.setAttribute("aria-label", "Adicionar outra marca");
+    btnAdicionar.textContent = "+";
+
+    const btnRemover = document.createElement("button");
+    btnRemover.className = "kb-btn sm kb-marca-card-acao";
+    btnRemover.type = "button";
+    btnRemover.dataset.action = "remover-marca";
+    btnRemover.title = "Remover esta marca";
+    btnRemover.setAttribute("aria-label", "Remover esta marca");
+    btnRemover.textContent = "−";
+
+    linha.append(input, btnAdicionar, btnRemover);
+    return linha;
+  }
+
+  function atualizarIdentificacaoLinhasMarcaCard(){
+    const linhas = Array.from(marcaCardLista?.querySelectorAll('[data-role="marca-card-linha"]') || []);
+
+    linhas.forEach((linha, indice) => {
+      const input = linha.querySelector('[data-role="input-marca-card"]');
+      if (!input) return;
+
+      if (indice === 0) {
+        input.id = "inputMarcaCard";
+        input.setAttribute("aria-label", "Marca principal");
+        inputMarcaCard = input;
+      } else {
+        input.removeAttribute("id");
+        input.setAttribute("aria-label", `Marca adicional ${indice + 1}`);
+      }
+    });
+  }
+
+  function renderizarMarcasCard(valores, marcaFallback = ""){
+    if (!marcaCardLista) return;
+
+    const listaBruta = Array.isArray(valores) ? valores : [];
+    const valoresNormalizados = [];
+    const chavesVistas = new Set();
+
+    [...listaBruta, marcaFallback].forEach((item) => {
+      const valor = item && typeof item === "object"
+        ? (item.Marca ?? item.marca ?? "")
+        : item;
+      const marca = safeStr(valor || "").trim().slice(0, 100);
+      if (!marca) return;
+
+      const chave = chaveComparacaoMarcaCard(marca);
+      if (!chave || chavesVistas.has(chave)) return;
+
+      chavesVistas.add(chave);
+      valoresNormalizados.push(marca);
+    });
+
+    marcaCardLista.innerHTML = "";
+    (valoresNormalizados.length ? valoresNormalizados : [""]).forEach((marca) => {
+      marcaCardLista.appendChild(criarLinhaMarcaCard(marca));
+    });
+
+    atualizarIdentificacaoLinhasMarcaCard();
   }
 
   function sincronizarMarcaExibidaHeaderComInputTopo(){
@@ -7766,7 +7874,7 @@ function montarMapaQuantidadesAtualizacaoAoVivo(idsFase, idFaseDestino = 0, acre
   }
 
   function limparDadosNovoContratoFormulario(){
-    if (inputMarcaCard) inputMarcaCard.value = "";
+    renderizarMarcasCard([]);
     if (inputTelefoneCard) inputTelefoneCard.value = "";
     if (inputEmailCard) inputEmailCard.value = "";
   }
@@ -16741,11 +16849,13 @@ async function moverCard(idCard, idFasePara, posicao) {
     };
 
     if (idNum(cardAbertoId) === idC) {
-      const marcaMovimento = safeStr(inputMarcaCard?.value || "").trim();
+      const marcasMovimento = coletarMarcasCardFormulario();
+      const marcaMovimento = marcasMovimento[0] || null;
       const telefoneMovimento = normalizarTelefoneContato(inputTelefoneCard?.value || "") || null;
       const emailMovimento = safeStr(inputEmailCard?.value || "").trim();
 
-      if (marcaMovimento) payload.marca = marcaMovimento;
+      payload.marcas = marcasMovimento;
+      payload.marca = marcaMovimento;
       if (telefoneMovimento) payload.telefone = telefoneMovimento;
       if (emailMovimento) payload.email = emailMovimento;
     }
@@ -17750,12 +17860,40 @@ async function moverCard(idCard, idFasePara, posicao) {
     agendarSincronizacaoFormularioSolicitacao();
   });
 
-  inputMarcaCard?.addEventListener("input", () => {
-    sincronizarMarcaExibidaHeaderComInputTopo();
+  marcaCardLista?.addEventListener("click", (evento) => {
+    const botao = evento.target?.closest?.("[data-action]");
+    if (!botao || !marcaCardLista.contains(botao)) return;
+
+    const linhaAtual = botao.closest('[data-role="marca-card-linha"]');
+    if (!linhaAtual) return;
+
+    if (botao.dataset.action === "adicionar-marca") {
+      const novaLinha = criarLinhaMarcaCard("");
+      linhaAtual.insertAdjacentElement("afterend", novaLinha);
+      atualizarIdentificacaoLinhasMarcaCard();
+      novaLinha.querySelector('[data-role="input-marca-card"]')?.focus();
+    } else if (botao.dataset.action === "remover-marca") {
+      linhaAtual.remove();
+      if (!marcaCardLista.querySelector('[data-role="marca-card-linha"]')) {
+        marcaCardLista.appendChild(criarLinhaMarcaCard(""));
+      }
+      atualizarIdentificacaoLinhasMarcaCard();
+      sincronizarMarcaExibidaHeaderComInputTopo();
+    }
+
     agendarSincronizacaoFormularioSolicitacao();
+    if (typeof atualizarEstadoSalvarCard === "function") atualizarEstadoSalvarCard();
   });
 
-  inputMarcaCard?.addEventListener("change", () => {
+  marcaCardLista?.addEventListener("input", (evento) => {
+    if (!evento.target?.matches?.('[data-role="input-marca-card"]')) return;
+    sincronizarMarcaExibidaHeaderComInputTopo();
+    agendarSincronizacaoFormularioSolicitacao();
+    if (typeof atualizarEstadoSalvarCard === "function") atualizarEstadoSalvarCard();
+  });
+
+  marcaCardLista?.addEventListener("change", (evento) => {
+    if (!evento.target?.matches?.('[data-role="input-marca-card"]')) return;
     sincronizarMarcaExibidaHeaderComInputTopo();
     agendarSincronizacaoFormularioSolicitacao();
   });
@@ -19392,10 +19530,8 @@ async function moverCard(idCard, idFasePara, posicao) {
       inputDescricaoCard.value = cardNormalizado.Descricao ?? "";
     }
 
-    if (inputMarcaCard) {
-      inputMarcaCard.value = cardNormalizado.Marca ?? "";
-      sincronizarMarcaExibidaHeaderComInputTopo();
-    }
+    renderizarMarcasCard(cardNormalizado.Marcas ?? cardNormalizado.marcas ?? [], cardNormalizado.Marca ?? "");
+    sincronizarMarcaExibidaHeaderComInputTopo();
 
     if (inputTelefoneCard) {
       inputTelefoneCard.value = normalizarTelefoneContato(cardNormalizado.Telefone ?? "");
@@ -19651,10 +19787,8 @@ async function moverCard(idCard, idFasePara, posicao) {
       resetarFluxoContrato();
     }
 
-    if (inputMarcaCard) {
-      inputMarcaCard.value = cardNormalizado.Marca ?? "";
-      sincronizarMarcaExibidaHeaderComInputTopo();
-    }
+    renderizarMarcasCard(cardNormalizado.Marcas ?? cardNormalizado.marcas ?? [], cardNormalizado.Marca ?? "");
+    sincronizarMarcaExibidaHeaderComInputTopo();
 
     if (inputTelefoneCard) {
       inputTelefoneCard.value = normalizarTelefoneContato(cardNormalizado.Telefone ?? "");
@@ -20095,6 +20229,7 @@ async function moverCard(idCard, idFasePara, posicao) {
     const painelFaces = painelFaceLigado ? normalizarPainelFacesParaComparacao(coletarPainelFacesDoFormulario()) : [];
     const solicitacaoContrato = obterSolicitacaoContratoParaPayload();
     const tipoDocumentoAtual = obterTipoDocumentoSelecionadoNoHeaderSolicitacao();
+    const marcasCard = coletarMarcasCardFormulario();
 
     const idTipoClienteAtual = selectTipoClienteDescontoCard?.value ? Number(selectTipoClienteDescontoCard.value) : null;
     const empresasRelacionadasPayload = coletarEmpresasRelacionadasPermitidasParaPayload(idTipoClienteAtual);
@@ -20118,7 +20253,8 @@ async function moverCard(idCard, idFasePara, posicao) {
       id_empresa_cliente_direto: empresasRelacionadasPayload.id_empresa_cliente_direto,
       id_empresa_bureau: empresasRelacionadasPayload.id_empresa_bureau,
       id_empresa_intermediario: empresasRelacionadasPayload.id_empresa_intermediario,
-      marca: safeStr(inputMarcaCard?.value || "").trim() || null,
+      marca: marcasCard[0] || null,
+      marcas: marcasCard,
       telefone: normalizarTelefoneContato(inputTelefoneCard?.value || "") || null,
       email: safeStr(inputEmailCard?.value || "").trim() || null,
       solicitacao_contrato: solicitacaoContrato,

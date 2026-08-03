@@ -2130,6 +2130,38 @@
     gap:6px;
   }
 
+  .kb-marcas-card-lista{
+    display:grid;
+    gap:8px;
+  }
+
+  .kb-marca-card-linha{
+    display:grid;
+    grid-template-columns:minmax(0, 1fr) 38px 38px;
+    gap:8px;
+    align-items:center;
+  }
+
+  .kb-marca-card-acao{
+    width:38px;
+    min-width:38px;
+    height:38px;
+    padding:0;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:10px;
+    font-size:20px;
+    font-weight:950;
+    line-height:1;
+  }
+
+  .kb-marca-card-acao[data-action="remover-marca"]{
+    color:#b42318;
+    border-color:rgba(180,35,24,.28);
+    background:rgba(180,35,24,.06);
+  }
+
   .kb-contrato-campo[hidden]{
     display:none !important;
   }
@@ -4590,7 +4622,13 @@
           <div class="kb-cadastro-empresa-grid">
             <div class="kb-contrato-campo span-3">
               <label class="kb-contrato-label" for="inputMarcaCard">Marca</label>
-              <input id="inputMarcaCard" class="kb-input" type="text" maxlength="100" placeholder="Ex: Coca-Cola" />
+              <div id="marcaCardLista" class="kb-marcas-card-lista">
+                <div class="kb-marca-card-linha" data-role="marca-card-linha">
+                  <input id="inputMarcaCard" class="kb-input" type="text" maxlength="100" placeholder="Ex: Coca-Cola" data-role="input-marca-card" />
+                  <button class="kb-btn sm kb-marca-card-acao" type="button" data-action="adicionar-marca" title="Adicionar outra marca" aria-label="Adicionar outra marca">+</button>
+                  <button class="kb-btn sm kb-marca-card-acao" type="button" data-action="remover-marca" title="Remover esta marca" aria-label="Remover esta marca">−</button>
+                </div>
+              </div>
             </div>
 
             <div class="kb-contrato-campo" hidden aria-hidden="true">
