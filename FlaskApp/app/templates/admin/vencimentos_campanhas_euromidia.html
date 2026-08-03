@@ -965,6 +965,23 @@
     text-decoration:none;
   }
 
+  .vc-numero-contrato{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    margin-top:3px;
+    font-size:11px;
+    font-weight:800;
+  }
+
+  .vc-preferencia-selo{
+    display:block;
+    width:20px;
+    height:20px;
+    object-fit:contain;
+    flex:0 0 20px;
+  }
+
   .vc-painel{
     display:inline-flex;
     align-items:center;
@@ -2032,7 +2049,18 @@
                     </span>
                   {% endif %}
                   {% if row.NumeroContratoExibicao and row.NumeroContratoExibicao != '—' %}
-                    <div class="muted" style="font-size:11px;font-weight:800;margin-top:3px;">Nº contrato: {{ row.NumeroContratoExibicao }}</div>
+                    <div class="muted vc-numero-contrato">
+                      <span>Nº contrato: {{ row.NumeroContratoExibicao }}</span>
+                      {% if row.TemPreferenciaReserva %}
+                        <img
+                          class="vc-preferencia-selo"
+                          src="{{ url_for('static', filename='imagens/MEDALHA PREFERENCIA.png') }}"
+                          alt="Preferência de reserva"
+                          title="Esta ocupação possui preferência de reserva."
+                          loading="lazy"
+                        >
+                      {% endif %}
+                    </div>
                   {% endif %}
                   {% if row.FonteLinha == 'RESERVA' %}
                     <div class="muted" style="font-size:11px;font-weight:900;margin-top:3px;">

@@ -22092,6 +22092,7 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                 TipoReserva = CAST(NULL AS int),
                 TipoVinculoOrigem = CAST(NULL AS nvarchar(120)),
                 IDFatoOcupacaoOrigem = CAST(NULL AS int),
+                BitPreferencia = CAST(ISNULL(item.BitPreferencia, 0) AS bit),
                 venc.DataCriacao,
                 venc.DataAtualizacao
             FROM
@@ -22187,6 +22188,17 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                 reserva.TipoReserva,
                 reserva.TipoVinculoOrigem,
                 reserva.IDFatoOcupacaoOrigem,
+                BitPreferencia = CAST(
+                    CASE
+                        WHEN ISNULL(item_res.BitPreferencia, 0) = 1 THEN 1
+                        WHEN ISNULL(reserva.TipoReserva, 0) = 2 THEN 1
+                        WHEN UPPER(LTRIM(RTRIM(ISNULL(reserva.TipoVinculoOrigem, '')))) COLLATE Latin1_General_CI_AI
+                             LIKE 'PREFER%RENOVA%' THEN 1
+                        WHEN ISNULL(reserva.IDFatoOcupacaoOrigem, 0) > 0 THEN 1
+                        ELSE 0
+                    END
+                    AS bit
+                ),
                 DataCriacao = reserva.CriadoEm,
                 DataAtualizacao = reserva.DataAtualizacao
             FROM
@@ -22233,7 +22245,8 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
             OUTER APPLY
             (
                 SELECT TOP (1)
-                    ValorCampanha = item_res_base.TotalLiquidoContratoAGBRVENDGERCOOR
+                    ValorCampanha = item_res_base.TotalLiquidoContratoAGBRVENDGERCOOR,
+                    BitPreferencia = ISNULL(item_res_base.BitPreferencia, 0)
                 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_res_base
                 WHERE ISNULL(item_res_base.BitAtivo, 0) = 1
                   AND (
@@ -22367,6 +22380,17 @@ def _campanhas_vencimentos_enriquecer_item(d: dict) -> dict:
             or "PREFERÊNCIA RENOV" in tipo_vinculo_origem
             or (_parse_int(d.get("IDFatoOcupacaoOrigem")) or 0) > 0
         )
+    )
+    try:
+        bit_preferencia_item = bool(int(d.get("BitPreferencia") or 0))
+    except (TypeError, ValueError):
+        bit_preferencia_item = False
+
+    # A medalha da grade é orientada pelo BitPreferencia do item. Para linhas
+    # cuja origem já é a própria reserva, os metadados da ocupação também são
+    # considerados para não ocultar preferências antigas sem o bit preenchido.
+    d["TemPreferenciaReserva"] = bool(
+        bit_preferencia_item or d["ReservaPreferenciaRenovacao"]
     )
     reserva_tem_prazo_48h_uteis = d.get("ReservaExpiraEm") is not None
     d["ReservaPermiteAcoes"] = bool(
@@ -25713,6 +25737,7 @@ def vencimentos_campanhas_euromidia():
             vc.TipoReserva,
             vc.TipoVinculoOrigem,
             vc.IDFatoOcupacaoOrigem,
+            vc.BitPreferencia,
             vc.DataCriacao,
             vc.DataAtualizacao
         {sql_from_where}
@@ -25957,6 +25982,7 @@ def vencimentos_campanhas_sugestoes():
             vc.TipoReserva,
             vc.TipoVinculoOrigem,
             vc.IDFatoOcupacaoOrigem,
+            vc.BitPreferencia,
             vc.DataAtualizacao
         {sql_from_where}
         ORDER BY
