@@ -959,6 +959,21 @@
     white-space:nowrap;
   }
 
+  .vc-contrato-linha{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    max-width:100%;
+  }
+
+  .vc-ocupacao-fatiada-icone{
+    display:block;
+    width:22px;
+    height:22px;
+    object-fit:contain;
+    flex:0 0 22px;
+  }
+
   .vc-contrato-disabled{
     color:#64748B;
     cursor:default;
@@ -2038,16 +2053,27 @@
                 data-id-vencimento="{{ row.IDFatoVencimentoCampanhaEuromidia if row.FonteLinha == 'CAMPANHA' else '' }}"
               >
                 <td data-label="Contrato">
-                  {% if usuario_pode_acessar_contrato %}
-                    {% set url_contrato_rapido = url_for('Paineis.contratos_detalhe', id_contrato=row.IDFatoControleContratosEuromidia, return_to=request.full_path, modo_rapido=1) %}
-                    <a class="vc-contrato" href="{{ url_contrato_rapido }}" data-prefetch-contrato-url="{{ url_contrato_rapido }}" title="Abrir contrato #{{ row.IDFatoControleContratosEuromidia }} em modo rápido com cache Redis.">
-                      {{ row.IDFatoControleContratosEuromidia or row.NumeroContratoExibicao }}
-                    </a>
-                  {% else %}
-                    <span class="vc-contrato vc-contrato-disabled" title="{% if row.IDFatoControleContratosEuromidia %}Contrato bloqueado para este usuário nesta tela.{% else %}Linha sem contrato vinculado.{% endif %}">
-                      {{ row.IDFatoControleContratosEuromidia or row.NumeroContratoExibicao or '—' }}
-                    </span>
-                  {% endif %}
+                  <div class="vc-contrato-linha">
+                    {% if usuario_pode_acessar_contrato %}
+                      {% set url_contrato_rapido = url_for('Paineis.contratos_detalhe', id_contrato=row.IDFatoControleContratosEuromidia, return_to=request.full_path, modo_rapido=1) %}
+                      <a class="vc-contrato" href="{{ url_contrato_rapido }}" data-prefetch-contrato-url="{{ url_contrato_rapido }}" title="Abrir contrato #{{ row.IDFatoControleContratosEuromidia }} em modo rápido com cache Redis.">
+                        {{ row.IDFatoControleContratosEuromidia or row.NumeroContratoExibicao }}
+                      </a>
+                    {% else %}
+                      <span class="vc-contrato vc-contrato-disabled" title="{% if row.IDFatoControleContratosEuromidia %}Contrato bloqueado para este usuário nesta tela.{% else %}Linha sem contrato vinculado.{% endif %}">
+                        {{ row.IDFatoControleContratosEuromidia or row.NumeroContratoExibicao or '—' }}
+                      </span>
+                    {% endif %}
+                    {% if row.BitOcupacaoFatiada %}
+                      <img
+                        class="vc-ocupacao-fatiada-icone"
+                        src="{{ url_for('static', filename='imagens/seta_continuidade.png') }}"
+                        alt="Ocupação fatiada"
+                        title="Ocupação fatiada: os períodos foram consolidados em uma única linha."
+                        loading="lazy"
+                      >
+                    {% endif %}
+                  </div>
                   {% if row.NumeroContratoExibicao and row.NumeroContratoExibicao != '—' %}
                     <div class="muted vc-numero-contrato">
                       <span>Nº contrato: {{ row.NumeroContratoExibicao }}</span>

@@ -22033,6 +22033,8 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
     CAMPANHA:
         - origem oficial FatoVencimentoCampanhaEuromidia;
         - mantém a regra de linha mais recente por item de contrato;
+        - para ocupação fatiada, usa IDFatoOcupacaoPaineisEuromidia da
+          FatoAgendamentoFaceContrato como chave e mantém uma única linha;
         - mantém somente vencimentos ativos e itens ativos.
 
     RESERVA:
@@ -22051,6 +22053,14 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                 CAST(NULL AS int) AS IDReservaOcupacao,
                 CAST('CAMPANHA' AS varchar(20)) AS FonteLinha,
                 CAST(1 AS bit) AS PodeRenovar,
+                BitOcupacaoFatiada = CAST
+                (
+                    CASE
+                        WHEN venc.IDFatoOcupacaoFatiada IS NOT NULL THEN 1
+                        ELSE 0
+                    END
+                    AS bit
+                ),
                 venc.IDFatoControleContratosEuromidia,
                 venc.IDFatoControleContratosItensEuromidia,
                 venc.IDDimStatusCampanha,
@@ -22102,17 +22112,49 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                 (
                     SELECT
                         venc_base.*,
+                        agendamento_vinculo.IDFatoOcupacaoPaineisEuromidia AS IDFatoOcupacaoFatiada,
                         ROW_NUMBER() OVER
                         (
                             PARTITION BY
-                                venc_base.IDFatoControleContratosEuromidia,
-                                venc_base.IDFatoControleContratosItensEuromidia
+                                CASE
+                                    WHEN agendamento_vinculo.IDFatoOcupacaoPaineisEuromidia IS NOT NULL THEN 1
+                                    ELSE 0
+                                END,
+                                CASE
+                                    WHEN agendamento_vinculo.IDFatoOcupacaoPaineisEuromidia IS NOT NULL
+                                    THEN agendamento_vinculo.IDFatoOcupacaoPaineisEuromidia
+                                    ELSE venc_base.IDFatoControleContratosEuromidia
+                                END,
+                                CASE
+                                    WHEN agendamento_vinculo.IDFatoOcupacaoPaineisEuromidia IS NOT NULL THEN 0
+                                    ELSE venc_base.IDFatoControleContratosItensEuromidia
+                                END
                             ORDER BY
+                                CASE
+                                    WHEN agendamento_vinculo.IDFatoOcupacaoPaineisEuromidia IS NOT NULL
+                                    THEN ISNULL(agendamento_vinculo.Sequencia, 2147483647)
+                                    ELSE 0
+                                END ASC,
                                 ISNULL(venc_base.DataAtualizacao, '19000101') DESC,
                                 ISNULL(venc_base.DataCriacao, '19000101') DESC,
                                 venc_base.IDFatoVencimentoCampanhaEuromidia DESC
                         ) AS LinhaMaisRecente
                     FROM [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia] AS venc_base
+                    OUTER APPLY
+                    (
+                        SELECT TOP (1)
+                            ag.IDFatoOcupacaoPaineisEuromidia,
+                            ag.Sequencia
+                        FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato] AS ag WITH (NOLOCK)
+                        WHERE ag.IDFatoControleContratosEuromidia = venc_base.IDFatoControleContratosEuromidia
+                          AND ag.IDFatoControleContratosItensEuromidia = venc_base.IDFatoControleContratosItensEuromidia
+                          AND ISNULL(ag.BitAtivo, 1) = 1
+                          AND ISNULL(ag.IDFatoOcupacaoPaineisEuromidia, 0) > 0
+                        ORDER BY
+                            ISNULL(ag.Sequencia, 2147483647) ASC,
+                            ISNULL(ag.DataAtualizado, '19000101') DESC,
+                            ag.IDFatoAgendamentoFaceContrato DESC
+                    ) AS agendamento_vinculo
                     WHERE ISNULL(venc_base.BitAtivo, 1) = 1
                       AND ISNULL(venc_base.IDFatoControleContratosEuromidia, 0) > 0
                       AND ISNULL(venc_base.IDFatoControleContratosItensEuromidia, 0) > 0
@@ -22146,6 +22188,7 @@ def _campanhas_vencimentos_sql_from_where(where_sql: str) -> str:
                 reserva.IDFatoOcupacaoPaineisEuromidia AS IDReservaOcupacao,
                 CAST('RESERVA' AS varchar(20)) AS FonteLinha,
                 CAST(1 AS bit) AS PodeRenovar,
+                CAST(0 AS bit) AS BitOcupacaoFatiada,
                 reserva.IDFatoControleContratos AS IDFatoControleContratosEuromidia,
                 reserva.IDFatoControleContratosItemOrigem AS IDFatoControleContratosItensEuromidia,
                 CAST(-9001 AS int) AS IDDimStatusCampanha,
@@ -22493,6 +22536,14 @@ def _campanhas_vencimentos_ocupacoes_ativas_por_item(ids_itens) -> dict[int, int
                             WHERE vinc.IDFatoOcupacaoPaineisEuromidia = ocup.IDFatoOcupacaoPaineisEuromidia
                               AND vinc.IDFatoControleContratosItensEuromidia = alvo.IDItem
                         )
+                        OR EXISTS
+                        (
+                            SELECT 1
+                            FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato] AS ag WITH (NOLOCK)
+                            WHERE ag.IDFatoOcupacaoPaineisEuromidia = ocup.IDFatoOcupacaoPaineisEuromidia
+                              AND ag.IDFatoControleContratosItensEuromidia = alvo.IDItem
+                              AND ISNULL(ag.BitAtivo, 1) = 1
+                        )
             """
 
         return db.session.execute(
@@ -22715,6 +22766,73 @@ def _campanhas_vencimentos_sincronizar_itens_controle() -> None:
         SET @IDStatusVencida = COALESCE(@IDStatusVencida, {int(ID_STATUS_CAMPANHA_VENCIDA)});
         SET @IDStatusSemDataTermino = COALESCE(@IDStatusSemDataTermino, {int(ID_STATUS_CAMPANHA_SEM_DATA_TERMINO)});
 
+        IF OBJECT_ID('tempdb..#AgendamentoOcupacaoConsolidado') IS NOT NULL
+            DROP TABLE #AgendamentoOcupacaoConsolidado;
+
+        ;WITH AgendamentoVinculo AS
+        (
+            SELECT
+                ag.IDFatoControleContratosEuromidia,
+                ag.IDFatoControleContratosItensEuromidia,
+                ag.IDFatoOcupacaoPaineisEuromidia,
+                LinhaVinculo = ROW_NUMBER() OVER
+                (
+                    PARTITION BY
+                        ag.IDFatoControleContratosEuromidia,
+                        ag.IDFatoControleContratosItensEuromidia
+                    ORDER BY
+                        ISNULL(ag.Sequencia, 2147483647) ASC,
+                        ISNULL(ag.DataAtualizado, '19000101') DESC,
+                        ag.IDFatoAgendamentoFaceContrato DESC
+                )
+            FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato] AS ag WITH (NOLOCK)
+            WHERE ISNULL(ag.BitAtivo, 1) = 1
+              AND ISNULL(ag.IDFatoControleContratosEuromidia, 0) > 0
+              AND ISNULL(ag.IDFatoControleContratosItensEuromidia, 0) > 0
+              AND ISNULL(ag.IDFatoOcupacaoPaineisEuromidia, 0) > 0
+        ),
+        AgendamentoPeriodo AS
+        (
+            SELECT
+                ag.IDFatoOcupacaoPaineisEuromidia,
+                DataInicioOcupacao = MIN
+                (
+                    COALESCE(
+                        TRY_CONVERT(date, ag.DataInicio),
+                        TRY_CONVERT(date, ag.DataInicioPrevisto)
+                    )
+                ),
+                DataTerminoOcupacao = MAX
+                (
+                    COALESCE(
+                        TRY_CONVERT(date, ag.DataTermino),
+                        TRY_CONVERT(date, ag.DataTerminoPrevisto)
+                    )
+                )
+            FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato] AS ag WITH (NOLOCK)
+            WHERE ISNULL(ag.BitAtivo, 1) = 1
+              AND ISNULL(ag.IDFatoOcupacaoPaineisEuromidia, 0) > 0
+            GROUP BY ag.IDFatoOcupacaoPaineisEuromidia
+        )
+        SELECT
+            vinc.IDFatoControleContratosEuromidia,
+            vinc.IDFatoControleContratosItensEuromidia,
+            vinc.IDFatoOcupacaoPaineisEuromidia,
+            periodo.DataInicioOcupacao,
+            periodo.DataTerminoOcupacao
+        INTO #AgendamentoOcupacaoConsolidado
+        FROM AgendamentoVinculo AS vinc
+        INNER JOIN AgendamentoPeriodo AS periodo
+            ON periodo.IDFatoOcupacaoPaineisEuromidia = vinc.IDFatoOcupacaoPaineisEuromidia
+        WHERE vinc.LinhaVinculo = 1;
+
+        CREATE UNIQUE CLUSTERED INDEX IX_AgendamentoOcupacaoConsolidado_Item
+            ON #AgendamentoOcupacaoConsolidado
+            (
+                IDFatoControleContratosEuromidia,
+                IDFatoControleContratosItensEuromidia
+            );
+
         ;WITH ItensFonte AS
         (
             SELECT
@@ -22728,35 +22846,56 @@ def _campanhas_vencimentos_sincronizar_itens_controle() -> None:
                     NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), i.RazaoSocial))), ''),
                     NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.RazaoSocial))), '')
                 ),
-                DataInicioCampanha = CAST(i.DataInicioPrevisto AS date),
-                DataTerminoPrevisto = CAST(COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS date),
+                DataInicioCampanha = periodo_fonte.DataInicioCampanha,
+                DataTerminoPrevisto = periodo_fonte.DataTerminoPrevisto,
                 DiasParaVencer = CASE
-                    WHEN COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) IS NULL THEN NULL
-                    WHEN CAST(COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS date) < @Hoje THEN 0
-                    ELSE DATEDIFF(DAY, @Hoje, CAST(COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS date))
+                    WHEN periodo_fonte.DataTerminoPrevisto IS NULL THEN NULL
+                    WHEN periodo_fonte.DataTerminoPrevisto < @Hoje THEN 0
+                    ELSE DATEDIFF(DAY, @Hoje, periodo_fonte.DataTerminoPrevisto)
                 END,
                 BitAtivoCalculado = CASE
-                    WHEN COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) IS NOT NULL
-                         AND CAST(COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS date) < @Hoje THEN 0
+                    WHEN periodo_fonte.DataTerminoPrevisto IS NOT NULL
+                         AND periodo_fonte.DataTerminoPrevisto < @Hoje THEN 0
                     ELSE 1
                 END,
                 IDDimStatusCampanhaCalculado = CASE
-                    WHEN COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) IS NULL THEN @IDStatusSemDataTermino
-                    WHEN i.DataInicioPrevisto IS NOT NULL AND CAST(i.DataInicioPrevisto AS date) > @Hoje THEN @IDStatusFutura
-                    WHEN CAST(COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS date) < @Hoje THEN @IDStatusVencida
-                    WHEN DATEDIFF(DAY, @Hoje, CAST(COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS date)) BETWEEN 0 AND 45 THEN @IDStatusVencendo
+                    WHEN periodo_fonte.DataTerminoPrevisto IS NULL THEN @IDStatusSemDataTermino
+                    WHEN periodo_fonte.DataInicioCampanha IS NOT NULL AND periodo_fonte.DataInicioCampanha > @Hoje THEN @IDStatusFutura
+                    WHEN periodo_fonte.DataTerminoPrevisto < @Hoje THEN @IDStatusVencida
+                    WHEN DATEDIFF(DAY, @Hoje, periodo_fonte.DataTerminoPrevisto) BETWEEN 0 AND 45 THEN @IDStatusVencendo
                     ELSE @IDStatusAtiva
                 END
             FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
             INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
                 ON ctr.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+            LEFT JOIN #AgendamentoOcupacaoConsolidado AS agendamento_consolidado
+                ON agendamento_consolidado.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+               AND agendamento_consolidado.IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia
+            CROSS APPLY
+            (
+                SELECT
+                    DataInicioCampanha = CAST
+                    (
+                        COALESCE(
+                            agendamento_consolidado.DataInicioOcupacao,
+                            i.DataInicioPrevisto
+                        ) AS date
+                    ),
+                    DataTerminoPrevisto = CAST
+                    (
+                        COALESCE(
+                            agendamento_consolidado.DataTerminoOcupacao,
+                            i.DataFimEfetiva,
+                            i.DataTerminoPrevisto
+                        ) AS date
+                    )
+            ) AS periodo_fonte
             WHERE ISNULL(i.BitAtivo, 0) = 1
               AND ISNULL(i.IDFatoControleContratoEuromidia, 0) > 0
               AND ISNULL(i.IDFatoControleContratosItensEuromidia, 0) > 0
               AND (
-                    i.DataInicioPrevisto IS NOT NULL
-                    OR i.DataTerminoPrevisto IS NOT NULL
-                    OR i.DataFimEfetiva IS NOT NULL
+                    periodo_fonte.DataInicioCampanha IS NOT NULL
+                    OR periodo_fonte.DataTerminoPrevisto IS NOT NULL
                   )
         )
         INSERT INTO [Integracao].[Silver].[FatoVencimentoCampanhaEuromidia]
@@ -22809,35 +22948,56 @@ def _campanhas_vencimentos_sincronizar_itens_controle() -> None:
                     NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), i.RazaoSocial))), ''),
                     NULLIF(LTRIM(RTRIM(CONVERT(varchar(300), ctr.RazaoSocial))), '')
                 ),
-                DataInicioCampanha = CAST(i.DataInicioPrevisto AS date),
-                DataTerminoPrevisto = CAST(COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS date),
+                DataInicioCampanha = periodo_fonte.DataInicioCampanha,
+                DataTerminoPrevisto = periodo_fonte.DataTerminoPrevisto,
                 DiasParaVencer = CASE
-                    WHEN COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) IS NULL THEN NULL
-                    WHEN CAST(COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS date) < @Hoje THEN 0
-                    ELSE DATEDIFF(DAY, @Hoje, CAST(COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS date))
+                    WHEN periodo_fonte.DataTerminoPrevisto IS NULL THEN NULL
+                    WHEN periodo_fonte.DataTerminoPrevisto < @Hoje THEN 0
+                    ELSE DATEDIFF(DAY, @Hoje, periodo_fonte.DataTerminoPrevisto)
                 END,
                 BitAtivoCalculado = CASE
-                    WHEN COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) IS NOT NULL
-                         AND CAST(COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS date) < @Hoje THEN 0
+                    WHEN periodo_fonte.DataTerminoPrevisto IS NOT NULL
+                         AND periodo_fonte.DataTerminoPrevisto < @Hoje THEN 0
                     ELSE 1
                 END,
                 IDDimStatusCampanhaCalculado = CASE
-                    WHEN COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) IS NULL THEN @IDStatusSemDataTermino
-                    WHEN i.DataInicioPrevisto IS NOT NULL AND CAST(i.DataInicioPrevisto AS date) > @Hoje THEN @IDStatusFutura
-                    WHEN CAST(COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS date) < @Hoje THEN @IDStatusVencida
-                    WHEN DATEDIFF(DAY, @Hoje, CAST(COALESCE(i.DataFimEfetiva, i.DataTerminoPrevisto) AS date)) BETWEEN 0 AND 45 THEN @IDStatusVencendo
+                    WHEN periodo_fonte.DataTerminoPrevisto IS NULL THEN @IDStatusSemDataTermino
+                    WHEN periodo_fonte.DataInicioCampanha IS NOT NULL AND periodo_fonte.DataInicioCampanha > @Hoje THEN @IDStatusFutura
+                    WHEN periodo_fonte.DataTerminoPrevisto < @Hoje THEN @IDStatusVencida
+                    WHEN DATEDIFF(DAY, @Hoje, periodo_fonte.DataTerminoPrevisto) BETWEEN 0 AND 45 THEN @IDStatusVencendo
                     ELSE @IDStatusAtiva
                 END
             FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
             INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS ctr
                 ON ctr.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+            LEFT JOIN #AgendamentoOcupacaoConsolidado AS agendamento_consolidado
+                ON agendamento_consolidado.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+               AND agendamento_consolidado.IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia
+            CROSS APPLY
+            (
+                SELECT
+                    DataInicioCampanha = CAST
+                    (
+                        COALESCE(
+                            agendamento_consolidado.DataInicioOcupacao,
+                            i.DataInicioPrevisto
+                        ) AS date
+                    ),
+                    DataTerminoPrevisto = CAST
+                    (
+                        COALESCE(
+                            agendamento_consolidado.DataTerminoOcupacao,
+                            i.DataFimEfetiva,
+                            i.DataTerminoPrevisto
+                        ) AS date
+                    )
+            ) AS periodo_fonte
             WHERE ISNULL(i.BitAtivo, 0) = 1
               AND ISNULL(i.IDFatoControleContratoEuromidia, 0) > 0
               AND ISNULL(i.IDFatoControleContratosItensEuromidia, 0) > 0
               AND (
-                    i.DataInicioPrevisto IS NOT NULL
-                    OR i.DataTerminoPrevisto IS NOT NULL
-                    OR i.DataFimEfetiva IS NOT NULL
+                    periodo_fonte.DataInicioCampanha IS NOT NULL
+                    OR periodo_fonte.DataTerminoPrevisto IS NOT NULL
                   )
         )
         UPDATE vc
@@ -22869,6 +23029,8 @@ def _campanhas_vencimentos_sincronizar_itens_controle() -> None:
             OR ISNULL(CAST(vc.DataTerminoPrevisto AS date), '19000101') <> ISNULL(f.DataTerminoPrevisto, '19000101')
             OR ISNULL(vc.DiasParaVencer, -999999) <> ISNULL(f.DiasParaVencer, -999999)
             OR ISNULL(vc.BitAtivo, 1) <> ISNULL(CASE WHEN vc.IDDimStatusCampanha = @IDStatusRenovada THEN 0 ELSE f.BitAtivoCalculado END, 1);
+
+        DROP TABLE #AgendamentoOcupacaoConsolidado;
     """)
 
     try:
@@ -25714,6 +25876,7 @@ def vencimentos_campanhas_euromidia():
             vc.IDReservaOcupacao,
             vc.FonteLinha,
             vc.PodeRenovar,
+            vc.BitOcupacaoFatiada,
             vc.IDFatoControleContratosEuromidia,
             vc.IDFatoControleContratosItensEuromidia,
             vc.IDDimStatusCampanha,
@@ -25963,6 +26126,7 @@ def vencimentos_campanhas_sugestoes():
             vc.IDReservaOcupacao,
             vc.FonteLinha,
             vc.PodeRenovar,
+            vc.BitOcupacaoFatiada,
             vc.IDFatoControleContratosEuromidia,
             vc.IDFatoControleContratosItensEuromidia,
             vc.IDDimStatusCampanha,

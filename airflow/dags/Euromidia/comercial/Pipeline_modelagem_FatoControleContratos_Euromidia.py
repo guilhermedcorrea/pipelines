@@ -117,10 +117,13 @@ CRON_AGENDAMENTO = "0 8,11,15,18 * * *"
 
 CONN_ID_SQL_SERVER = "mssql_integracao"
 
-DAG_ID_PRIORIDADE_RESERVAS_PADRAO = "pipeline_prioridade_reservas"
-DAG_ID_PRIORIDADE_RESERVAS = (
-    os.getenv("AIRFLOW_DAG_PRIORIDADE_RESERVAS", DAG_ID_PRIORIDADE_RESERVAS_PADRAO).strip()
-    or DAG_ID_PRIORIDADE_RESERVAS_PADRAO
+DAG_ID_VERIFICA_PREFERENCIA_RESERVA_PADRAO = "pipeline_verifica_preferencia_reserva"
+DAG_ID_VERIFICA_PREFERENCIA_RESERVA = (
+    os.getenv(
+        "AIRFLOW_DAG_VERIFICA_PREFERENCIA_RESERVA",
+        DAG_ID_VERIFICA_PREFERENCIA_RESERVA_PADRAO,
+    ).strip()
+    or DAG_ID_VERIFICA_PREFERENCIA_RESERVA_PADRAO
 )
 
 
@@ -3684,6 +3687,15 @@ FonteBase AS (
                     END
                 ORDER BY
                     CASE WHEN ISNULL(i.BitOcupacaoCompartilhada, 0) = 1 THEN 0 ELSE 1 END,
+                    CASE
+                        WHEN ISNULL(i.BitOcupacaoFatiada, 0) = 1
+                         AND CAST(GETDATE() AS date) BETWEEN
+                             CAST(i.DataInicioPrevisto AS date)
+                             AND CAST(COALESCE(i.DataCancelamento, i.DataTerminoPrevisto) AS date)
+                            THEN 0
+                        WHEN ISNULL(i.BitOcupacaoFatiada, 0) = 1 THEN 1
+                        ELSE 0
+                    END,
                     CASE WHEN ISNULL(i.BitOcupacaoFatiada, 0) = 1 THEN 0 ELSE 1 END,
                     ISNULL(i.SequenciaAgendamento, 2147483647),
                     LEN(COALESCE(i.ReferenciaOcupacaoEmComum, '')) DESC,
@@ -4790,15 +4802,16 @@ São atualizadas:
 - ID do painel
 - ID da face
 
-### 10. Calendário, ocupação e prioridade de reservas
+### 10. Calendário, ocupação e preferência de reservas
 Por fim:
 - atualiza dimensão calendário;
 - executa MERGE de ocupação em `FatoOcupacaoPaineisEuromidia`;
-- dispara a DAG `pipeline_prioridade_reservas` em modo pós-upsert.
+- dispara a DAG `pipeline_verifica_preferencia_reserva` em modo pós-upsert;
+- depois da verificação, esse DAG dispara `pipeline_prioridade_reservas`.
 
-Esse disparo é necessário porque o MERGE de ocupação apenas atualiza/cria ocupações contratuais.
-Quem cria a reserva automática de preferência de renovação e recalcula `ReservaOrdemPrioridade`
-é a DAG de prioridade de reservas.
+Essa ordem é obrigatória para que a prioridade somente seja calculada depois de
+`BitPreferencia` e das tabelas de preferência estarem atualizados. Para ocupações
+fatiadas, a verificação usa o período total consolidado, e não a duração de cada fatia.
 
 O disparo envia o `conf`:
 
@@ -5795,13 +5808,13 @@ def pipeline_controle_contratos_euromidia():
     agendamento_face_contrato = upsert_agendamento_face_contrato()
     bit_ativo_itens = update_bit_ativo_itens()
 
-    prioridade_reservas = TriggerDagRunOperator(
-        task_id="acionar_prioridade_reservas_pos_upsert_ocupacao",
-        trigger_dag_id=DAG_ID_PRIORIDADE_RESERVAS,
+    verifica_preferencia_reserva = TriggerDagRunOperator(
+        task_id="acionar_verificacao_preferencia_pos_upsert_ocupacao",
+        trigger_dag_id=DAG_ID_VERIFICA_PREFERENCIA_RESERVA,
         trigger_run_id="pos_upsert_ocupacao__{{ ts_nodash }}__{{ ti.try_number }}",
         conf={
             "origem": "pipeline_controle_contratos_euromidia",
-            "modo_execucao": "VARREDURA_POS_UPSERT_OCUPACAO",
+            "modo_execucao": "VERIFICACAO_POS_UPSERT_OCUPACAO",
             "processar_todos_elegiveis": True,
             "tabela_origem": "[Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]",
             "dag_origem": DAG_ID,
@@ -5829,7 +5842,7 @@ def pipeline_controle_contratos_euromidia():
         >> vinculos_marcas_ocupacao
         >> agendamento_face_contrato
         >> bit_ativo_itens
-        >> prioridade_reservas
+        >> verifica_preferencia_reserva
     )
 
 

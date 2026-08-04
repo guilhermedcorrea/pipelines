@@ -68,13 +68,6 @@ HABILITAR_AGENDAMENTO_AUTOMATICO = _env_bool(
     "1",
 )
 
-DIAS_MAXIMOS_PROCURAR_ENCAIXE_TETRIS = _env_int(
-    "PIPELINE_PRIORIDADE_RESERVAS_DIAS_MAXIMOS_PROCURAR_ENCAIXE",
-    365,
-    minimo=0,
-    maximo=3650,
-)
-
 # O cron anterior era */8, ou seja, a cada 8 minutos.
 # Reduzindo aproximadamente 70% do intervalo: 8 min * 30% = 2,4 min.
 # Como cron trabalha em minuto inteiro, uso 2 minutos para ficar mais rápido
@@ -163,6 +156,10 @@ PIPELINE_PRIORIDADE_RESERVAS_CRIAR_NA_AGENDA=1
 
 A reserva automática de preferência só é criada quando a ocupação origem do contrato tiver duração comercial de 6 meses ou mais.
 
+Para uma ocupação fatiada, as fatias não são avaliadas separadamente. A DAG
+consulta `FatoAgendamentoFaceContrato` e considera o período consolidado entre
+a menor `DataInicio` e a maior `DataTermino` vinculadas à mesma ocupação.
+
 A regra usada é:
 
 ```sql
@@ -181,7 +178,13 @@ Logo, uma ocupação de 2026-01-01 até 2026-06-30 tem direito à preferência.
 
 ## Como a reserva futura é criada
 
-A reserva futura usa o dia seguinte ao fim da ocupação origem como data mínima. Se não houver encaixe livre nessa data, a DAG procura para frente o primeiro período livre possível, respeitando a grade tipo Tetris.
+A reserva futura começa obrigatoriamente no dia seguinte ao fim consolidado da
+ocupação de origem. O encaixe tipo Tetris procura outro slot/linha livre no
+mesmo período; ele nunca empurra a data para D+2, D+3 ou dias posteriores.
+
+Se nenhum slot comportar todo o período a partir de D+1, a reserva não é criada
+em uma data incorreta. A execução seguinte volta a avaliá-la depois que a grade
+for liberada.
 
 Exemplo:
 
@@ -739,7 +742,6 @@ def pipeline_prioridade_reservas():
             "status_cancelado": STATUS_CANCELADO,
             "tipo_vinculo": TIPO_VINCULO_PREFERENCIA_RENOVACAO,
             "tipo_reserva_preferencia": TIPO_RESERVA_PREFERENCIA_RENOVACAO,
-            "dias_maximos_procurar_encaixe": DIAS_MAXIMOS_PROCURAR_ENCAIXE_TETRIS,
             "meses_minimos": MESES_MINIMOS_PREFERENCIA_RENOVACAO,
             "marcador_execucao": marcador_execucao,
         }
@@ -771,10 +773,12 @@ def pipeline_prioridade_reservas():
            Na varredura total isso podia levar horas e manter HOLDLOCK amplo.
 
            Nesta versão:
-           1. materializo somente ocupações ainda sem preferência;
-           2. materializo uma vez os bloqueios ativos;
-           3. procuro o primeiro encaixe de cada origem em ordem;
-           4. acrescento imediatamente a nova reserva aos bloqueios temporários.
+           1. materializo ocupações elegíveis novas e as preferências existentes
+              que precisam ser conferidas/realinhadas;
+           2. materializo uma vez os bloqueios ativos e empilho registros
+              digitais antigos sem LoopInicio/LoopFim pelo mesmo first-fit;
+           3. fixa a reserva em D+1 e procura somente o primeiro slot livre;
+           4. acrescenta imediatamente cada reserva aos bloqueios temporários.
 
            Assim duas preferências criadas na mesma execução também não ocupam
            o mesmo slot/período.
@@ -836,6 +840,7 @@ def pipeline_prioridade_reservas():
         CREATE TABLE #Elegiveis
         (
             IDFatoOcupacaoOrigem INT NOT NULL PRIMARY KEY,
+            IDReservaPreferenciaExistente INT NULL,
             IDFatoControleContratos INT NULL,
             IDFatoControleContratosItemOrigem INT NULL,
             CodPonto INT NOT NULL,
@@ -862,6 +867,8 @@ def pipeline_prioridade_reservas():
         (
             SELECT
                 O.IDFatoOcupacaoPaineisEuromidia AS IDFatoOcupacaoOrigem,
+                PreferenciaExistente.IDFatoOcupacaoPaineisEuromidia
+                    AS IDReservaPreferenciaExistente,
                 COALESCE(
                     O.IDFatoControleContratos,
                     V.IDFatoControleContratosEuromidia,
@@ -878,14 +885,14 @@ def pipeline_prioridade_reservas():
                 PF.FaceOrdem AS FaceOrdemOrigem,
                 P.BitDigital,
                 P.QuantidadeFacesCalculada,
-                CAST(O.DataInicio AS DATE) AS DataInicio,
-                CAST(O.DataFim AS DATE) AS DataFim,
+                PeriodoOcupacao.DataInicio AS DataInicio,
+                PeriodoOcupacao.DataFim AS DataFim,
                 DATEDIFF(
                     MONTH,
-                    CAST(O.DataInicio AS DATE),
-                    DATEADD(DAY, 1, CAST(O.DataFim AS DATE))
+                    PeriodoOcupacao.DataInicio,
+                    DATEADD(DAY, 1, PeriodoOcupacao.DataFim)
                 ) AS QuantidadeMesesContrato,
-                DATEADD(DAY, 1, CAST(O.DataFim AS DATE)) AS DataMinimaReserva,
+                DATEADD(DAY, 1, PeriodoOcupacao.DataFim) AS DataMinimaReserva,
                 CASE
                     WHEN P.BitDigital = 1 THEN
                         CASE
@@ -914,6 +921,38 @@ def pipeline_prioridade_reservas():
                     NULLIF(LTRIM(RTRIM(V.ReferenciaLogycWare)), '')
                 ) AS NumeroPrevia
             FROM Integracao.Silver.FatoOcupacaoPaineisEuromidia AS O WITH (READCOMMITTEDLOCK)
+            OUTER APPLY
+            (
+                /*
+                   FatoAgendamentoFaceContrato existe apenas para detalhar as
+                   fatias da ocupação na grade. Para preferência, consolido o
+                   primeiro início e o último término entre a ocupação e todas
+                   as fatias ativas. Assim uma fatia parcial nunca antecipa a
+                   preferência; sem agendamento, permanecem as datas de O.
+                */
+                SELECT
+                    MIN(Periodo.DataInicio) AS DataInicio,
+                    MAX(Periodo.DataFim) AS DataFim
+                FROM
+                (
+                    SELECT
+                        CAST(O.DataInicio AS DATE) AS DataInicio,
+                        CAST(O.DataFim AS DATE) AS DataFim
+
+                    UNION ALL
+
+                    SELECT
+                        CAST(A.DataInicio AS DATE),
+                        CAST(A.DataTermino AS DATE)
+                    FROM Integracao.Silver.FatoAgendamentoFaceContrato AS A WITH (NOLOCK)
+                    WHERE
+                        A.IDFatoOcupacaoPaineisEuromidia =
+                            O.IDFatoOcupacaoPaineisEuromidia
+                        AND A.BitAtivo = 1
+                        AND A.DataInicio IS NOT NULL
+                        AND A.DataTermino IS NOT NULL
+                ) AS Periodo
+            ) AS PeriodoOcupacao
             OUTER APPLY
             (
                 SELECT TOP (1)
@@ -970,12 +1009,12 @@ def pipeline_prioridade_reservas():
                                     V.IDFatoControleContratosEuromidia
                                 )
                             )
-                            AND CAST(I2.DataInicioPrevisto AS DATE) <= CAST(O.DataFim AS DATE)
+                            AND CAST(I2.DataInicioPrevisto AS DATE) <= PeriodoOcupacao.DataFim
                             AND CAST(COALESCE(
                                 I2.DataTerminoPrevisto,
                                 I2.DataFimEfetiva,
                                 I2.DataCancelamento
-                            ) AS DATE) >= CAST(O.DataInicio AS DATE)
+                            ) AS DATE) >= PeriodoOcupacao.DataInicio
                         )
                     )
                     AND (
@@ -985,6 +1024,45 @@ def pipeline_prioridade_reservas():
                 ORDER BY
                     I2.IDFatoControleContratosItensEuromidia DESC
             ) AS I
+            OUTER APPLY
+            (
+                SELECT TOP (1)
+                    R.IDFatoOcupacaoPaineisEuromidia,
+                    R.IDFatoOcupacaoOrigem
+                FROM Integracao.Silver.FatoOcupacaoPaineisEuromidia AS R WITH (NOLOCK)
+                WHERE
+                    (
+                        R.IDFatoOcupacaoOrigem =
+                            O.IDFatoOcupacaoPaineisEuromidia
+                        OR
+                        (
+                            COALESCE(
+                                O.IDFatoControleContratosItemOrigem,
+                                V.IDFatoControleContratosItensEuromidia,
+                                I.IDFatoControleContratosItensEuromidia
+                            ) IS NOT NULL
+                            AND R.IDFatoControleContratosItemOrigem = COALESCE(
+                                O.IDFatoControleContratosItemOrigem,
+                                V.IDFatoControleContratosItensEuromidia,
+                                I.IDFatoControleContratosItensEuromidia
+                            )
+                        )
+                    )
+                    AND UPPER(LTRIM(RTRIM(ISNULL(R.TipoVinculoOrigem, ''))))
+                        = UPPER(LTRIM(RTRIM(:tipo_vinculo)))
+                    AND UPPER(LTRIM(RTRIM(ISNULL(R.Origem, ''))))
+                        = UPPER(LTRIM(RTRIM(:origem_reserva)))
+                    AND R.CanceladoEm IS NULL
+                    AND UPPER(LTRIM(RTRIM(ISNULL(R.Status, ''))))
+                        <> UPPER(LTRIM(RTRIM(:status_cancelado)))
+                ORDER BY
+                    CASE
+                        WHEN R.IDFatoOcupacaoOrigem =
+                            O.IDFatoOcupacaoPaineisEuromidia
+                        THEN 0 ELSE 1
+                    END,
+                    R.IDFatoOcupacaoPaineisEuromidia
+            ) AS PreferenciaExistente
             INNER JOIN #Paineis AS P
                 ON P.IDDimPaineisEuromidia = O.IDPainelEuromidia
             OUTER APPLY
@@ -1027,8 +1105,14 @@ def pipeline_prioridade_reservas():
                 AND O.CodPonto IS NOT NULL
                 AND O.CodFace IS NOT NULL
                 AND O.IDPainelEuromidia IS NOT NULL
-                AND O.DataInicio IS NOT NULL
-                AND O.DataFim IS NOT NULL
+                AND PeriodoOcupacao.DataInicio IS NOT NULL
+                AND PeriodoOcupacao.DataFim IS NOT NULL
+                AND
+                (
+                    PreferenciaExistente.IDFatoOcupacaoPaineisEuromidia IS NULL
+                    OR PreferenciaExistente.IDFatoOcupacaoOrigem =
+                        O.IDFatoOcupacaoPaineisEuromidia
+                )
                 AND O.CanceladoEm IS NULL
                 AND UPPER(LTRIM(RTRIM(ISNULL(O.Status, ''))))
                     <> UPPER(LTRIM(RTRIM(:status_cancelado)))
@@ -1046,6 +1130,7 @@ def pipeline_prioridade_reservas():
         INSERT INTO #Elegiveis
         (
             IDFatoOcupacaoOrigem,
+            IDReservaPreferenciaExistente,
             IDFatoControleContratos,
             IDFatoControleContratosItemOrigem,
             CodPonto,
@@ -1069,6 +1154,7 @@ def pipeline_prioridade_reservas():
         )
         SELECT
             O.IDFatoOcupacaoOrigem,
+            O.IDReservaPreferenciaExistente,
             O.IDFatoControleContratos,
             O.IDFatoControleContratosItemOrigem,
             O.CodPonto,
@@ -1101,26 +1187,26 @@ def pipeline_prioridade_reservas():
                 DATEADD(MONTH, :meses_minimos, O.DataInicio)
             )
             AND O.QuantidadeMesesContrato >= :meses_minimos
-            AND NOT EXISTS
-            (
-                SELECT 1
-                FROM Integracao.Silver.FatoOcupacaoPaineisEuromidia AS R WITH (NOLOCK)
-                WHERE
-                    (
-                        R.IDFatoOcupacaoOrigem = O.IDFatoOcupacaoOrigem
-                        OR
-                        (
-                            O.IDFatoControleContratosItemOrigem IS NOT NULL
-                            AND R.IDFatoControleContratosItemOrigem =
-                                O.IDFatoControleContratosItemOrigem
-                        )
-                    )
-                    AND UPPER(LTRIM(RTRIM(ISNULL(R.TipoVinculoOrigem, ''))))
-                        = UPPER(LTRIM(RTRIM(:tipo_vinculo)))
-                    AND UPPER(LTRIM(RTRIM(ISNULL(R.Origem, ''))))
-                        = UPPER(LTRIM(RTRIM(:origem_reserva)))
-            )
         OPTION (RECOMPILE);
+
+        DECLARE
+            @JanelaReservaInicio DATE,
+            @JanelaReservaFim DATE;
+
+        SELECT
+            @JanelaReservaInicio = MIN(E.DataMinimaReserva),
+            @JanelaReservaFim = MAX(
+                DATEADD(
+                    DAY,
+                    -1,
+                    DATEADD(
+                        MONTH,
+                        E.QuantidadeMesesContrato,
+                        E.DataMinimaReserva
+                    )
+                )
+            )
+        FROM #Elegiveis AS E;
 
         CREATE TABLE #Bloqueios
         (
@@ -1132,6 +1218,11 @@ def pipeline_prioridade_reservas():
             FaceFim INT NOT NULL
         );
 
+        /*
+           Primeiro preservo as posições já explicitamente gravadas. Para
+           painel analógico, a posição é a própria face física. Para painel
+           digital, LoopInicio/LoopFim representam o slot já fixado.
+        */
         INSERT INTO #Bloqueios
         (
             IDFatoOcupacaoPaineisEuromidia,
@@ -1144,8 +1235,8 @@ def pipeline_prioridade_reservas():
         SELECT
             O.IDFatoOcupacaoPaineisEuromidia,
             O.IDPainelEuromidia,
-            CAST(O.DataInicio AS DATE),
-            CAST(O.DataFim AS DATE),
+            PeriodoBloqueio.DataInicio,
+            PeriodoBloqueio.DataFim,
             SlotCalculado.FaceInicio,
             SlotCalculado.FaceInicio + SlotCalculado.SpanQtd - 1
         FROM Integracao.Silver.FatoOcupacaoPaineisEuromidia AS O WITH (READCOMMITTEDLOCK)
@@ -1183,18 +1274,250 @@ def pipeline_prioridade_reservas():
                     ELSE 1
                 END AS SpanQtd
         ) AS SlotCalculado
+        OUTER APPLY
+        (
+            SELECT
+                MIN(Periodo.DataInicio) AS DataInicio,
+                MAX(Periodo.DataFim) AS DataFim
+            FROM
+            (
+                SELECT
+                    CAST(O.DataInicio AS DATE) AS DataInicio,
+                    CAST(O.DataFim AS DATE) AS DataFim
+
+                UNION ALL
+
+                SELECT
+                    CAST(A.DataInicio AS DATE),
+                    CAST(A.DataTermino AS DATE)
+                FROM Integracao.Silver.FatoAgendamentoFaceContrato AS A WITH (NOLOCK)
+                WHERE
+                    A.IDFatoOcupacaoPaineisEuromidia =
+                        O.IDFatoOcupacaoPaineisEuromidia
+                    AND A.BitAtivo = 1
+                    AND A.DataInicio IS NOT NULL
+                    AND A.DataTermino IS NOT NULL
+            ) AS Periodo
+        ) AS PeriodoBloqueio
         WHERE
             O.IDPainelEuromidia IS NOT NULL
             AND O.CodPonto IS NOT NULL
             AND O.CodFace IS NOT NULL
-            AND O.DataInicio IS NOT NULL
-            AND O.DataFim IS NOT NULL
+            AND PeriodoBloqueio.DataInicio IS NOT NULL
+            AND PeriodoBloqueio.DataFim IS NOT NULL
+            AND @JanelaReservaInicio IS NOT NULL
+            AND PeriodoBloqueio.DataInicio <= @JanelaReservaFim
+            AND PeriodoBloqueio.DataFim >= @JanelaReservaInicio
             AND PF.FaceOrdem IS NOT NULL
             AND SlotCalculado.FaceInicio IS NOT NULL
             AND SlotCalculado.SpanQtd > 0
+            AND SlotCalculado.FaceInicio + SlotCalculado.SpanQtd - 1
+                <= P.QuantidadeFacesCalculada
+            AND
+            (
+                P.BitDigital = 0
+                OR
+                (
+                    TRY_CONVERT(INT, O.LoopInicio) > 0
+                    AND TRY_CONVERT(INT, O.LoopFim)
+                        >= TRY_CONVERT(INT, O.LoopInicio)
+                )
+            )
             AND O.CanceladoEm IS NULL
             AND UPPER(LTRIM(RTRIM(ISNULL(O.Status, ''))))
                 <> UPPER(LTRIM(RTRIM(:status_cancelado)));
+
+        /*
+           Ocupações digitais antigas normalmente não possuem LoopInicio e
+           LoopFim. A regra anterior colocava todas no mesmo slot retornado
+           por DimFacesPaineis, enquanto a grade as empilhava em linhas
+           diferentes. Aqui reproduzo o first-fit da grade: cada barra sem
+           slot explícito ocupa o primeiro bloco contíguo livre durante todo
+           o seu período.
+        */
+        DECLARE
+            @BloqueioID INT,
+            @BloqueioPainel INT,
+            @BloqueioDataInicio DATE,
+            @BloqueioDataFim DATE,
+            @BloqueioSpan INT,
+            @BloqueioQuantidadeFaces INT,
+            @BloqueioFaceInicio INT,
+            @BloqueioFaceInicioMaxima INT,
+            @BloqueioFaceFim INT,
+            @BloqueioEncaixado BIT;
+
+        DECLARE cursor_bloqueios_digitais CURSOR LOCAL FAST_FORWARD FOR
+            SELECT
+                O.IDFatoOcupacaoPaineisEuromidia,
+                O.IDPainelEuromidia,
+                PeriodoBloqueio.DataInicio,
+                PeriodoBloqueio.DataFim,
+                SlotCalculado.SpanQtd,
+                P.QuantidadeFacesCalculada
+            FROM Integracao.Silver.FatoOcupacaoPaineisEuromidia AS O WITH (READCOMMITTEDLOCK)
+            INNER JOIN #Paineis AS P
+                ON P.IDDimPaineisEuromidia = O.IDPainelEuromidia
+                AND P.BitDigital = 1
+            CROSS APPLY
+            (
+                SELECT
+                    CASE
+                        WHEN TRY_CONVERT(INT, O.SpanQtd) > 0
+                        THEN TRY_CONVERT(INT, O.SpanQtd)
+                        WHEN TRY_CONVERT(INT, O.Cota) = 1080 THEN 2
+                        ELSE 1
+                    END AS SpanQtd
+            ) AS SlotCalculado
+            OUTER APPLY
+            (
+                SELECT
+                    MIN(Periodo.DataInicio) AS DataInicio,
+                    MAX(Periodo.DataFim) AS DataFim
+                FROM
+                (
+                    SELECT
+                        CAST(O.DataInicio AS DATE) AS DataInicio,
+                        CAST(O.DataFim AS DATE) AS DataFim
+
+                    UNION ALL
+
+                    SELECT
+                        CAST(A.DataInicio AS DATE),
+                        CAST(A.DataTermino AS DATE)
+                    FROM Integracao.Silver.FatoAgendamentoFaceContrato AS A WITH (NOLOCK)
+                    WHERE
+                        A.IDFatoOcupacaoPaineisEuromidia =
+                            O.IDFatoOcupacaoPaineisEuromidia
+                        AND A.BitAtivo = 1
+                        AND A.DataInicio IS NOT NULL
+                        AND A.DataTermino IS NOT NULL
+                ) AS Periodo
+            ) AS PeriodoBloqueio
+            WHERE
+                O.IDPainelEuromidia IS NOT NULL
+                AND PeriodoBloqueio.DataInicio IS NOT NULL
+                AND PeriodoBloqueio.DataFim IS NOT NULL
+                AND @JanelaReservaInicio IS NOT NULL
+                AND PeriodoBloqueio.DataInicio <= @JanelaReservaFim
+                AND PeriodoBloqueio.DataFim >= @JanelaReservaInicio
+                AND SlotCalculado.SpanQtd > 0
+                AND SlotCalculado.SpanQtd <= P.QuantidadeFacesCalculada
+                AND NOT
+                (
+                    TRY_CONVERT(INT, O.LoopInicio) > 0
+                    AND TRY_CONVERT(INT, O.LoopFim)
+                        >= TRY_CONVERT(INT, O.LoopInicio)
+                    AND TRY_CONVERT(INT, O.LoopFim)
+                        <= P.QuantidadeFacesCalculada
+                )
+                AND O.CanceladoEm IS NULL
+                AND UPPER(LTRIM(RTRIM(ISNULL(O.Status, ''))))
+                    <> UPPER(LTRIM(RTRIM(:status_cancelado)))
+            ORDER BY
+                PeriodoBloqueio.DataInicio,
+                PeriodoBloqueio.DataFim,
+                O.IDFatoOcupacaoPaineisEuromidia;
+
+        OPEN cursor_bloqueios_digitais;
+
+        FETCH NEXT FROM cursor_bloqueios_digitais INTO
+            @BloqueioID,
+            @BloqueioPainel,
+            @BloqueioDataInicio,
+            @BloqueioDataFim,
+            @BloqueioSpan,
+            @BloqueioQuantidadeFaces;
+
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            SET @BloqueioEncaixado = 0;
+            SET @BloqueioFaceInicio = 1;
+            SET @BloqueioFaceInicioMaxima =
+                @BloqueioQuantidadeFaces - @BloqueioSpan + 1;
+
+            WHILE
+                @BloqueioEncaixado = 0
+                AND @BloqueioFaceInicio <= @BloqueioFaceInicioMaxima
+            BEGIN
+                SET @BloqueioFaceFim =
+                    @BloqueioFaceInicio + @BloqueioSpan - 1;
+
+                IF NOT EXISTS
+                (
+                    SELECT 1
+                    FROM #Bloqueios AS B
+                    WHERE
+                        B.IDPainelEuromidia = @BloqueioPainel
+                        AND B.DataInicio <= @BloqueioDataFim
+                        AND B.DataFim >= @BloqueioDataInicio
+                        AND B.FaceInicio <= @BloqueioFaceFim
+                        AND B.FaceFim >= @BloqueioFaceInicio
+                )
+                BEGIN
+                    INSERT INTO #Bloqueios
+                    (
+                        IDFatoOcupacaoPaineisEuromidia,
+                        IDPainelEuromidia,
+                        DataInicio,
+                        DataFim,
+                        FaceInicio,
+                        FaceFim
+                    )
+                    VALUES
+                    (
+                        @BloqueioID,
+                        @BloqueioPainel,
+                        @BloqueioDataInicio,
+                        @BloqueioDataFim,
+                        @BloqueioFaceInicio,
+                        @BloqueioFaceFim
+                    );
+
+                    SET @BloqueioEncaixado = 1;
+                END;
+
+                SET @BloqueioFaceInicio = @BloqueioFaceInicio + 1;
+            END;
+
+            /*
+               Se a própria base já estiver acima da capacidade, preservo um
+               bloqueio explícito. Isso impede uma nova preferência de ser
+               criada sobre uma grade que já está em conflito.
+            */
+            IF @BloqueioEncaixado = 0
+            BEGIN
+                INSERT INTO #Bloqueios
+                (
+                    IDFatoOcupacaoPaineisEuromidia,
+                    IDPainelEuromidia,
+                    DataInicio,
+                    DataFim,
+                    FaceInicio,
+                    FaceFim
+                )
+                VALUES
+                (
+                    @BloqueioID,
+                    @BloqueioPainel,
+                    @BloqueioDataInicio,
+                    @BloqueioDataFim,
+                    1,
+                    @BloqueioQuantidadeFaces
+                );
+            END;
+
+            FETCH NEXT FROM cursor_bloqueios_digitais INTO
+                @BloqueioID,
+                @BloqueioPainel,
+                @BloqueioDataInicio,
+                @BloqueioDataFim,
+                @BloqueioSpan,
+                @BloqueioQuantidadeFaces;
+        END;
+
+        CLOSE cursor_bloqueios_digitais;
+        DEALLOCATE cursor_bloqueios_digitais;
 
         CREATE INDEX IX_Bloqueios_PainelPeriodoSlot
             ON #Bloqueios
@@ -1208,6 +1531,7 @@ def pipeline_prioridade_reservas():
 
         DECLARE
             @IDFatoOcupacaoOrigem INT,
+            @IDReservaPreferenciaExistente INT,
             @IDFatoControleContratos INT,
             @IDFatoControleContratosItemOrigem INT,
             @CodPonto INT,
@@ -1228,7 +1552,6 @@ def pipeline_prioridade_reservas():
             @IDCliente INT,
             @NumeroContrato NVARCHAR(100),
             @NumeroPrevia NVARCHAR(100),
-            @DiaOffset INT,
             @FaceInicio INT,
             @FaceFim INT,
             @FaceInicioMaxima INT,
@@ -1254,6 +1577,7 @@ def pipeline_prioridade_reservas():
             DECLARE cursor_elegiveis CURSOR LOCAL FAST_FORWARD FOR
                 SELECT
                     E.IDFatoOcupacaoOrigem,
+                    E.IDReservaPreferenciaExistente,
                     E.IDFatoControleContratos,
                     E.IDFatoControleContratosItemOrigem,
                     E.CodPonto,
@@ -1283,6 +1607,7 @@ def pipeline_prioridade_reservas():
 
             FETCH NEXT FROM cursor_elegiveis INTO
                 @IDFatoOcupacaoOrigem,
+                @IDReservaPreferenciaExistente,
                 @IDFatoControleContratos,
                 @IDFatoControleContratosItemOrigem,
                 @CodPonto,
@@ -1307,7 +1632,7 @@ def pipeline_prioridade_reservas():
             WHILE @@FETCH_STATUS = 0
             BEGIN
                 SET @Inseriu = 0;
-                SET @DiaOffset = 0;
+                SET @NovoID = NULL;
                 SET @FaceInicioMaxima =
                     CASE
                         WHEN @BitDigital = 1
@@ -1315,29 +1640,22 @@ def pipeline_prioridade_reservas():
                         ELSE @FaceOrdemOrigem
                     END;
 
-                WHILE
-                    @Inseriu = 0
-                    AND @DiaOffset <= :dias_maximos_procurar_encaixe
-                BEGIN
-                    SET @DataInicioReserva = DATEADD(
-                        DAY,
-                        @DiaOffset,
-                        @DataMinimaReserva
-                    );
-                    SET @DataFimReserva = DATEADD(
-                        DAY,
-                        -1,
-                        DATEADD(
-                            MONTH,
-                            @QuantidadeMesesContrato,
-                            @DataInicioReserva
-                        )
-                    );
-                    SET @FaceInicio =
-                        CASE
-                            WHEN @BitDigital = 1 THEN 1
-                            ELSE @FaceOrdemOrigem
-                        END;
+                /* D+1 é uma data fixa; o Tetris pode mudar o slot, não o dia. */
+                SET @DataInicioReserva = @DataMinimaReserva;
+                SET @DataFimReserva = DATEADD(
+                    DAY,
+                    -1,
+                    DATEADD(
+                        MONTH,
+                        @QuantidadeMesesContrato,
+                        @DataInicioReserva
+                    )
+                );
+                SET @FaceInicio =
+                    CASE
+                        WHEN @BitDigital = 1 THEN 1
+                        ELSE @FaceOrdemOrigem
+                    END;
 
                     WHILE
                         @Inseriu = 0
@@ -1352,6 +1670,12 @@ def pipeline_prioridade_reservas():
                             WHERE
                                 B.IDFatoOcupacaoPaineisEuromidia
                                     <> @IDFatoOcupacaoOrigem
+                                AND
+                                (
+                                    @IDReservaPreferenciaExistente IS NULL
+                                    OR B.IDFatoOcupacaoPaineisEuromidia
+                                        <> @IDReservaPreferenciaExistente
+                                )
                                 AND B.IDPainelEuromidia = @IDPainelEuromidia
                                 AND B.DataInicio <= @DataFimReserva
                                 AND B.DataFim >= @DataInicioReserva
@@ -1385,7 +1709,99 @@ def pipeline_prioridade_reservas():
                                 )
                             );
 
-                            IF NOT EXISTS
+                            /*
+                               A execução agendada também corrige preferências
+                               já existentes: reposiciona o slot e força o
+                               início para D+1 do fim consolidado da origem.
+                            */
+                            IF @IDReservaPreferenciaExistente IS NOT NULL
+                            BEGIN
+                                DELETE FROM #Bloqueios
+                                WHERE IDFatoOcupacaoPaineisEuromidia =
+                                    @IDReservaPreferenciaExistente;
+
+                                UPDATE R
+                                   SET R.DataAtualizacao = SYSDATETIME(),
+                                       R.Referencia = @ReferenciaPreferencia,
+                                       R.CodPonto = @CodPonto,
+                                       R.CodFace = @CodFace,
+                                       R.IDPainelEuromidia = @IDPainelEuromidia,
+                                       R.Origem = :origem_reserva,
+                                       R.Status = :status_reservado,
+                                       R.DataInicio = @DataInicioReserva,
+                                       R.DataFim = @DataFimReserva,
+                                       R.LoopInicio = @FaceInicio,
+                                       R.LoopFim = @FaceFim,
+                                       R.SpanQtd = @SpanQtdCalculado,
+                                       R.Cota = @Cota,
+                                       R.MarcaExibida = @MarcaExibida,
+                                       R.Vendedor = @Vendedor,
+                                       R.IDVendedor = @IDVendedor,
+                                       R.IDCliente = @IDCliente,
+                                       R.IDFatoControleContratos =
+                                           @IDFatoControleContratos,
+                                       R.NumeroContrato = @NumeroContrato,
+                                       R.NumeroPrevia = @NumeroPrevia,
+                                       R.TextoOriginal = LEFT(CONCAT(
+                                           'Reserva automática realinhada por preferência de renovação. ',
+                                           'Ocupação origem: ', @IDFatoOcupacaoOrigem,
+                                           '. Período origem: ',
+                                           CONVERT(VARCHAR(10), @DataInicioOrigem, 103),
+                                           ' até ',
+                                           CONVERT(VARCHAR(10), @DataFimOrigem, 103),
+                                           '. Reserva obrigatória em D+1: ',
+                                           CONVERT(VARCHAR(10), @DataInicioReserva, 103),
+                                           ' até ',
+                                           CONVERT(VARCHAR(10), @DataFimReserva, 103),
+                                           '. Slot: ', @FaceInicio, ' até ', @FaceFim, '.'
+                                       ), 1000),
+                                       R.Observacao = LEFT(CONCAT(
+                                           'Preferência de renovação realinhada automaticamente. ',
+                                           'TipoVinculoOrigem=', :tipo_vinculo,
+                                           '. TipoReserva=', :tipo_reserva_preferencia,
+                                           '. ', :marcador_execucao
+                                       ), 500),
+                                       R.Dias = DATEDIFF(
+                                           DAY,
+                                           @DataInicioReserva,
+                                           @DataFimReserva
+                                       ) + 1,
+                                       R.IDFatoOcupacaoOrigem =
+                                           @IDFatoOcupacaoOrigem,
+                                       R.IDFatoControleContratosItemOrigem =
+                                           @IDFatoControleContratosItemOrigem,
+                                       R.TipoVinculoOrigem = :tipo_vinculo,
+                                       R.TipoReserva = :tipo_reserva_preferencia
+                                FROM Integracao.Silver.FatoOcupacaoPaineisEuromidia AS R
+                                WHERE
+                                    R.IDFatoOcupacaoPaineisEuromidia =
+                                        @IDReservaPreferenciaExistente
+                                    AND R.CanceladoEm IS NULL;
+
+                                SET @NovoID = @IDReservaPreferenciaExistente;
+
+                                INSERT INTO #Bloqueios
+                                (
+                                    IDFatoOcupacaoPaineisEuromidia,
+                                    IDPainelEuromidia,
+                                    DataInicio,
+                                    DataFim,
+                                    FaceInicio,
+                                    FaceFim
+                                )
+                                VALUES
+                                (
+                                    @NovoID,
+                                    @IDPainelEuromidia,
+                                    @DataInicioReserva,
+                                    @DataFimReserva,
+                                    @FaceInicio,
+                                    @FaceFim
+                                );
+                            END;
+
+                            IF @IDReservaPreferenciaExistente IS NULL
+                               AND NOT EXISTS
                             (
                                 SELECT 1
                                 FROM Integracao.Silver.FatoOcupacaoPaineisEuromidia AS X
@@ -1536,11 +1952,9 @@ def pipeline_prioridade_reservas():
                         SET @FaceInicio = @FaceInicio + 1;
                     END;
 
-                    SET @DiaOffset = @DiaOffset + 1;
-                END;
-
                 FETCH NEXT FROM cursor_elegiveis INTO
                     @IDFatoOcupacaoOrigem,
+                    @IDReservaPreferenciaExistente,
                     @IDFatoControleContratos,
                     @IDFatoControleContratosItemOrigem,
                     @CodPonto,
@@ -1686,6 +2100,17 @@ def pipeline_prioridade_reservas():
             INNER JOIN Integracao.Silver.FatoVinculaMarcasOcupacao AS V WITH (NOLOCK)
                 ON V.IDFatoOcupacaoPaineisEuromidia = R.IDFatoOcupacaoOrigem
             WHERE V.IDFatoControleContratosItensEuromidia IS NOT NULL
+
+            UNION
+
+            SELECT DISTINCT
+                A.IDFatoControleContratosItensEuromidia
+            FROM ReservasPreferencia AS R
+            INNER JOIN Integracao.Silver.FatoAgendamentoFaceContrato AS A WITH (NOLOCK)
+                ON A.IDFatoOcupacaoPaineisEuromidia = R.IDFatoOcupacaoOrigem
+            WHERE
+                A.IDFatoControleContratosItensEuromidia IS NOT NULL
+                AND A.BitAtivo = 1
         )
         UPDATE item
            SET item.BitPreferencia = 1,
@@ -1706,8 +2131,8 @@ def pipeline_prioridade_reservas():
         (
             SELECT
                 O.IDFatoOcupacaoPaineisEuromidia,
-                O.DataInicio,
-                O.DataFim,
+                PeriodoOcupacao.DataInicio,
+                PeriodoOcupacao.DataFim,
                 O.IDPainelEuromidia,
                 COALESCE(
                     O.IDFatoControleContratos,
@@ -1721,6 +2146,31 @@ def pipeline_prioridade_reservas():
                     ELSE 1
                 END AS JaTemPreferencia
             FROM Integracao.Silver.FatoOcupacaoPaineisEuromidia AS O WITH (NOLOCK)
+            OUTER APPLY
+            (
+                SELECT
+                    MIN(Periodo.DataInicio) AS DataInicio,
+                    MAX(Periodo.DataFim) AS DataFim
+                FROM
+                (
+                    SELECT
+                        CAST(O.DataInicio AS DATE) AS DataInicio,
+                        CAST(O.DataFim AS DATE) AS DataFim
+
+                    UNION ALL
+
+                    SELECT
+                        CAST(A.DataInicio AS DATE),
+                        CAST(A.DataTermino AS DATE)
+                    FROM Integracao.Silver.FatoAgendamentoFaceContrato AS A WITH (NOLOCK)
+                    WHERE
+                        A.IDFatoOcupacaoPaineisEuromidia =
+                            O.IDFatoOcupacaoPaineisEuromidia
+                        AND A.BitAtivo = 1
+                        AND A.DataInicio IS NOT NULL
+                        AND A.DataTermino IS NOT NULL
+                ) AS Periodo
+            ) AS PeriodoOcupacao
             OUTER APPLY
             (
                 SELECT TOP (1)
@@ -1786,8 +2236,8 @@ def pipeline_prioridade_reservas():
                     )
                 )
                 AND O.CanceladoEm IS NULL
-                AND O.DataInicio IS NOT NULL
-                AND O.DataFim IS NOT NULL
+                AND PeriodoOcupacao.DataInicio IS NOT NULL
+                AND PeriodoOcupacao.DataFim IS NOT NULL
                 AND UPPER(LTRIM(RTRIM(ISNULL(O.Status, ''))))
                     <> UPPER(LTRIM(RTRIM(:status_cancelado)))
                 AND
@@ -1877,6 +2327,28 @@ def pipeline_prioridade_reservas():
                     OR R.IDFatoControleContratos = :id_contrato
                     OR V.IDFatoControleContratosEuromidia = :id_contrato
                 )
+
+            UNION
+
+            SELECT DISTINCT
+                A.IDFatoControleContratosItensEuromidia
+            FROM Integracao.Silver.FatoOcupacaoPaineisEuromidia AS R WITH (NOLOCK)
+            INNER JOIN Integracao.Silver.FatoAgendamentoFaceContrato AS A WITH (NOLOCK)
+                ON A.IDFatoOcupacaoPaineisEuromidia = R.IDFatoOcupacaoOrigem
+            WHERE
+                A.IDFatoControleContratosItensEuromidia IS NOT NULL
+                AND A.BitAtivo = 1
+                AND R.Origem = :origem_reserva
+                AND R.Status = :status_reservado
+                AND R.TipoVinculoOrigem = :tipo_vinculo
+                AND ISNULL(R.TipoReserva, 0) = :tipo_reserva_preferencia
+                AND R.CanceladoEm IS NULL
+                AND
+                (
+                    :id_contrato IS NULL
+                    OR R.IDFatoControleContratos = :id_contrato
+                    OR A.IDFatoControleContratosEuromidia = :id_contrato
+                )
         )
         SELECT
             COUNT(1) AS itens_preferencia_marcados
@@ -1930,9 +2402,8 @@ def pipeline_prioridade_reservas():
 
         logging.info(
             "Executando criação incremental das reservas de preferência. "
-            "escopo=%s | limite_busca_dias=%s",
+            "escopo=%s | inicio_reserva=D+1_fixo | encaixe=tetris_por_slot",
             escopo,
-            DIAS_MAXIMOS_PROCURAR_ENCAIXE_TETRIS,
         )
         _executar_comando_parametrizado(hook, sql_insert, parametros)
         logging.info("INSERT incremental de preferências concluído.")

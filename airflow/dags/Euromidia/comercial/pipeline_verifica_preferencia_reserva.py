@@ -4,6 +4,10 @@ from typing import Any
 
 import pendulum
 from airflow.sdk import dag, task
+try:
+    from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
+except ImportError:  # compatibilidade com instalações Airflow anteriores
+    from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from sqlalchemy import text
 
 from hooks.BancodeDados.SqlServer import HookSqlServer
@@ -49,8 +53,12 @@ Um item entra em preferência/reserva quando:
 7. O item está vigente na data atual:
    - DataInicioPrevisto <= hoje
    - DataTerminoPrevisto >= hoje
-8. O período comercial do item é de 6 meses ou mais:
+8. O período comercial da ocupação é de 6 meses ou mais:
    - DataTerminoPrevisto >= DATEADD(DAY, -1, DATEADD(MONTH, 6, DataInicioPrevisto))
+
+Quando o item pertence a uma ocupação fatiada, a elegibilidade não é calculada
+pela duração isolada da fatia. O DAG usa `DataInicioTotalAgendamento` e
+`DataTerminoTotalAgendamento`, isto é, o período consolidado da ocupação.
 
 ## O que o DAG faz
 
@@ -95,6 +103,9 @@ class ConfiguracaoPreferenciaReserva:
     status_terminal_cancelado: int = 9
     status_terminal_erro: int = 10
     meses_minimos_preferencia: int = 6
+
+
+DAG_ID_PRIORIDADE_RESERVAS = "pipeline_prioridade_reservas"
 
 
 def criar_engine_sql(conn_id: str):
@@ -174,6 +185,9 @@ def validar_estrutura_tabelas() -> dict[str, Any]:
                 (N'FatoControleContratosItensEuromidia', N'IDVendedor'),
                 (N'FatoControleContratosItensEuromidia', N'BitAtivo'),
                 (N'FatoControleContratosItensEuromidia', N'BitPreferencia'),
+                (N'FatoControleContratosItensEuromidia', N'BitOcupacaoFatiada'),
+                (N'FatoControleContratosItensEuromidia', N'DataInicioTotalAgendamento'),
+                (N'FatoControleContratosItensEuromidia', N'DataTerminoTotalAgendamento'),
 
                 (N'Vendedores', N'IDVendedor'),
                 (N'Vendedores', N'IDDimUsuarios'),
@@ -400,8 +414,8 @@ def criar_tabelas_temporarias_preferencia(conexao, config: ConfiguracaoPreferenc
     SELECT
         item.IDFatoControleContratosItensEuromidia,
         item.IDFatoControleContratoEuromidia,
-        CAST(item.DataInicioPrevisto AS DATE) AS DataInicioPrevisto,
-        CAST(item.DataTerminoPrevisto AS DATE) AS DataTerminoPrevisto,
+        periodo.DataInicioPreferencia AS DataInicioPrevisto,
+        periodo.DataTerminoPreferencia AS DataTerminoPrevisto,
         item.IDPainelEuromidia,
         item.IDDimFacesPaineis,
         item.IDVendedor,
@@ -411,20 +425,44 @@ def criar_tabelas_temporarias_preferencia(conexao, config: ConfiguracaoPreferenc
         ON contrato.IDFatoControleContratosEuromidia = item.IDFatoControleContratoEuromidia
     LEFT JOIN {config.tabela_vendedores} AS vendedor
         ON vendedor.IDVendedor = item.IDVendedor
+    CROSS APPLY
+    (
+        SELECT
+            DataInicioPreferencia = CAST
+            (
+                CASE
+                    WHEN ISNULL(item.BitOcupacaoFatiada, 0) = 1
+                     AND item.DataInicioTotalAgendamento IS NOT NULL
+                        THEN item.DataInicioTotalAgendamento
+                    ELSE item.DataInicioPrevisto
+                END
+                AS DATE
+            ),
+            DataTerminoPreferencia = CAST
+            (
+                CASE
+                    WHEN ISNULL(item.BitOcupacaoFatiada, 0) = 1
+                     AND item.DataTerminoTotalAgendamento IS NOT NULL
+                        THEN item.DataTerminoTotalAgendamento
+                    ELSE item.DataTerminoPrevisto
+                END
+                AS DATE
+            )
+    ) AS periodo
     WHERE
         ISNULL(contrato.IDDimStatusContratos, -1) = {config.status_contrato_ativo}
         AND ISNULL(contrato.BitAtivo, 0) = 1
         AND ISNULL(item.BitAtivo, 0) = 1
-        AND item.DataInicioPrevisto IS NOT NULL
-        AND item.DataTerminoPrevisto IS NOT NULL
-        AND CAST(item.DataTerminoPrevisto AS DATE) >= CAST(item.DataInicioPrevisto AS DATE)
-        AND CAST(item.DataInicioPrevisto AS DATE) <= @DataHoje
-        AND CAST(item.DataTerminoPrevisto AS DATE) >= @DataHoje
-        AND CAST(item.DataTerminoPrevisto AS DATE) >= DATEADD
+        AND periodo.DataInicioPreferencia IS NOT NULL
+        AND periodo.DataTerminoPreferencia IS NOT NULL
+        AND periodo.DataTerminoPreferencia >= periodo.DataInicioPreferencia
+        AND periodo.DataInicioPreferencia <= @DataHoje
+        AND periodo.DataTerminoPreferencia >= @DataHoje
+        AND periodo.DataTerminoPreferencia >= DATEADD
         (
             DAY,
             -1,
-            DATEADD(MONTH, {config.meses_minimos_preferencia}, CAST(item.DataInicioPrevisto AS DATE))
+            DATEADD(MONTH, {config.meses_minimos_preferencia}, periodo.DataInicioPreferencia)
         );
 
     CREATE CLUSTERED INDEX IX_TMP_ItensPreferenciaReserva_Item
@@ -894,7 +932,23 @@ def pipeline_verifica_preferencia_reserva():
     validacao = tarefa_validar_estrutura_tabelas()
     sincronizacao = tarefa_sincronizar_preferencia_reserva()
 
-    validacao >> sincronizacao
+    prioridade_reservas = TriggerDagRunOperator(
+        task_id="acionar_prioridade_reservas_pos_verificacao_preferencia",
+        trigger_dag_id=DAG_ID_PRIORIDADE_RESERVAS,
+        trigger_run_id="pos_verifica_preferencia__{{ ts_nodash }}__{{ ti.try_number }}",
+        conf={
+            "origem": "pipeline_verifica_preferencia_reserva",
+            "modo_execucao": "VARREDURA_POS_VERIFICACAO_PREFERENCIA",
+            "processar_todos_elegiveis": True,
+            "tabela_origem": "[Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]",
+            "dag_origem": "pipeline_verifica_preferencia_reserva",
+            "run_id_origem": "{{ dag_run.run_id }}",
+            "logical_date_origem": "{{ ds }}",
+        },
+        wait_for_completion=False,
+    )
+
+    validacao >> sincronizacao >> prioridade_reservas
 
 
 pipeline_verifica_preferencia_reserva_dag = pipeline_verifica_preferencia_reserva()
