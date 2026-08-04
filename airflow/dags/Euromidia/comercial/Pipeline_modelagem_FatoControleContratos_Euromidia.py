@@ -276,6 +276,13 @@ ORDEM_COLUNAS_SAIDA = lista_unica_preservando_ordem(
         "ChaveOcupacaoOrigem",
         "BitOcupacaoCompartilhada",
         "ReferenciaOcupacaoEmComum",
+        "BitOcupacaoFatiada",
+        "ReferenciaAgendamento",
+        "SequenciaAgendamento",
+        "QuantidadePeriodosAgendamento",
+        "DataInicioTotalAgendamento",
+        "DataTerminoTotalAgendamento",
+        "TipoPeriodoAgendamento",
     ]
 )
 
@@ -895,6 +902,336 @@ def identificar_ocupacoes_compartilhadas(df: pd.DataFrame) -> pd.DataFrame:
 
     return df_out
 
+
+def identificar_ocupacoes_fatiadas(df: pd.DataFrame) -> pd.DataFrame:
+    """Marca uma ocupação dividida em dois ou mais períodos consecutivos.
+
+    A classificação é executada depois da regra de ocupações compartilhadas.
+    Uma linha já marcada como ``BitOcupacaoCompartilhada = 1`` fica fora desta
+    análise, tornando os dois modelos de relacionamento mutuamente exclusivos.
+
+    O número do contrato não compõe a identidade do grupo porque cada fração
+    pode possuir uma autorização diferente. A prévia, por outro lado, precisa
+    permanecer igual em todas as frações. Exemplo válido: contratos 106605,
+    106629 e 106630 vinculados à mesma prévia 100664411.
+    """
+    df_out = df.copy()
+
+    colunas_necessarias = [
+        "DataLancamento",
+        "Cota",
+        "CodPonto",
+        "CodFace",
+        "TipoDocumento",
+        "NumeroPrevia",
+        "RazaoSocial",
+        "CNPJ",
+        "MarcaExibida",
+        "DataInicioPrevisto",
+        "DataTerminoPrevisto",
+        "BitOcupacaoCompartilhada",
+    ]
+    faltantes = [coluna for coluna in colunas_necessarias if coluna not in df_out.columns]
+    if faltantes:
+        raise ValueError(
+            "Faltam colunas para identificar ocupações fatiadas: "
+            + ", ".join(faltantes)
+        )
+
+    colunas_saida = [
+        "BitOcupacaoFatiada",
+        "ReferenciaAgendamento",
+        "SequenciaAgendamento",
+        "QuantidadePeriodosAgendamento",
+        "DataInicioTotalAgendamento",
+        "DataTerminoTotalAgendamento",
+        "TipoPeriodoAgendamento",
+    ]
+
+    df_out["BitOcupacaoFatiada"] = 0
+    for coluna in colunas_saida[1:]:
+        df_out[coluna] = None
+
+    normalizadores_identidade = {
+        "DataLancamento": _norm_date,
+        "Cota": _norm_text,
+        "CodPonto": _norm_text,
+        "CodFace": _norm_text,
+        "TipoDocumento": _norm_text,
+        "NumeroPrevia": _norm_text,
+        "RazaoSocial": _norm_text,
+        "CNPJ": _only_digits,
+        "MarcaExibida": _norm_text,
+    }
+
+    colunas_chave: list[str] = []
+    for coluna, normalizador in normalizadores_identidade.items():
+        coluna_tecnica = f"_FAT_{coluna.upper()}"
+        colunas_chave.append(coluna_tecnica)
+        df_out[coluna_tecnica] = df_out[coluna].map(normalizador)
+
+    # Há contratos em que a primeira fração não possui o número da prévia,
+    # embora todas as demais frações consecutivas tragam a mesma prévia. Nesse
+    # caso, a ausência não pode separar a primeira fração da ocupação total.
+    # O preenchimento é apenas técnico e conservador: somente propagamos a
+    # prévia quando existe exatamente um único valor conhecido para a mesma
+    # identidade física/comercial. Se houver duas prévias diferentes, a linha
+    # vazia continua sem classificação para impedir mistura entre campanhas.
+    coluna_previa_tecnica = "_FAT_NUMEROPREVIA"
+    colunas_chave_sem_previa = [
+        coluna for coluna in colunas_chave if coluna != coluna_previa_tecnica
+    ]
+    previa_informada = df_out[coluna_previa_tecnica].where(
+        df_out[coluna_previa_tecnica].ne("SEM")
+    )
+    agrupadores_previa = [df_out[coluna] for coluna in colunas_chave_sem_previa]
+    quantidade_previas_grupo = previa_informada.groupby(
+        agrupadores_previa,
+        dropna=False,
+        sort=False,
+    ).transform("nunique")
+    previa_unica_grupo = previa_informada.groupby(
+        agrupadores_previa,
+        dropna=False,
+        sort=False,
+    ).transform("first")
+    mascara_previa_ausente_resolvivel = (
+        df_out[coluna_previa_tecnica].eq("SEM")
+        & quantidade_previas_grupo.eq(1)
+        & previa_unica_grupo.notna()
+    )
+    df_out.loc[
+        mascara_previa_ausente_resolvivel,
+        coluna_previa_tecnica,
+    ] = previa_unica_grupo.loc[mascara_previa_ausente_resolvivel]
+
+    df_out["_FAT_DATA_INICIO"] = pd.to_datetime(
+        df_out["DataInicioPrevisto"], errors="coerce"
+    ).dt.normalize()
+    df_out["_FAT_DATA_TERMINO"] = pd.to_datetime(
+        df_out["DataTerminoPrevisto"], errors="coerce"
+    ).dt.normalize()
+
+    mascara_compartilhada = (
+        pd.to_numeric(df_out["BitOcupacaoCompartilhada"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+        .eq(1)
+    )
+    mascara_chave_completa = df_out[colunas_chave].ne("SEM").all(axis=1)
+    mascara_datas_validas = (
+        df_out["_FAT_DATA_INICIO"].notna()
+        & df_out["_FAT_DATA_TERMINO"].notna()
+        & df_out["_FAT_DATA_TERMINO"].ge(df_out["_FAT_DATA_INICIO"])
+    )
+    mascara_valida = (
+        ~mascara_compartilhada
+        & mascara_chave_completa
+        & mascara_datas_validas
+    )
+
+    periodos = (
+        df_out.loc[
+            mascara_valida,
+            [*colunas_chave, "_FAT_DATA_INICIO", "_FAT_DATA_TERMINO"],
+        ]
+        .drop_duplicates()
+        .sort_values(
+            [*colunas_chave, "_FAT_DATA_INICIO", "_FAT_DATA_TERMINO"],
+            kind="stable",
+        )
+        .reset_index(drop=True)
+    )
+
+    quantidade_grupos = 0
+    quantidade_linhas = 0
+
+    if not periodos.empty:
+        agrupador_identidade = periodos.groupby(
+            colunas_chave,
+            dropna=False,
+            sort=False,
+        )
+        termino_anterior = agrupador_identidade["_FAT_DATA_TERMINO"].shift(1)
+        eh_continuacao = (
+            periodos["_FAT_DATA_INICIO"] - termino_anterior
+        ).dt.days.eq(1)
+
+        periodos["_FAT_NUMERO_BLOCO"] = (
+            (~eh_continuacao)
+            .astype(int)
+            .groupby([periodos[coluna] for coluna in colunas_chave], sort=False)
+            .cumsum()
+        )
+
+        colunas_bloco = [*colunas_chave, "_FAT_NUMERO_BLOCO"]
+        agrupador_bloco = periodos.groupby(
+            colunas_bloco,
+            dropna=False,
+            sort=False,
+        )
+
+        periodos["QuantidadePeriodosAgendamento"] = agrupador_bloco[
+            "_FAT_DATA_INICIO"
+        ].transform("size")
+        periodos["SequenciaAgendamento"] = agrupador_bloco.cumcount() + 1
+        periodos["DataInicioTotalAgendamento"] = agrupador_bloco[
+            "_FAT_DATA_INICIO"
+        ].transform("min")
+        periodos["DataTerminoTotalAgendamento"] = agrupador_bloco[
+            "_FAT_DATA_TERMINO"
+        ].transform("max")
+        periodos["BitOcupacaoFatiada"] = periodos[
+            "QuantidadePeriodosAgendamento"
+        ].ge(2).astype(int)
+
+        periodos["ReferenciaAgendamento"] = None
+        mascara_fatiada = periodos["BitOcupacaoFatiada"].eq(1)
+
+        if mascara_fatiada.any():
+            blocos_fatiados = (
+                periodos.loc[
+                    mascara_fatiada,
+                    [
+                        *colunas_bloco,
+                        "DataInicioTotalAgendamento",
+                        "DataTerminoTotalAgendamento",
+                    ],
+                ]
+                .drop_duplicates()
+                .copy()
+            )
+
+            def gerar_referencia_agendamento(linha: pd.Series) -> str:
+                partes = [str(linha[coluna]) for coluna in colunas_chave]
+                partes.extend(
+                    [
+                        linha["DataInicioTotalAgendamento"].strftime("%Y-%m-%d"),
+                        linha["DataTerminoTotalAgendamento"].strftime("%Y-%m-%d"),
+                    ]
+                )
+                assinatura = "|".join(partes)
+                return "FAT-" + hashlib.sha256(
+                    assinatura.encode("utf-8")
+                ).hexdigest().upper()[:40]
+
+            blocos_fatiados["ReferenciaAgendamento"] = blocos_fatiados.apply(
+                gerar_referencia_agendamento,
+                axis=1,
+            )
+            periodos = periodos.merge(
+                blocos_fatiados[
+                    [*colunas_bloco, "ReferenciaAgendamento"]
+                ],
+                on=colunas_bloco,
+                how="left",
+                validate="many_to_one",
+                suffixes=("", "_GERADA"),
+            )
+            if "ReferenciaAgendamento_GERADA" in periodos.columns:
+                periodos["ReferenciaAgendamento"] = periodos[
+                    "ReferenciaAgendamento_GERADA"
+                ].combine_first(periodos["ReferenciaAgendamento"])
+                periodos.drop(
+                    columns=["ReferenciaAgendamento_GERADA"],
+                    inplace=True,
+                )
+
+        fim_do_mes = periodos["_FAT_DATA_INICIO"] + pd.offsets.MonthEnd(0)
+        periodo_mensal = (
+            periodos["_FAT_DATA_INICIO"].dt.day.eq(1)
+            & periodos["_FAT_DATA_TERMINO"].eq(fim_do_mes)
+        )
+        periodos["TipoPeriodoAgendamento"] = periodo_mensal.map(
+            {True: "MENSAL", False: "RESTANTE"}
+        )
+
+        mapa_periodos = periodos.loc[
+            periodos["BitOcupacaoFatiada"].eq(1),
+            [
+                *colunas_chave,
+                "_FAT_DATA_INICIO",
+                "_FAT_DATA_TERMINO",
+                *colunas_saida,
+            ],
+        ].copy()
+
+        if not mapa_periodos.empty:
+            df_out = df_out.merge(
+                mapa_periodos,
+                on=[*colunas_chave, "_FAT_DATA_INICIO", "_FAT_DATA_TERMINO"],
+                how="left",
+                validate="many_to_one",
+                suffixes=("", "_IDENTIFICADO"),
+            )
+
+            for coluna in colunas_saida:
+                coluna_identificada = f"{coluna}_IDENTIFICADO"
+                if coluna_identificada not in df_out.columns:
+                    continue
+                if coluna == "BitOcupacaoFatiada":
+                    df_out[coluna] = (
+                        pd.to_numeric(df_out[coluna_identificada], errors="coerce")
+                        .fillna(0)
+                        .astype(int)
+                    )
+                else:
+                    df_out[coluna] = df_out[coluna_identificada]
+                df_out.drop(columns=[coluna_identificada], inplace=True)
+
+            quantidade_grupos = int(
+                df_out.loc[
+                    df_out["BitOcupacaoFatiada"].eq(1),
+                    "ReferenciaAgendamento",
+                ].nunique(dropna=True)
+            )
+            quantidade_linhas = int(df_out["BitOcupacaoFatiada"].eq(1).sum())
+
+    # Defesa adicional: mesmo que as funções sejam reordenadas no futuro,
+    # uma ocupação compartilhada jamais pode permanecer marcada como fatiada.
+    mascara_sobreposta = (
+        pd.to_numeric(df_out["BitOcupacaoCompartilhada"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+        .eq(1)
+        & pd.to_numeric(df_out["BitOcupacaoFatiada"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+        .eq(1)
+    )
+    if mascara_sobreposta.any():
+        df_out.loc[mascara_sobreposta, "BitOcupacaoFatiada"] = 0
+        for coluna in colunas_saida[1:]:
+            df_out.loc[mascara_sobreposta, coluna] = None
+
+    if (
+        pd.to_numeric(df_out["BitOcupacaoCompartilhada"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+        .eq(1)
+        & pd.to_numeric(df_out["BitOcupacaoFatiada"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+        .eq(1)
+    ).any():
+        raise ValueError(
+            "Falha de exclusividade: uma linha foi classificada simultaneamente "
+            "como ocupação compartilhada e ocupação fatiada."
+        )
+
+    colunas_tecnicas = [
+        coluna for coluna in df_out.columns if coluna.startswith("_FAT_")
+    ]
+    df_out = df_out.drop(columns=colunas_tecnicas, errors="ignore")
+
+    logger.info(
+        "Ocupações fatiadas identificadas | grupos=%s | linhas_relacionadas=%s",
+        quantidade_grupos,
+        quantidade_linhas,
+    )
+
+    return df_out
+
 def localizar_caminho_excel_controle_contratos() -> Path:
     """Localiza o arquivo original do controle de contratos dentro do container."""
     nome_arquivo_excel = NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS
@@ -1074,6 +1411,7 @@ def tratar_dataframe_ctr_pandas(df_original: pd.DataFrame) -> pd.DataFrame:
 
     df = aplicar_hash_contrato_e_previa(df)
     df = identificar_ocupacoes_compartilhadas(df)
+    df = identificar_ocupacoes_fatiadas(df)
     df = garantir_colunas_saida(df)
 
     return df
@@ -2358,6 +2696,13 @@ SET XACT_ABORT ON;
         , LEFT(TRY_CONVERT(varchar(100), [ChaveOcupacaoOrigem]), 100) AS [ChaveOcupacaoOrigem]
         , ISNULL(TRY_CONVERT(bit, [BitOcupacaoCompartilhada]), 0) AS [BitOcupacaoCompartilhada]
         , LEFT(TRY_CONVERT(nvarchar(500), [ReferenciaOcupacaoEmComum]), 500) AS [ReferenciaOcupacaoEmComum]
+        , ISNULL(TRY_CONVERT(bit, [BitOcupacaoFatiada]), 0) AS [BitOcupacaoFatiada]
+        , LEFT(TRY_CONVERT(varchar(300), [ReferenciaAgendamento]), 300) AS [ReferenciaAgendamento]
+        , TRY_CONVERT(int, [SequenciaAgendamento]) AS [SequenciaAgendamento]
+        , TRY_CONVERT(int, [QuantidadePeriodosAgendamento]) AS [QuantidadePeriodosAgendamento]
+        , TRY_CONVERT(date, [DataInicioTotalAgendamento]) AS [DataInicioTotalAgendamento]
+        , TRY_CONVERT(date, [DataTerminoTotalAgendamento]) AS [DataTerminoTotalAgendamento]
+        , LEFT(TRY_CONVERT(varchar(20), [TipoPeriodoAgendamento]), 20) AS [TipoPeriodoAgendamento]
     FROM [Integracao].[dbo].[df_fatocontrolecontratos]
 ),
 Final AS (
@@ -2442,6 +2787,13 @@ Final AS (
       , [ChaveOcupacaoOrigem]
       , [BitOcupacaoCompartilhada]
       , [ReferenciaOcupacaoEmComum]
+      , [BitOcupacaoFatiada]
+      , [ReferenciaAgendamento]
+      , [SequenciaAgendamento]
+      , [QuantidadePeriodosAgendamento]
+      , [DataInicioTotalAgendamento]
+      , [DataTerminoTotalAgendamento]
+      , [TipoPeriodoAgendamento]
     FROM Itens
 ),
 Fonte AS (
@@ -2514,6 +2866,13 @@ Fonte AS (
         , MAX(f.ChaveOcupacaoOrigem) AS ChaveOcupacaoOrigem
         , CAST(MAX(CONVERT(tinyint, f.BitOcupacaoCompartilhada)) AS bit) AS BitOcupacaoCompartilhada
         , MAX(f.ReferenciaOcupacaoEmComum) AS ReferenciaOcupacaoEmComum
+        , CAST(MAX(CONVERT(tinyint, f.BitOcupacaoFatiada)) AS bit) AS BitOcupacaoFatiada
+        , MAX(f.ReferenciaAgendamento) AS ReferenciaAgendamento
+        , MAX(f.SequenciaAgendamento) AS SequenciaAgendamento
+        , MAX(f.QuantidadePeriodosAgendamento) AS QuantidadePeriodosAgendamento
+        , MAX(f.DataInicioTotalAgendamento) AS DataInicioTotalAgendamento
+        , MAX(f.DataTerminoTotalAgendamento) AS DataTerminoTotalAgendamento
+        , MAX(f.TipoPeriodoAgendamento) AS TipoPeriodoAgendamento
     FROM Final f
     GROUP BY f.Referencia
 )
@@ -2590,6 +2949,13 @@ WHEN MATCHED
             , S.ChaveOcupacaoOrigem
             , S.BitOcupacaoCompartilhada
             , S.ReferenciaOcupacaoEmComum
+            , S.BitOcupacaoFatiada
+            , S.ReferenciaAgendamento
+            , S.SequenciaAgendamento
+            , S.QuantidadePeriodosAgendamento
+            , S.DataInicioTotalAgendamento
+            , S.DataTerminoTotalAgendamento
+            , S.TipoPeriodoAgendamento
         EXCEPT
         SELECT
               T.NumeroContrato
@@ -2658,6 +3024,13 @@ WHEN MATCHED
             , T.ChaveOcupacaoOrigem
             , T.BitOcupacaoCompartilhada
             , T.ReferenciaOcupacaoEmComum
+            , T.BitOcupacaoFatiada
+            , T.ReferenciaAgendamento
+            , T.SequenciaAgendamento
+            , T.QuantidadePeriodosAgendamento
+            , T.DataInicioTotalAgendamento
+            , T.DataTerminoTotalAgendamento
+            , T.TipoPeriodoAgendamento
     )
 THEN
     UPDATE SET
@@ -2728,6 +3101,13 @@ THEN
         , T.ChaveOcupacaoOrigem = S.ChaveOcupacaoOrigem
         , T.BitOcupacaoCompartilhada = S.BitOcupacaoCompartilhada
         , T.ReferenciaOcupacaoEmComum = S.ReferenciaOcupacaoEmComum
+        , T.BitOcupacaoFatiada = S.BitOcupacaoFatiada
+        , T.ReferenciaAgendamento = S.ReferenciaAgendamento
+        , T.SequenciaAgendamento = S.SequenciaAgendamento
+        , T.QuantidadePeriodosAgendamento = S.QuantidadePeriodosAgendamento
+        , T.DataInicioTotalAgendamento = S.DataInicioTotalAgendamento
+        , T.DataTerminoTotalAgendamento = S.DataTerminoTotalAgendamento
+        , T.TipoPeriodoAgendamento = S.TipoPeriodoAgendamento
 WHEN NOT MATCHED BY TARGET THEN
     INSERT (
           [IDFatoControleContratoEuromidia]
@@ -2798,6 +3178,13 @@ WHEN NOT MATCHED BY TARGET THEN
         , [ChaveOcupacaoOrigem]
         , [BitOcupacaoCompartilhada]
         , [ReferenciaOcupacaoEmComum]
+        , [BitOcupacaoFatiada]
+        , [ReferenciaAgendamento]
+        , [SequenciaAgendamento]
+        , [QuantidadePeriodosAgendamento]
+        , [DataInicioTotalAgendamento]
+        , [DataTerminoTotalAgendamento]
+        , [TipoPeriodoAgendamento]
     )
     VALUES (
           S.IDFatoControleContratoEuromidia
@@ -2868,6 +3255,13 @@ WHEN NOT MATCHED BY TARGET THEN
         , S.ChaveOcupacaoOrigem
         , S.BitOcupacaoCompartilhada
         , S.ReferenciaOcupacaoEmComum
+        , S.BitOcupacaoFatiada
+        , S.ReferenciaAgendamento
+        , S.SequenciaAgendamento
+        , S.QuantidadePeriodosAgendamento
+        , S.DataInicioTotalAgendamento
+        , S.DataTerminoTotalAgendamento
+        , S.TipoPeriodoAgendamento
     );
 """
 
@@ -2970,7 +3364,7 @@ SET
 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item;
 """
 
-GARANTIR_ESTRUTURA_OCUPACAO_COMPARTILHADA_SQL = r"""
+GARANTIR_ESTRUTURA_RELACIONAMENTOS_OCUPACAO_SQL = r"""
 SET NOCOUNT ON;
 
 IF COL_LENGTH('Integracao.Silver.FatoControleContratosItensEuromidia', 'ChaveOcupacaoOrigem') IS NULL
@@ -2990,6 +3384,49 @@ IF COL_LENGTH('Integracao.Silver.FatoControleContratosItensEuromidia', 'Referenc
 BEGIN
     ALTER TABLE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
     ADD [ReferenciaOcupacaoEmComum] nvarchar(500) NULL;
+END;
+
+IF COL_LENGTH('Integracao.Silver.FatoControleContratosItensEuromidia', 'BitOcupacaoFatiada') IS NULL
+BEGIN
+    ALTER TABLE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+    ADD [BitOcupacaoFatiada] bit NOT NULL
+        CONSTRAINT [DF_FCTI_BitOcupacaoFatiada] DEFAULT (0) WITH VALUES;
+END;
+
+IF COL_LENGTH('Integracao.Silver.FatoControleContratosItensEuromidia', 'ReferenciaAgendamento') IS NULL
+BEGIN
+    ALTER TABLE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+    ADD [ReferenciaAgendamento] varchar(300) NULL;
+END;
+
+IF COL_LENGTH('Integracao.Silver.FatoControleContratosItensEuromidia', 'SequenciaAgendamento') IS NULL
+BEGIN
+    ALTER TABLE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+    ADD [SequenciaAgendamento] int NULL;
+END;
+
+IF COL_LENGTH('Integracao.Silver.FatoControleContratosItensEuromidia', 'QuantidadePeriodosAgendamento') IS NULL
+BEGIN
+    ALTER TABLE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+    ADD [QuantidadePeriodosAgendamento] int NULL;
+END;
+
+IF COL_LENGTH('Integracao.Silver.FatoControleContratosItensEuromidia', 'DataInicioTotalAgendamento') IS NULL
+BEGIN
+    ALTER TABLE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+    ADD [DataInicioTotalAgendamento] date NULL;
+END;
+
+IF COL_LENGTH('Integracao.Silver.FatoControleContratosItensEuromidia', 'DataTerminoTotalAgendamento') IS NULL
+BEGIN
+    ALTER TABLE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+    ADD [DataTerminoTotalAgendamento] date NULL;
+END;
+
+IF COL_LENGTH('Integracao.Silver.FatoControleContratosItensEuromidia', 'TipoPeriodoAgendamento') IS NULL
+BEGIN
+    ALTER TABLE [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+    ADD [TipoPeriodoAgendamento] varchar(20) NULL;
 END;
 
 IF OBJECT_ID(N'Integracao.Silver.FatoVinculaMarcasOcupacao', N'U') IS NULL
@@ -3019,6 +3456,109 @@ BEGIN
     ADD [IDFatoControleContratosItensEuromidia] int NULL;
 END;
 
+IF OBJECT_ID(N'Integracao.Silver.FatoAgendamentoFaceContrato', N'U') IS NULL
+BEGIN
+    CREATE TABLE [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+    (
+        [IDFatoAgendamentoFaceContrato] int IDENTITY(1,1) NOT NULL,
+        [IDFatoControleContratosEuromidia] int NOT NULL,
+        [IDFatoControleContratosItensEuromidia] int NOT NULL,
+        [IDDimPaineisEuromidia] int NULL,
+        [IDDimFacesPaineis] int NULL,
+        [IDFatoVinculaMarcasOcupacao] int NULL,
+        [IDFatoOcupacaoPaineisEuromidia] int NULL,
+        [IDEmpresa] int NULL,
+        [Marca] nvarchar(100) NULL,
+        [Previa] nvarchar(100) NULL,
+        [Sequencia] int NOT NULL,
+        [DataInicio] date NOT NULL,
+        [DataTermino] date NOT NULL,
+        [DataInicioPrevisto] date NULL,
+        [DataTerminoPrevisto] date NULL,
+        [TipoPeriodo] varchar(20) NULL,
+        [Situacao] varchar(50) NULL,
+        [Referencia] varchar(300) NULL,
+        [BitAtivo] bit NOT NULL
+            CONSTRAINT [DF_FatoAgendamentoFaceContrato_BitAtivo] DEFAULT (1),
+        [DataAtualizado] datetime NOT NULL
+            CONSTRAINT [DF_FatoAgendamentoFaceContrato_DataAtualizado] DEFAULT (GETDATE()),
+        CONSTRAINT [PK_FatoAgendamentoFaceContrato]
+            PRIMARY KEY CLUSTERED ([IDFatoAgendamentoFaceContrato]),
+        CONSTRAINT [CK_FatoAgendamentoFaceContrato_Datas]
+            CHECK ([DataTermino] >= [DataInicio]),
+        CONSTRAINT [CK_FatoAgendamentoFaceContrato_TipoPeriodo]
+            CHECK ([TipoPeriodo] IS NULL OR [TipoPeriodo] IN ('MENSAL', 'RESTANTE'))
+    );
+END;
+
+IF COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'IDFatoOcupacaoPaineisEuromidia') IS NULL
+BEGIN
+    ALTER TABLE [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+    ADD [IDFatoOcupacaoPaineisEuromidia] int NULL;
+END;
+
+IF
+(
+       COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'IDFatoControleContratosEuromidia') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'IDFatoControleContratosItensEuromidia') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'IDDimPaineisEuromidia') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'IDDimFacesPaineis') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'IDFatoVinculaMarcasOcupacao') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'IDFatoOcupacaoPaineisEuromidia') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'IDEmpresa') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'Marca') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'Previa') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'Sequencia') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'DataInicio') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'DataTermino') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'DataInicioPrevisto') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'DataTerminoPrevisto') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'TipoPeriodo') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'Situacao') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'Referencia') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'BitAtivo') IS NULL
+    OR COL_LENGTH('Integracao.Silver.FatoAgendamentoFaceContrato', 'DataAtualizado') IS NULL
+)
+BEGIN
+    THROW 51000, 'A tabela Integracao.Silver.FatoAgendamentoFaceContrato existe, mas não possui todas as colunas obrigatórias.', 1;
+END;
+
+;WITH AgendamentosAtivosDuplicados AS
+(
+    SELECT
+        IDFatoAgendamentoFaceContrato,
+        rn = ROW_NUMBER() OVER
+        (
+            PARTITION BY IDFatoControleContratosItensEuromidia
+            ORDER BY DataAtualizado DESC, IDFatoAgendamentoFaceContrato DESC
+        )
+    FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+    WHERE BitAtivo = 1
+)
+UPDATE agendamento
+SET
+    agendamento.BitAtivo = 0,
+    agendamento.Situacao = 'DUPLICADO_INATIVO',
+    agendamento.DataAtualizado = GETDATE()
+FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato] AS agendamento
+INNER JOIN AgendamentosAtivosDuplicados AS duplicado
+    ON duplicado.IDFatoAgendamentoFaceContrato = agendamento.IDFatoAgendamentoFaceContrato
+WHERE duplicado.rn > 1;
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM [Integracao].sys.indexes
+    WHERE
+        object_id = OBJECT_ID(N'Integracao.Silver.FatoAgendamentoFaceContrato')
+        AND name = N'UX_FatoAgendamentoFaceContrato_ItemAtivo'
+)
+BEGIN
+    CREATE UNIQUE NONCLUSTERED INDEX [UX_FatoAgendamentoFaceContrato_ItemAtivo]
+        ON [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+        ([IDFatoControleContratosItensEuromidia])
+        WHERE [BitAtivo] = 1;
+END;
 
 """
 
@@ -3047,6 +3587,9 @@ FonteBase AS (
                         WHEN ISNULL(i.BitOcupacaoCompartilhada, 0) = 1
                              AND NULLIF(LTRIM(RTRIM(i.ChaveOcupacaoOrigem)), '') IS NOT NULL
                             THEN i.ChaveOcupacaoOrigem
+                        WHEN ISNULL(i.BitOcupacaoFatiada, 0) = 1
+                             AND NULLIF(LTRIM(RTRIM(i.ReferenciaAgendamento)), '') IS NOT NULL
+                            THEN i.ReferenciaAgendamento
                         ELSE i.Referencia
                      END,
         CodPonto = i.CodPonto,
@@ -3059,8 +3602,16 @@ FonteBase AS (
                 ELSE 'CANCELADO'
             END AS varchar(20)
         ),
-        DataInicio = i.DataInicioPrevisto,
-        DataFim = COALESCE(i.DataCancelamento, i.DataTerminoPrevisto),
+        DataInicio = CASE
+                        WHEN ISNULL(i.BitOcupacaoFatiada, 0) = 1
+                            THEN i.DataInicioTotalAgendamento
+                        ELSE i.DataInicioPrevisto
+                     END,
+        DataFim = CASE
+                    WHEN ISNULL(i.BitOcupacaoFatiada, 0) = 1
+                        THEN i.DataTerminoTotalAgendamento
+                    ELSE COALESCE(i.DataCancelamento, i.DataTerminoPrevisto)
+                  END,
         LoopInicio = CAST(NULL AS int),
         LoopFim = CAST(NULL AS int),
         SpanQtd = CAST(NULL AS int),
@@ -3076,6 +3627,8 @@ FonteBase AS (
             CASE
                 WHEN ISNULL(i.BitOcupacaoCompartilhada, 0) = 1
                     THEN 'OCUPAÇÃO COMPARTILHADA | '
+                WHEN ISNULL(i.BitOcupacaoFatiada, 0) = 1
+                    THEN 'OCUPAÇÃO FATIADA | '
                 ELSE ''
             END,
             'CONTRATO:', COALESCE(i.NumeroContrato,''),
@@ -3093,6 +3646,10 @@ FonteBase AS (
         CanceladoPorIDUsuario = CAST(NULL AS int),
         Observacao = LEFT(i.OBS, 500),
         Dias = CASE
+                 WHEN ISNULL(i.BitOcupacaoFatiada, 0) = 1
+                      AND i.DataInicioTotalAgendamento IS NOT NULL
+                      AND i.DataTerminoTotalAgendamento >= i.DataInicioTotalAgendamento
+                    THEN DATEDIFF(day, i.DataInicioTotalAgendamento, i.DataTerminoTotalAgendamento) + 1
                  WHEN i.DataInicioPrevisto IS NULL THEN NULL
                  WHEN COALESCE(i.DataCancelamento, i.DataTerminoPrevisto) IS NULL THEN NULL
                  WHEN COALESCE(i.DataCancelamento, i.DataTerminoPrevisto) < i.DataInicioPrevisto THEN NULL
@@ -3103,6 +3660,8 @@ FonteBase AS (
             CASE
                 WHEN ISNULL(i.BitOcupacaoCompartilhada, 0) = 1
                     THEN 'CONTRATO_COMPARTILHADO'
+                WHEN ISNULL(i.BitOcupacaoFatiada, 0) = 1
+                    THEN 'CONTRATO_FATIADO'
                 ELSE 'CONTRATO'
             END AS varchar(30)
         ),
@@ -3118,10 +3677,15 @@ FonteBase AS (
                         WHEN ISNULL(i.BitOcupacaoCompartilhada, 0) = 1
                              AND NULLIF(LTRIM(RTRIM(i.ChaveOcupacaoOrigem)), '') IS NOT NULL
                             THEN i.ChaveOcupacaoOrigem
+                        WHEN ISNULL(i.BitOcupacaoFatiada, 0) = 1
+                             AND NULLIF(LTRIM(RTRIM(i.ReferenciaAgendamento)), '') IS NOT NULL
+                            THEN i.ReferenciaAgendamento
                         ELSE i.Referencia
                     END
                 ORDER BY
                     CASE WHEN ISNULL(i.BitOcupacaoCompartilhada, 0) = 1 THEN 0 ELSE 1 END,
+                    CASE WHEN ISNULL(i.BitOcupacaoFatiada, 0) = 1 THEN 0 ELSE 1 END,
+                    ISNULL(i.SequenciaAgendamento, 2147483647),
                     LEN(COALESCE(i.ReferenciaOcupacaoEmComum, '')) DESC,
                     LEN(COALESCE(i.NumeroPrevia, '')) DESC,
                     LEN(COALESCE(i.NumeroContrato, '')) DESC,
@@ -3403,6 +3967,7 @@ WHERE rn > 1;
     ) AS painel_resolvido
     WHERE
         ISNULL(i.BitOcupacaoCompartilhada, 0) = 1
+        AND ISNULL(i.BitOcupacaoFatiada, 0) = 0
         AND NULLIF(LTRIM(RTRIM(i.ChaveOcupacaoOrigem)), '') IS NOT NULL
 ),
 Fonte AS
@@ -3475,6 +4040,7 @@ WHERE
         WHERE
             item.IDFatoControleContratosItensEuromidia = vinculo.IDFatoControleContratosItensEuromidia
             AND ISNULL(item.BitOcupacaoCompartilhada, 0) = 1
+            AND ISNULL(item.BitOcupacaoFatiada, 0) = 0
             AND item.ChaveOcupacaoOrigem = ocupacao.Referencia
     );
 
@@ -3492,6 +4058,287 @@ SET
     ocupacao.DataAtualizacao = CAST(GETDATE() AS datetime2(0))
 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS ocupacao
 WHERE ocupacao.Origem = 'CONTRATO';
+"""
+
+
+UPSERT_AGENDAMENTO_FACE_CONTRATO_SQL = r"""
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia]
+    WHERE
+        ISNULL(BitOcupacaoCompartilhada, 0) = 1
+        AND ISNULL(BitOcupacaoFatiada, 0) = 1
+)
+BEGIN
+    THROW 51001, 'Falha de exclusividade: existem itens simultaneamente compartilhados e fatiados.', 1;
+END;
+
+-- Cada grupo fatiado deve possuir exatamente uma ocupação consolidada. Essa
+-- ocupação é criada na etapa anterior com a mesma ReferenciaAgendamento, a
+-- menor data inicial e a maior data final do grupo.
+IF EXISTS
+(
+    SELECT i.ReferenciaAgendamento
+    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
+    LEFT JOIN [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS ocupacao
+        ON ocupacao.Referencia = i.ReferenciaAgendamento
+       AND ocupacao.Origem = 'CONTRATO'
+    WHERE
+        ISNULL(i.BitOcupacaoFatiada, 0) = 1
+        AND ISNULL(i.BitOcupacaoCompartilhada, 0) = 0
+        AND NULLIF(LTRIM(RTRIM(i.ReferenciaAgendamento)), '') IS NOT NULL
+        AND i.SequenciaAgendamento IS NOT NULL
+        AND i.SequenciaAgendamento >= 1
+        AND i.DataInicioPrevisto IS NOT NULL
+        AND i.DataTerminoPrevisto >= i.DataInicioPrevisto
+    GROUP BY i.ReferenciaAgendamento
+    HAVING COUNT(DISTINCT ocupacao.IDFatoOcupacaoPaineisEuromidia) <> 1
+)
+BEGIN
+    THROW 51004, 'Falha no agendamento: o grupo fatiado não possui exatamente uma ocupação consolidada.', 1;
+END;
+
+;WITH FonteBase AS
+(
+    SELECT
+        IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia,
+        IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia,
+        IDDimPaineisEuromidia = i.IDPainelEuromidia,
+        IDDimFacesPaineis = i.IDDimFacesPaineis,
+        IDFatoVinculaMarcasOcupacao = CAST(NULL AS int),
+        IDFatoOcupacaoPaineisEuromidia = ocupacao.IDFatoOcupacaoPaineisEuromidia,
+        IDEmpresa = c.IDEmpresa,
+        Marca = LEFT(i.MarcaExibida, 100),
+        Previa = LEFT(i.NumeroPrevia, 100),
+        Sequencia = i.SequenciaAgendamento,
+        DataInicio = i.DataInicioPrevisto,
+        DataTermino = i.DataTerminoPrevisto,
+        DataInicioPrevisto = i.DataInicioPrevisto,
+        DataTerminoPrevisto = i.DataTerminoPrevisto,
+        TipoPeriodo = i.TipoPeriodoAgendamento,
+        Situacao = CAST(
+            CASE
+                WHEN i.DataCancelamento IS NOT NULL
+                     OR UPPER(LTRIM(RTRIM(COALESCE(i.AtivoCancelamento, '')))) IN ('C', 'CANCELADO')
+                    THEN 'CANCELADO'
+                ELSE 'ATIVO'
+            END AS varchar(50)
+        ),
+        Referencia = LEFT(i.ReferenciaAgendamento, 300),
+        rn = ROW_NUMBER() OVER
+        (
+            PARTITION BY i.IDFatoControleContratosItensEuromidia
+            ORDER BY i.DataAtualizacao DESC, i.IDFatoControleContratosItensEuromidia DESC
+        )
+    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
+    INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS c
+        ON c.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+    INNER JOIN [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS ocupacao
+        ON ocupacao.Referencia = i.ReferenciaAgendamento
+       AND ocupacao.Origem = 'CONTRATO'
+    WHERE
+        ISNULL(i.BitOcupacaoFatiada, 0) = 1
+        AND ISNULL(i.BitOcupacaoCompartilhada, 0) = 0
+        AND NULLIF(LTRIM(RTRIM(i.ReferenciaAgendamento)), '') IS NOT NULL
+        AND i.SequenciaAgendamento IS NOT NULL
+        AND i.SequenciaAgendamento >= 1
+        AND i.DataInicioPrevisto IS NOT NULL
+        AND i.DataTerminoPrevisto >= i.DataInicioPrevisto
+),
+Fonte AS
+(
+    SELECT
+        IDFatoControleContratosEuromidia,
+        IDFatoControleContratosItensEuromidia,
+        IDDimPaineisEuromidia,
+        IDDimFacesPaineis,
+        IDFatoVinculaMarcasOcupacao,
+        IDFatoOcupacaoPaineisEuromidia,
+        IDEmpresa,
+        Marca,
+        Previa,
+        Sequencia,
+        DataInicio,
+        DataTermino,
+        DataInicioPrevisto,
+        DataTerminoPrevisto,
+        TipoPeriodo,
+        Situacao,
+        Referencia
+    FROM FonteBase
+    WHERE rn = 1
+)
+MERGE [Integracao].[Silver].[FatoAgendamentoFaceContrato] AS T
+USING Fonte AS S
+    ON T.IDFatoControleContratosItensEuromidia = S.IDFatoControleContratosItensEuromidia
+   AND T.BitAtivo = 1
+WHEN MATCHED THEN
+    UPDATE SET
+        T.IDFatoControleContratosEuromidia = S.IDFatoControleContratosEuromidia,
+        T.IDDimPaineisEuromidia = S.IDDimPaineisEuromidia,
+        T.IDDimFacesPaineis = S.IDDimFacesPaineis,
+        T.IDFatoVinculaMarcasOcupacao = NULL,
+        T.IDFatoOcupacaoPaineisEuromidia = S.IDFatoOcupacaoPaineisEuromidia,
+        T.IDEmpresa = S.IDEmpresa,
+        T.Marca = S.Marca,
+        T.Previa = S.Previa,
+        T.Sequencia = S.Sequencia,
+        T.DataInicio = S.DataInicio,
+        T.DataTermino = S.DataTermino,
+        T.DataInicioPrevisto = S.DataInicioPrevisto,
+        T.DataTerminoPrevisto = S.DataTerminoPrevisto,
+        T.TipoPeriodo = S.TipoPeriodo,
+        T.Situacao = S.Situacao,
+        T.Referencia = S.Referencia,
+        T.BitAtivo = 1,
+        T.DataAtualizado = GETDATE()
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT
+    (
+        IDFatoControleContratosEuromidia,
+        IDFatoControleContratosItensEuromidia,
+        IDDimPaineisEuromidia,
+        IDDimFacesPaineis,
+        IDFatoVinculaMarcasOcupacao,
+        IDFatoOcupacaoPaineisEuromidia,
+        IDEmpresa,
+        Marca,
+        Previa,
+        Sequencia,
+        DataInicio,
+        DataTermino,
+        DataInicioPrevisto,
+        DataTerminoPrevisto,
+        TipoPeriodo,
+        Situacao,
+        Referencia,
+        BitAtivo,
+        DataAtualizado
+    )
+    VALUES
+    (
+        S.IDFatoControleContratosEuromidia,
+        S.IDFatoControleContratosItensEuromidia,
+        S.IDDimPaineisEuromidia,
+        S.IDDimFacesPaineis,
+        NULL,
+        S.IDFatoOcupacaoPaineisEuromidia,
+        S.IDEmpresa,
+        S.Marca,
+        S.Previa,
+        S.Sequencia,
+        S.DataInicio,
+        S.DataTermino,
+        S.DataInicioPrevisto,
+        S.DataTerminoPrevisto,
+        S.TipoPeriodo,
+        S.Situacao,
+        S.Referencia,
+        1,
+        GETDATE()
+    );
+
+UPDATE agendamento
+SET
+    agendamento.BitAtivo = 0,
+    agendamento.Situacao = 'INATIVO_ORIGEM',
+    agendamento.DataAtualizado = GETDATE()
+FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato] AS agendamento
+WHERE
+    agendamento.BitAtivo = 1
+    AND agendamento.Referencia LIKE 'FAT-%'
+    AND NOT EXISTS
+    (
+        SELECT 1
+        FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item
+        WHERE
+            item.IDFatoControleContratosItensEuromidia = agendamento.IDFatoControleContratosItensEuromidia
+            AND ISNULL(item.BitOcupacaoFatiada, 0) = 1
+            AND ISNULL(item.BitOcupacaoCompartilhada, 0) = 0
+            AND item.ReferenciaAgendamento = agendamento.Referencia
+    );
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato] AS agendamento
+    INNER JOIN [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinculo
+        ON vinculo.IDFatoControleContratosItensEuromidia = agendamento.IDFatoControleContratosItensEuromidia
+    WHERE agendamento.BitAtivo = 1
+)
+BEGIN
+    THROW 51002, 'Falha de exclusividade: um item ativo está nas tabelas de multimarcas e de fatiamento.', 1;
+END;
+
+IF EXISTS
+(
+    SELECT 1
+    FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato] AS agendamento
+    LEFT JOIN [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS ocupacao
+        ON ocupacao.IDFatoOcupacaoPaineisEuromidia = agendamento.IDFatoOcupacaoPaineisEuromidia
+    WHERE
+        agendamento.BitAtivo = 1
+        AND agendamento.Referencia LIKE 'FAT-%'
+        AND
+        (
+            agendamento.IDFatoOcupacaoPaineisEuromidia IS NULL
+            OR ocupacao.IDFatoOcupacaoPaineisEuromidia IS NULL
+            OR ocupacao.Origem <> 'CONTRATO'
+            OR ocupacao.Referencia <> agendamento.Referencia
+        )
+)
+BEGIN
+    THROW 51005, 'Falha no agendamento: uma fatia ativa não está vinculada à ocupação consolidada correta.', 1;
+END;
+
+-- A tabela possui granularidade por item contratual. Por isso, dois ou mais
+-- itens podem representar o mesmo período lógico e compartilhar a mesma
+-- sequência, desde que apontem para exatamente o mesmo intervalo de datas.
+-- A validação anterior comparava a quantidade de linhas físicas com a
+-- quantidade de sequências e rejeitava esse cenário legítimo.
+IF EXISTS
+(
+    -- Uma mesma sequência não pode apontar para períodos diferentes.
+    SELECT 1
+    FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+    WHERE BitAtivo = 1 AND Referencia LIKE 'FAT-%'
+    GROUP BY Referencia, Sequencia
+    HAVING
+        MIN(DataInicio) <> MAX(DataInicio)
+        OR MIN(DataTermino) <> MAX(DataTermino)
+)
+OR EXISTS
+(
+    -- Um mesmo período não pode receber mais de uma sequência.
+    SELECT 1
+    FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+    WHERE BitAtivo = 1 AND Referencia LIKE 'FAT-%'
+    GROUP BY Referencia, DataInicio, DataTermino
+    HAVING COUNT(DISTINCT Sequencia) > 1
+)
+OR EXISTS
+(
+    -- A continuidade é validada sobre os períodos lógicos distintos, não
+    -- sobre a quantidade de itens contratuais vinculados a cada período.
+    SELECT 1
+    FROM
+    (
+        SELECT DISTINCT Referencia, Sequencia
+        FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+        WHERE BitAtivo = 1 AND Referencia LIKE 'FAT-%'
+    ) AS sequencias_logicas
+    GROUP BY Referencia
+    HAVING
+        MIN(Sequencia) <> 1
+        OR MAX(Sequencia) <> COUNT(*)
+)
+BEGIN
+    THROW 51003, 'Falha no agendamento: a sequência lógica possui lacunas ou associação inconsistente com os períodos.', 1;
+END;
 """
 
 
@@ -4541,15 +5388,15 @@ def pipeline_controle_contratos_euromidia():
             publicar_resumo_auditoria(resumo)
             raise
 
-    @task(task_id="garantir_estrutura_ocupacao_compartilhada")
-    def garantir_estrutura_ocupacao_compartilhada() -> dict[str, Any]:
+    @task(task_id="garantir_estrutura_relacionamentos_ocupacao")
+    def garantir_estrutura_relacionamentos_ocupacao() -> dict[str, Any]:
         return executar_sql_auditado(
-            nome_amigavel="Garantir estrutura das ocupações compartilhadas",
+            nome_amigavel="Garantir estrutura dos relacionamentos de ocupação",
             descricao_etapa=(
-                "Garante as colunas técnicas dos itens e a tabela ponte entre ocupação, empresa, "
-                "contrato, item, painel, face e marca."
+                "Garante as colunas técnicas dos itens, a ponte de ocupações multimarcas e a "
+                "tabela de agendamentos dos períodos fatiados, mantendo os modelos exclusivos."
             ),
-            sql_execucao=GARANTIR_ESTRUTURA_OCUPACAO_COMPARTILHADA_SQL,
+            sql_execucao=GARANTIR_ESTRUTURA_RELACIONAMENTOS_OCUPACAO_SQL,
             sql_amostra="""
                 SELECT TOP 5
                     IDFatoVinculaMarcasOcupacao,
@@ -4567,7 +5414,8 @@ def pipeline_controle_contratos_euromidia():
             origem_dados="Metadados do SQL Server",
             destino_dados=(
                 "[Integracao].[Silver].[FatoControleContratosItensEuromidia] + "
-                "[Integracao].[Silver].[FatoVinculaMarcasOcupacao]"
+                "[Integracao].[Silver].[FatoVinculaMarcasOcupacao] + "
+                "[Integracao].[Silver].[FatoAgendamentoFaceContrato]"
             ),
         )
 
@@ -4624,6 +5472,13 @@ def pipeline_controle_contratos_euromidia():
                     ChaveOcupacaoOrigem,
                     BitOcupacaoCompartilhada,
                     ReferenciaOcupacaoEmComum,
+                    BitOcupacaoFatiada,
+                    ReferenciaAgendamento,
+                    SequenciaAgendamento,
+                    QuantidadePeriodosAgendamento,
+                    DataInicioTotalAgendamento,
+                    DataTerminoTotalAgendamento,
+                    TipoPeriodoAgendamento,
                     DataAtualizacao
                 FROM [Silver].[FatoControleContratosItensEuromidia]
                 ORDER BY DataAtualizacao DESC, Referencia DESC
@@ -4850,6 +5705,49 @@ def pipeline_controle_contratos_euromidia():
             destino_dados="[Integracao].[Silver].[FatoVinculaMarcasOcupacao]",
         )
 
+    @task(task_id="upsert_agendamento_face_contrato")
+    def upsert_agendamento_face_contrato() -> dict[str, Any]:
+        return executar_sql_auditado(
+            nome_amigavel="MERGE períodos das ocupações fatiadas",
+            descricao_etapa=(
+                "Insere ou atualiza cada período consecutivo identificado para a mesma ocupação, "
+                "preservando contrato/item, painel, face, empresa, marca, prévia, sequência, datas "
+                "e o ID da única ocupação consolidada do grupo. "
+                "A etapa também desativa relações que deixaram de existir e bloqueia sobreposição "
+                "com a tabela de ocupações multimarcas."
+            ),
+            sql_execucao=UPSERT_AGENDAMENTO_FACE_CONTRATO_SQL,
+            sql_amostra="""
+                SELECT TOP 20
+                    IDFatoAgendamentoFaceContrato,
+                    IDFatoControleContratosEuromidia,
+                    IDFatoControleContratosItensEuromidia,
+                    IDDimPaineisEuromidia,
+                    IDDimFacesPaineis,
+                    IDFatoVinculaMarcasOcupacao,
+                    IDFatoOcupacaoPaineisEuromidia,
+                    IDEmpresa,
+                    Marca,
+                    Previa,
+                    Sequencia,
+                    DataInicio,
+                    DataTermino,
+                    TipoPeriodo,
+                    Situacao,
+                    Referencia,
+                    BitAtivo,
+                    DataAtualizado
+                FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato]
+                ORDER BY DataAtualizado DESC, IDFatoAgendamentoFaceContrato DESC
+            """,
+            origem_dados=(
+                "[Integracao].[Silver].[FatoControleContratosItensEuromidia] + "
+                "[Integracao].[Silver].[FatoControleContratosEuromidia] + "
+                "[Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]"
+            ),
+            destino_dados="[Integracao].[Silver].[FatoAgendamentoFaceContrato]",
+        )
+
     @task(task_id="update_bit_ativo_itens")
     def update_bit_ativo_itens() -> dict[str, Any]:
         return executar_sql_auditado(
@@ -4883,7 +5781,7 @@ def pipeline_controle_contratos_euromidia():
     info_download = baixar_arquivo_sharepoint()
     info_csv = gerar_csv_ctr(info_download)
     stage = carregar_stage(info_csv)
-    estrutura_ocupacao_compartilhada = garantir_estrutura_ocupacao_compartilhada()
+    estrutura_relacionamentos_ocupacao = garantir_estrutura_relacionamentos_ocupacao()
     contratos = merge_contratos()
     itens = merge_itens()
     fk = update_fk_contratos_itens()
@@ -4894,6 +5792,7 @@ def pipeline_controle_contratos_euromidia():
     calendario = upsert_dim_calendario()
     ocupacao = upsert_ocupacao()
     vinculos_marcas_ocupacao = upsert_vinculos_marcas_ocupacao()
+    agendamento_face_contrato = upsert_agendamento_face_contrato()
     bit_ativo_itens = update_bit_ativo_itens()
 
     prioridade_reservas = TriggerDagRunOperator(
@@ -4917,7 +5816,7 @@ def pipeline_controle_contratos_euromidia():
         >> info_download
         >> info_csv
         >> stage
-        >> estrutura_ocupacao_compartilhada
+        >> estrutura_relacionamentos_ocupacao
         >> contratos
         >> itens
         >> fk
@@ -4928,6 +5827,7 @@ def pipeline_controle_contratos_euromidia():
         >> calendario
         >> ocupacao
         >> vinculos_marcas_ocupacao
+        >> agendamento_face_contrato
         >> bit_ativo_itens
         >> prioridade_reservas
     )

@@ -8398,13 +8398,18 @@ def grade_painel(codponto: int):
             quantidade_faces_kpi = int(slots_por_face_kpi) * int(qtd_faces_selecionadas_kpi)
         else:
             slots_por_face_kpi = 1
-            try:
-                quantidade_faces_kpi = int(num_faces or 0)
-            except Exception:
-                quantidade_faces_kpi = 0
-
-            if quantidade_faces_kpi <= 0:
-                quantidade_faces_kpi = int(qtd_faces_selecionadas_kpi)
+            # Em painel não digital, cada CodFace exibida na grade representa
+            # exatamente uma linha de capacidade por dia. ``num_faces`` pode
+            # vir de DimPaineisEuromidia.QuantidadeFaces e representa o painel
+            # inteiro; quando a tela está filtrada em uma única face (ex. 1133A
+            # de um painel com duas faces), usar esse cadastro dobra apenas o
+            # denominador: 365 ocupados / 730 disponíveis = 50%.
+            #
+            # A lista já calcula a ocupação por CodFace. Portanto, para que o
+            # mesmo range e os mesmos filtros produzam o mesmo percentual nas
+            # duas telas, a capacidade da grade deve usar somente as faces que
+            # permaneceram em ``faces`` após os filtros.
+            quantidade_faces_kpi = int(qtd_faces_selecionadas_kpi)
 
         capacidade_total_periodo = int(total_dias_kpi) * int(quantidade_faces_kpi)
         if capacidade_total_periodo <= 0:
