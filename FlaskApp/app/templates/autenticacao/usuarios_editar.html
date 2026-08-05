@@ -56,7 +56,23 @@
     </style>
 
     <div class="senha-box">
-      <h2 class="page-title" style="font-size:18px; margin-bottom:8px;">Senha do usuário</h2>
+      <h2 class="page-title" style="font-size:18px; margin-bottom:8px;">E-mail e senha do usuário</h2>
+
+      <div style="margin-top:14px;">
+        <label for="emailUsuario">E-mail do usuário</label>
+        <input id="emailUsuario"
+               name="email"
+               type="email"
+               value="{{ usuario.Email or '' }}"
+               maxlength="254"
+               required
+               autocomplete="username"
+               placeholder="usuario@empresa.com.br">
+        <div class="senha-help">
+          Este e-mail é usado para identificar o usuário no acesso e na recuperação de senha.
+          O sistema não permite que dois usuários tenham o mesmo e-mail.
+        </div>
+      </div>
 
       <div class="perm-alert warning">
         A senha real não aparece porque o sistema salva <b>HashSenha</b>, não a senha em texto puro.

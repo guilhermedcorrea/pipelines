@@ -16,8 +16,6 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
-    <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
-
   <!-- HeatLayer -->
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 
@@ -2031,7 +2029,33 @@
   }
 
   .mm-performance-table.mm-performance-table-segmentos{
-    min-width:1420px;
+    width:max(100%, 1720px);
+    min-width:1720px;
+    table-layout:fixed;
+  }
+
+  .mm-performance-table-segmentos col.mm-col-segmento{ width:330px; }
+  .mm-performance-table-segmentos col.mm-col-score{ width:105px; }
+  .mm-performance-table-segmentos col.mm-col-classificacao{ width:145px; }
+  .mm-performance-table-segmentos col.mm-col-periodo{ width:155px; }
+  .mm-performance-table-segmentos col.mm-col-faturamento{ width:150px; }
+  .mm-performance-table-segmentos col.mm-col-contratos{ width:175px; }
+  .mm-performance-table-segmentos col.mm-col-ocupacao{ width:135px; }
+  .mm-performance-table-segmentos col.mm-col-ultimo-preco{ width:160px; }
+  .mm-performance-table-segmentos col.mm-col-preco-tabela{ width:125px; }
+  .mm-performance-table-segmentos col.mm-col-preco-ia{ width:150px; }
+  .mm-performance-table-segmentos col.mm-col-renovacao{ width:190px; }
+
+  .mm-performance-table-segmentos thead th,
+  .mm-performance-table-segmentos tbody td{
+    padding-left:9px;
+    padding-right:9px;
+  }
+
+  .mm-performance-table-segmentos thead th{
+    line-height:1.25;
+    white-space:normal;
+    overflow-wrap:normal;
   }
 
   .mm-performance-table thead th{
@@ -2076,10 +2100,14 @@
   }
 
   .mm-performance-segmento{
-    max-width:260px;
+    width:330px;
+    min-width:330px;
+    max-width:330px;
     white-space:normal !important;
-    word-break:break-word;
-    overflow-wrap:anywhere;
+    word-break:normal;
+    overflow-wrap:break-word;
+    hyphens:auto;
+    line-height:1.35;
     color:#0f172a;
     font-weight:1000;
   }
@@ -2142,12 +2170,14 @@
 
   .mm-performance-pagination{
     display:flex;
+    flex-direction:column;
     align-items:center;
-    justify-content:space-between;
-    gap:12px;
-    padding:0 12px 14px 12px;
+    justify-content:center;
+    gap:9px;
+    padding:12px 14px 15px 14px;
     background:#fff;
     border-top:1px solid rgba(226,232,240,.85);
+    text-align:center;
   }
 
   .mm-performance-pagination[hidden]{
@@ -2159,13 +2189,24 @@
     font-size:12px;
     font-weight:950;
     white-space:nowrap;
+    text-align:center;
   }
 
   .mm-performance-pagination-actions{
     display:flex;
     align-items:center;
+    justify-content:center;
     gap:8px;
-    flex:0 0 auto;
+    width:100%;
+    flex-wrap:wrap;
+  }
+
+  .mm-performance-page-numbers{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:5px;
+    flex-wrap:wrap;
   }
 
   .mm-performance-page-btn{
@@ -2191,6 +2232,34 @@
     cursor:not-allowed;
     opacity:.45;
     box-shadow:none;
+  }
+
+  .mm-performance-page-number{
+    min-width:34px;
+    width:34px;
+    height:32px;
+    padding:0;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+  }
+
+  .mm-performance-page-number.is-current{
+    color:#fff;
+    background:var(--euro-blue);
+    border-color:var(--euro-blue);
+    box-shadow:0 3px 10px rgba(0,40,132,.2);
+    cursor:default;
+    opacity:1;
+  }
+
+  .mm-performance-page-ellipsis{
+    width:24px;
+    color:#94a3b8;
+    font-size:13px;
+    font-weight:1000;
+    text-align:center;
+    user-select:none;
   }
 
   @media (max-width: 960px){
@@ -2223,17 +2292,13 @@
       min-width:980px;
     }
     .mm-performance-table.mm-performance-table-segmentos{
-      min-width:1280px;
+      width:1720px;
+      min-width:1720px;
     }
     .mm-performance-table thead th,
     .mm-performance-table tbody td{
       padding:10px 9px;
       font-size:11.5px;
-    }
-    .mm-performance-pagination{
-      flex-direction:column;
-      align-items:stretch;
-      gap:9px;
     }
     .mm-performance-pagination-info{
       white-space:normal;
@@ -2707,28 +2772,10 @@
             <th class="num">Desempenho de Renovação</th>
           </tr>
         </thead>
-        <tbody>
-          {% for linha in desempenho_painel %}
+        <tbody id="tbodyDesempenhoPainel">
           <tr>
-            <td class="mm-performance-periodo">{{ linha.periodo }}</td>
-            <td class="num">{{ linha.faturamento_txt }}</td>
-            <td class="num">{{ linha.contratos_media_mes_txt }}</td>
-            <td class="num">{{ linha.taxa_ocupacao_txt }}</td>
-            <td class="num">{{ linha.ultimo_preco_negociado_txt }}</td>
-            <td class="num">{{ linha.preco_tabela_txt }}</td>
-            <td class="num">{{ linha.preco_recomendado_ia_txt }}</td>
-            <td class="num">
-              <div class="mm-renew-cell">
-                <span class="mm-renew-value">{{ linha.desempenho_renovacao_txt }}</span>
-                <span class="mm-renew-bar" aria-hidden="true"><span style="width: {{ linha.desempenho_renovacao_barra }}%;"></span></span>
-              </div>
-            </td>
+            <td class="mm-performance-empty" colspan="8">Carregando desempenho comercial do painel…</td>
           </tr>
-          {% else %}
-          <tr>
-            <td class="mm-performance-empty" colspan="8">Sem dados comerciais para este painel nos períodos calculados.</td>
-          </tr>
-          {% endfor %}
         </tbody>
       </table>
     </div>
@@ -2745,6 +2792,19 @@
 
     <div class="mm-performance-table-wrap">
       <table class="mm-performance-table mm-performance-table-segmentos" id="tblDesempenhoSegmentos">
+        <colgroup>
+          <col class="mm-col-segmento">
+          <col class="mm-col-score">
+          <col class="mm-col-classificacao">
+          <col class="mm-col-periodo">
+          <col class="mm-col-faturamento">
+          <col class="mm-col-contratos">
+          <col class="mm-col-ocupacao">
+          <col class="mm-col-ultimo-preco">
+          <col class="mm-col-preco-tabela">
+          <col class="mm-col-preco-ia">
+          <col class="mm-col-renovacao">
+        </colgroup>
         <thead>
           <tr>
             <th>Segmento</th>
@@ -2761,38 +2821,18 @@
           </tr>
         </thead>
         <tbody id="tbodyDesempenhoSegmentos">
-          {% for linha in desempenho_segmentos %}
-          <tr data-mm-segmento-row="1">
-            <td class="mm-performance-segmento">{{ linha.classe }}</td>
-            <td class="num">{{ linha.score_setor_txt }}</td>
-            <td><span class="mm-performance-classificacao">{{ linha.classificacao_macro }}</span></td>
-            <td class="mm-performance-periodo">{{ linha.periodo }}</td>
-            <td class="num">{{ linha.faturamento_txt }}</td>
-            <td class="num">{{ linha.contratos_media_mes_txt }}</td>
-            <td class="num">{{ linha.taxa_ocupacao_txt }}</td>
-            <td class="num">{{ linha.ultimo_preco_negociado_txt }}</td>
-            <td class="num">{{ linha.preco_tabela_txt }}</td>
-            <td class="num">{{ linha.preco_recomendado_ia_txt }}</td>
-            <td class="num">
-              <div class="mm-renew-cell">
-                <span class="mm-renew-value">{{ linha.desempenho_renovacao_txt }}</span>
-                <span class="mm-renew-bar" aria-hidden="true"><span style="width: {{ linha.desempenho_renovacao_barra }}%;"></span></span>
-              </div>
-            </td>
-          </tr>
-          {% else %}
           <tr>
-            <td class="mm-performance-empty" colspan="11">Sem contratos com segmento vinculado para este painel nos períodos calculados.</td>
+            <td class="mm-performance-empty" colspan="11">Carregando desempenho comercial por segmento…</td>
           </tr>
-          {% endfor %}
         </tbody>
       </table>
     </div>
 
     <div class="mm-performance-pagination" id="pagDesempenhoSegmentos" hidden aria-label="Paginação da tabela Desempenho Comercial por Segmento">
-      <div class="mm-performance-pagination-info" id="pagDesempenhoSegmentosInfo">Exibindo 0 a 0 de 0 registros</div>
+      <div class="mm-performance-pagination-info" id="pagDesempenhoSegmentosInfo">Exibindo 0 a 0 de 0 segmentos</div>
       <div class="mm-performance-pagination-actions">
         <button type="button" class="mm-performance-page-btn" id="btnDesempenhoSegmentosAnterior">Anterior</button>
+        <div class="mm-performance-page-numbers" id="pagDesempenhoSegmentosNumeros" aria-label="Páginas disponíveis"></div>
         <button type="button" class="mm-performance-page-btn" id="btnDesempenhoSegmentosProxima">Próxima</button>
       </div>
     </div>
@@ -2910,6 +2950,13 @@
   // Endpoint sob demanda: painéis dos concorrentes por EmpresaProprietaria.
   const URL_API_CONCORRENTES_TEMPLATE = "{{ url_for('Paineis.api_concorrentes_painel', codponto=0) }}";
   const URL_API_CONCORRENTES = _trocarCodPontoUrlApi(URL_API_CONCORRENTES_TEMPLATE, "concorrentes");
+
+  // A mesma rota calcula o bloco comercial quando recebe _bloco=desempenho.
+  // Preservamos os parâmetros atuais (inclusive codface/face_principal), para
+  // que o cálculo assíncrono use exatamente a face aberta pelo usuário.
+  const urlApiDesempenho = new URL(window.location.href);
+  urlApiDesempenho.searchParams.set("_bloco", "desempenho");
+  const URL_API_DESEMPENHO = urlApiDesempenho.toString();
 
   // ✅ garante array
   const empresasArr = Array.isArray(EMPRESAS) ? EMPRESAS : [];
@@ -3829,23 +3876,33 @@
     if(msgSegmentoVazio) msgSegmentoVazio.hidden = visiveis > 0;
   }
 
-  if(selSegmento){
-    // O dropdown de Segmento deve exibir a lista oficial de classes CNAE,
-    // vinda de [Integracao].[Silver].[DimCnaes].[Classe].
-    // Fallback: se o backend ainda não mandar SEGMENTOS_CNAE, usa os segmentos do dataset.
-    const baseSegmentosCnae = Array.isArray(SEGMENTOS_CNAE) ? SEGMENTOS_CNAE : [];
-    const baseSegmentos = baseSegmentosCnae.length
-      ? baseSegmentosCnae
-      : empresasArr.map(e => e && (e.classe_cnae || e.segmento)).filter(Boolean);
+  let assinaturaSegmentosDisponiveis = "";
 
-    const segmentos = Array.from(new Set(
-        baseSegmentos
-          .map(s => String(s || "").trim())
-          .filter(Boolean)
-      ))
-      .sort((a,b)=> String(a).localeCompare(String(b), "pt-BR", { sensitivity:"base" }));
+  function _substituirSegmentosDisponiveis(valores, manterSelecao){
+    if(!selSegmento) return;
 
-    for(const s of segmentos){
+    const segmentosOrdenados = Array.from(new Set(
+      (Array.isArray(valores) ? valores : [])
+        .map(s => String(s || "").trim())
+        .filter(s => s && !["todos", "nenhum"].includes(_normStr(s)))
+    )).sort((a,b)=> String(a).localeCompare(String(b), "pt-BR", { sensitivity:"base" }));
+
+    const novaAssinatura = segmentosOrdenados.map(_normStr).join("\u001f");
+    if(novaAssinatura === assinaturaSegmentosDisponiveis) return;
+
+    let selecaoAnterior = ["todos"];
+    if(manterSelecao){
+      if(_segmentoNenhumSelecionado()) selecaoAnterior = ["nenhum"];
+      else if(_segmentoTodosSelecionado()) selecaoAnterior = ["todos"];
+      else selecaoAnterior = _segmentosSelecionados();
+    }
+
+    Array.from(selSegmento.options).forEach(opt => {
+      if(!["todos", "nenhum"].includes(opt.value)) opt.remove();
+    });
+    if(listaSegmentos) listaSegmentos.innerHTML = "";
+
+    for(const s of segmentosOrdenados){
       const opt = document.createElement("option");
       opt.value = s;
       opt.textContent = s;
@@ -3863,7 +3920,6 @@
 
         const span = document.createElement("span");
         span.textContent = s;
-
         row.appendChild(chk);
         row.appendChild(span);
         listaSegmentos.appendChild(row);
@@ -3871,12 +3927,11 @@
         chk.addEventListener("change", () => {
           const atuais = new Set(_segmentosSelecionados().map(_normStr));
           const chave = _normStr(s);
-
           if(chk.checked) atuais.add(chave);
           else atuais.delete(chave);
 
-          const novos = segmentos.filter(seg => atuais.has(_normStr(seg)));
-          if(novos.length === segmentos.length){
+          const novos = segmentosOrdenados.filter(seg => atuais.has(_normStr(seg)));
+          if(novos.length === segmentosOrdenados.length){
             _setSegmentosSelecionados(["todos"], true);
           }else if(novos.length === 0){
             _setSegmentosSelecionados(["nenhum"], true);
@@ -3886,6 +3941,24 @@
         });
       }
     }
+
+    assinaturaSegmentosDisponiveis = novaAssinatura;
+    _setSegmentosSelecionados(selecaoAnterior, false);
+    _filtrarOpcoesSegmento();
+  }
+
+  if(selSegmento){
+    // A rota HTML não espera mais a varredura geográfica. Mantemos as opções
+    // recebidas no payload/URL como estado inicial e a API substitui a lista
+    // pelo mesmo conjunto regional que o backend calculava anteriormente.
+    const segmentosIniciaisDisponiveis = [];
+    if(Array.isArray(SEGMENTOS_CNAE)) segmentosIniciaisDisponiveis.push(...SEGMENTOS_CNAE);
+    segmentosIniciaisDisponiveis.push(...empresasArr.map(e => e && (e.classe_cnae || e.segmento)).filter(Boolean));
+    if(filtroIni){
+      segmentosIniciaisDisponiveis.push(..._normalizarSegmentosEntrada(filtroIni.segmentos));
+      segmentosIniciaisDisponiveis.push(..._normalizarSegmentosEntrada(filtroIni.segmento));
+    }
+    _substituirSegmentosDisponiveis(segmentosIniciaisDisponiveis, false);
   }
 
   if(chkSegmentoTodos){
@@ -5349,6 +5422,13 @@ function _renderMapa(){
       const data = await resp.json();
       if(seq !== seqEmpresasSegmentoReceita) return;
 
+      if(
+        Array.isArray(data && data.segmentos_disponiveis)
+        && data.segmentos_disponiveis_ok !== false
+      ){
+        _substituirSegmentosDisponiveis(data.segmentos_disponiveis, true);
+      }
+
       empresasSegmentoReceitaArr = _extrairListaEmpresasSegmentoReceita(data)
         .map(_normalizarEmpresaSegmentoReceitaItem)
         .filter(e => Number.isFinite(Number(e && e.lat)) && Number.isFinite(Number(e && e.lng)));
@@ -6085,23 +6165,83 @@ document.addEventListener("DOMContentLoaded", function(){
     const info = document.getElementById("pagDesempenhoSegmentosInfo");
     const btnAnterior = document.getElementById("btnDesempenhoSegmentosAnterior");
     const btnProxima = document.getElementById("btnDesempenhoSegmentosProxima");
+    const numeros = document.getElementById("pagDesempenhoSegmentosNumeros");
 
-    if(!tbody || !paginacao || !info || !btnAnterior || !btnProxima){
+    if(!tbody || !paginacao || !info || !btnAnterior || !btnProxima || !numeros){
       return;
     }
 
     const linhas = Array.from(tbody.querySelectorAll('tr[data-mm-segmento-row="1"]'));
-    const tamanhoPagina = 10;
+    const gruposMap = new Map();
+    linhas.forEach((linha, idx) => {
+      const chave = String(linha.dataset.mmSegmentoGrupo || `linha-${idx}`);
+      if(!gruposMap.has(chave)) gruposMap.set(chave, []);
+      gruposMap.get(chave).push(linha);
+    });
+    const grupos = Array.from(gruposMap.values());
+    // Uma página = um segmento = três linhas (12, 24 e 36 meses).
+    const tamanhoPagina = 1;
     let paginaAtual = 1;
 
+    function obterPaginasVisiveis(totalPaginas){
+      const candidatas = new Set([1, totalPaginas]);
+      for(let pagina = paginaAtual - 2; pagina <= paginaAtual + 2; pagina += 1){
+        if(pagina >= 1 && pagina <= totalPaginas) candidatas.add(pagina);
+      }
+
+      const ordenadas = Array.from(candidatas).sort((a, b) => a - b);
+      const itens = [];
+      let paginaAnterior = 0;
+      ordenadas.forEach(pagina => {
+        if(paginaAnterior && pagina - paginaAnterior > 1) itens.push(null);
+        itens.push(pagina);
+        paginaAnterior = pagina;
+      });
+      return itens;
+    }
+
+    function renderizarNumeros(totalPaginas){
+      numeros.replaceChildren();
+
+      obterPaginasVisiveis(totalPaginas).forEach(item => {
+        if(item === null){
+          const reticencias = document.createElement("span");
+          reticencias.className = "mm-performance-page-ellipsis";
+          reticencias.textContent = "…";
+          reticencias.setAttribute("aria-hidden", "true");
+          numeros.appendChild(reticencias);
+          return;
+        }
+
+        const botao = document.createElement("button");
+        botao.type = "button";
+        botao.className = "mm-performance-page-btn mm-performance-page-number";
+        botao.textContent = String(item);
+        botao.setAttribute("aria-label", `Ir para a página ${item}`);
+
+        if(item === paginaAtual){
+          botao.classList.add("is-current");
+          botao.setAttribute("aria-current", "page");
+          botao.disabled = true;
+        }else{
+          botao.addEventListener("click", () => {
+            paginaAtual = item;
+            render();
+          });
+        }
+        numeros.appendChild(botao);
+      });
+    }
+
     function render(){
-      const total = linhas.length;
+      const total = grupos.length;
       const totalPaginas = Math.max(1, Math.ceil(total / tamanhoPagina));
 
       if(total <= tamanhoPagina){
         linhas.forEach(linha => { linha.hidden = false; });
         paginacao.hidden = true;
-        info.textContent = total ? `Exibindo 1 a ${total} de ${total} registros` : "Exibindo 0 a 0 de 0 registros";
+        numeros.replaceChildren();
+        info.textContent = total ? "Exibindo 1 segmento • 3 períodos" : "Nenhum segmento para exibir";
         return;
       }
 
@@ -6111,14 +6251,16 @@ document.addEventListener("DOMContentLoaded", function(){
       const inicio = (paginaAtual - 1) * tamanhoPagina;
       const fim = Math.min(inicio + tamanhoPagina, total);
 
-      linhas.forEach((linha, idx) => {
-        linha.hidden = !(idx >= inicio && idx < fim);
+      grupos.forEach((linhasGrupo, idx) => {
+        const exibir = idx >= inicio && idx < fim;
+        linhasGrupo.forEach(linha => { linha.hidden = !exibir; });
       });
 
       paginacao.hidden = false;
-      info.textContent = `Exibindo ${inicio + 1} a ${fim} de ${total} registros • Página ${paginaAtual} de ${totalPaginas}`;
+      info.textContent = `Exibindo segmento ${inicio + 1} de ${total} • Períodos de 12, 24 e 36 meses`;
       btnAnterior.disabled = paginaAtual <= 1;
       btnProxima.disabled = paginaAtual >= totalPaginas;
+      renderizarNumeros(totalPaginas);
     }
 
     btnAnterior.addEventListener("click", () => {
@@ -6134,7 +6276,106 @@ document.addEventListener("DOMContentLoaded", function(){
     render();
   }
 
-  _inicializarPaginacaoDesempenhoSegmentos();
+  let carregamentoDesempenhoIniciado = false;
+
+  async function _carregarDesempenhoComercial(){
+    if(carregamentoDesempenhoIniciado) return;
+    carregamentoDesempenhoIniciado = true;
+
+    const tbodyPainel = document.getElementById("tbodyDesempenhoPainel");
+    const tbodySegmentos = document.getElementById("tbodyDesempenhoSegmentos");
+
+    try{
+      const resp = await fetch(URL_API_DESEMPENHO, {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+        credentials: "same-origin"
+      });
+
+      if(!resp.ok){
+        throw new Error(`HTTP ${resp.status}`);
+      }
+
+      const data = await resp.json();
+      const linhasPainel = Array.isArray(data && data.painel) ? data.painel : [];
+      const linhasSegmentos = Array.isArray(data && data.segmentos) ? data.segmentos : [];
+
+      if(tbodyPainel){
+        tbodyPainel.innerHTML = linhasPainel.length ? linhasPainel.map(linha => {
+          const barra = Math.max(0, Math.min(100, Number(linha && linha.desempenho_renovacao_barra) || 0));
+          return `
+            <tr>
+              <td class="mm-performance-periodo">${_escapeHtml(String(linha?.periodo ?? "—"))}</td>
+              <td class="num">${_escapeHtml(String(linha?.faturamento_txt ?? "—"))}</td>
+              <td class="num">${_escapeHtml(String(linha?.contratos_media_mes_txt ?? "—"))}</td>
+              <td class="num">${_escapeHtml(String(linha?.taxa_ocupacao_txt ?? "—"))}</td>
+              <td class="num">${_escapeHtml(String(linha?.ultimo_preco_negociado_txt ?? "—"))}</td>
+              <td class="num">${_escapeHtml(String(linha?.preco_tabela_txt ?? "—"))}</td>
+              <td class="num">${_escapeHtml(String(linha?.preco_recomendado_ia_txt ?? "—"))}</td>
+              <td class="num">
+                <div class="mm-renew-cell">
+                  <span class="mm-renew-value">${_escapeHtml(String(linha?.desempenho_renovacao_txt ?? "—"))}</span>
+                  <span class="mm-renew-bar" aria-hidden="true"><span style="width:${barra}%"></span></span>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join("") : '<tr><td class="mm-performance-empty" colspan="8">Sem dados comerciais para este painel nos períodos calculados.</td></tr>';
+      }
+
+      if(tbodySegmentos){
+        tbodySegmentos.innerHTML = linhasSegmentos.length ? linhasSegmentos.map(linha => {
+          const barra = Math.max(0, Math.min(100, Number(linha && linha.desempenho_renovacao_barra) || 0));
+          return `
+            <tr data-mm-segmento-row="1" data-mm-segmento-grupo="${Number(linha?.segmento_grupo) || 0}">
+              <td class="mm-performance-segmento">${_escapeHtml(String(linha?.classe ?? "Sem segmento"))}</td>
+              <td class="num">${_escapeHtml(String(linha?.score_setor_txt ?? "—"))}</td>
+              <td><span class="mm-performance-classificacao">${_escapeHtml(String(linha?.classificacao_macro ?? "—"))}</span></td>
+              <td class="mm-performance-periodo">${_escapeHtml(String(linha?.periodo ?? "—"))}</td>
+              <td class="num">${_escapeHtml(String(linha?.faturamento_txt ?? "—"))}</td>
+              <td class="num">${_escapeHtml(String(linha?.contratos_media_mes_txt ?? "—"))}</td>
+              <td class="num">${_escapeHtml(String(linha?.taxa_ocupacao_txt ?? "—"))}</td>
+              <td class="num">${_escapeHtml(String(linha?.ultimo_preco_negociado_txt ?? "—"))}</td>
+              <td class="num">${_escapeHtml(String(linha?.preco_tabela_txt ?? "—"))}</td>
+              <td class="num">${_escapeHtml(String(linha?.preco_recomendado_ia_txt ?? "—"))}</td>
+              <td class="num">
+                <div class="mm-renew-cell">
+                  <span class="mm-renew-value">${_escapeHtml(String(linha?.desempenho_renovacao_txt ?? "—"))}</span>
+                  <span class="mm-renew-bar" aria-hidden="true"><span style="width:${barra}%"></span></span>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join("") : '<tr><td class="mm-performance-empty" colspan="11">Sem contratos com segmento vinculado para este painel nos períodos calculados.</td></tr>';
+      }
+
+      _inicializarPaginacaoDesempenhoSegmentos();
+    }catch(err){
+      console.warn("Falha ao carregar desempenho comercial:", err);
+      if(tbodyPainel){
+        tbodyPainel.innerHTML = '<tr><td class="mm-performance-empty" colspan="8">Não foi possível carregar o desempenho comercial. Atualize a página para tentar novamente.</td></tr>';
+      }
+      if(tbodySegmentos){
+        tbodySegmentos.innerHTML = '<tr><td class="mm-performance-empty" colspan="11">Não foi possível carregar o desempenho por segmento.</td></tr>';
+      }
+    }
+  }
+
+  function _agendarCarregamentoDesempenho(){
+    const secao = document.querySelector(".mm-performance-shell");
+    if(!secao || !("IntersectionObserver" in window)){
+      _carregarDesempenhoComercial();
+      return;
+    }
+
+    const observador = new IntersectionObserver((entradas) => {
+      if(entradas.some(entrada => entrada.isIntersecting)){
+        observador.disconnect();
+        _carregarDesempenhoComercial();
+      }
+    }, { rootMargin: "600px 0px" });
+    observador.observe(secao);
+  }
 
 
 
@@ -6144,10 +6385,10 @@ document.addEventListener("DOMContentLoaded", function(){
   _atualizarQuerystring();
   _sincronizarEmpresasSegmentoReceita();
   _sincronizarConcorrentes();
+  _agendarCarregamentoDesempenho();
   _atualizarGrafico();
   _renderCustoRosca();
 
 })();
 </script>
 {% endblock %}
-

@@ -1941,6 +1941,25 @@
           </div>
         </details>
 
+          <details class="vc-dd" data-dd="tipo">
+          <summary class="vc-dd-summary">
+            <span class="vc-dd-label" data-default="Tipo">Tipo</span>
+            <span class="vc-dd-caret">▾</span>
+          </summary>
+          <div class="vc-dd-panel">
+            <input type="text" class="vc-dd-search" placeholder="Pesquisar tipo..." autocomplete="off">
+            <div class="vc-dd-hint">Selecione um ou mais tipos</div>
+            <label class="vc-dd-item">
+              <input type="checkbox" name="tipo" value="" data-dd-all="1" {% if not tipos_selecionados %}checked{% endif %}>
+              <span class="vc-dd-text">(Todos)</span>
+            </label>
+            <label class="vc-dd-item">
+              <input type="checkbox" name="tipo" value="RENOVACAO_AUTOMATICA" {% if 'RENOVACAO_AUTOMATICA' in tipos_selecionados %}checked{% endif %}>
+              <span class="vc-dd-text">Renovação Automática</span>
+            </label>
+          </div>
+        </details>
+
           <details class="vc-dd" data-dd="marca">
           <summary class="vc-dd-summary">
             <span class="vc-dd-label" data-default="Marca">Marca</span>
@@ -2014,7 +2033,7 @@
 
           <button type="submit" class="btn btn-primary">Pesquisar</button>
 
-        {% if q or status_ids_selecionados or marcas_selecionadas or vendedores_ids_selecionados or periodo_filtro_ativo %}
+        {% if q or status_ids_selecionados or tipos_selecionados or marcas_selecionadas or vendedores_ids_selecionados or periodo_filtro_ativo %}
           <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia') }}">Limpar filtro</a>
         {% endif %}
         </div>
@@ -2308,8 +2327,8 @@
       <div class="vc-footer">
         <div class="vc-pages">
           {% if paginacao.page > 1 %}
-            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=1) }}">« Primeiro</a>
-            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=paginacao.page-1) }}">‹ Anterior</a>
+            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, tipo=tipos_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=1) }}">« Primeiro</a>
+            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, tipo=tipos_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=paginacao.page-1) }}">‹ Anterior</a>
           {% else %}
             <span class="btn btn-secondary" style="opacity:.5;pointer-events:none;">« Primeiro</span>
             <span class="btn btn-secondary" style="opacity:.5;pointer-events:none;">‹ Anterior</span>
@@ -2319,13 +2338,13 @@
             {% if p == paginacao.page %}
               <span class="btn btn-primary" style="pointer-events:none;">{{ p }}</span>
             {% else %}
-              <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=p) }}">{{ p }}</a>
+              <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, tipo=tipos_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=p) }}">{{ p }}</a>
             {% endif %}
           {% endfor %}
 
           {% if paginacao.page < paginacao.total_pages %}
-            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=paginacao.page+1) }}">Próximo ›</a>
-            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=paginacao.total_pages) }}">Último »</a>
+            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, tipo=tipos_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=paginacao.page+1) }}">Próximo ›</a>
+            <a class="btn btn-secondary" href="{{ url_for('admin.vencimentos_campanhas_euromidia', q=q, dt_ini=dt_ini, dt_fim=dt_fim, bi_semana=bi_semana_filtro, status=status_ids_selecionados, tipo=tipos_selecionados, marca=marcas_selecionadas, vendedor=vendedores_ids_selecionados, page=paginacao.total_pages) }}">Último »</a>
           {% else %}
             <span class="btn btn-secondary" style="opacity:.5;pointer-events:none;">Próximo ›</span>
             <span class="btn btn-secondary" style="opacity:.5;pointer-events:none;">Último »</span>
@@ -2795,6 +2814,8 @@
         label.textContent = 'Todas as marcas';
       }else if(padrao === 'Vendedor'){
         label.textContent = 'Todos os vendedores';
+      }else if(padrao === 'Tipo'){
+        label.textContent = 'Todos os tipos';
       }else{
         label.textContent = 'Todos os status';
       }
@@ -2876,6 +2897,9 @@
     const dados = new FormData(form);
     dados.getAll('status').forEach(function(valor){
       if(String(valor || '').trim()){ params.append('status', valor); }
+    });
+    dados.getAll('tipo').forEach(function(valor){
+      if(String(valor || '').trim()){ params.append('tipo', valor); }
     });
     dados.getAll('marca').forEach(function(valor){
       if(String(valor || '').trim()){ params.append('marca', valor); }

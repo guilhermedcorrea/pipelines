@@ -1419,7 +1419,7 @@ def usuarios_lista():
 @requer_permissao("USUARIOS_EDITAR")
 def usuarios_editar(id_usuario):
     """usuarios_editar
-    Eu edito o perfil do usuário e suas permissões individuais.
+    Eu edito o e-mail, o perfil, a senha e as permissões individuais do usuário.
 
     Regra:
     - HERDAR: usa a permissão do perfil.
@@ -1477,6 +1477,33 @@ def usuarios_editar(id_usuario):
 
             id_perfil = int(id_perfil_raw)
             bit_ativo = request.form.get("bit_ativo") == "1"
+
+            email = _email_normalizado(request.form.get("email"))
+
+            if not _email_tem_formato_minimo(email):
+                flash("Informe um e-mail válido, com no máximo 254 caracteres.", "danger")
+                return redirect(
+                    url_for(
+                        "Autenticacao.usuarios_editar",
+                        id_usuario=usuario.IDDimUsuarios,
+                    )
+                )
+
+            usuario_com_mesmo_email = (
+                db.session.query(DimUsuarios.IDDimUsuarios)
+                .filter(func.lower(DimUsuarios.Email) == email)
+                .filter(DimUsuarios.IDDimUsuarios != usuario.IDDimUsuarios)
+                .first()
+            )
+
+            if usuario_com_mesmo_email:
+                flash("Este e-mail já está cadastrado para outro usuário.", "danger")
+                return redirect(
+                    url_for(
+                        "Autenticacao.usuarios_editar",
+                        id_usuario=usuario.IDDimUsuarios,
+                    )
+                )
 
             nova_senha_admin = _texto(request.form.get("nova_senha_admin"))
             confirmar_senha_admin = _texto(request.form.get("confirmar_senha_admin"))
@@ -1546,6 +1573,7 @@ def usuarios_editar(id_usuario):
             parametros_update_usuario = {
                 "id_perfil": int(id_perfil),
                 "bit_ativo": 1 if bit_ativo else 0,
+                "email": email,
                 "agora": agora,
                 "id_usuario": id_usuario_int,
             }
@@ -1557,6 +1585,7 @@ def usuarios_editar(id_usuario):
                     SET
                         IDDimPerfilUsuario = :id_perfil,
                         BitAtivo = :bit_ativo,
+                        Email = :email,
                         HashSenha = :hash_senha,
                         UpdateAt = :agora
                     WHERE IDDimUsuarios = :id_usuario
@@ -1567,6 +1596,7 @@ def usuarios_editar(id_usuario):
                     SET
                         IDDimPerfilUsuario = :id_perfil,
                         BitAtivo = :bit_ativo,
+                        Email = :email,
                         UpdateAt = :agora
                     WHERE IDDimUsuarios = :id_usuario
                 """
@@ -1636,9 +1666,9 @@ def usuarios_editar(id_usuario):
             db.session.expire_all()
 
             if hash_senha_nova:
-                flash("Usuário, permissões e senha atualizados com sucesso.", "success")
+                flash("Usuário, e-mail, permissões e senha atualizados com sucesso.", "success")
             else:
-                flash("Usuário atualizado com sucesso.", "success")
+                flash("Usuário, e-mail e permissões atualizados com sucesso.", "success")
 
             return redirect(
                 url_for(

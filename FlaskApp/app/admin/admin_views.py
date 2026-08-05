@@ -21852,6 +21852,28 @@ def _campanhas_vencimentos_normalizar_lista_texto(valores) -> list[str]:
     return resultado
 
 
+TIPO_VENCIMENTO_RENOVACAO_AUTOMATICA = "RENOVACAO_AUTOMATICA"
+
+
+def _campanhas_vencimentos_normalizar_tipos(valores) -> list[str]:
+    """Aceita somente os tipos de campanha suportados pela tela.
+
+    O valor enviado pelo navegador nunca é usado como trecho SQL. Essa lista
+    de permissão mantém o filtro previsível e evita que parâmetros desconhecidos
+    alterem a semântica da consulta.
+    """
+
+    tipos_permitidos = {TIPO_VENCIMENTO_RENOVACAO_AUTOMATICA}
+    return [
+        tipo_normalizado
+        for tipo_normalizado in (
+            str(valor or "").strip().upper()
+            for valor in (valores or [])
+        )
+        if tipo_normalizado in tipos_permitidos
+    ][:1]
+
+
 def _campanhas_vencimentos_marca_sql() -> str:
     """Expressão SQL da marca exibida na origem unificada de campanhas + reservas."""
 
@@ -21940,6 +21962,7 @@ def _campanhas_vencimentos_montar_filtros_sql(
     *,
     q: str,
     status_ids_selecionados: list[int],
+    tipos_selecionados: list[str],
     marcas_selecionadas: list[str],
     vendedores_ids_selecionados: list[int],
     usuario_logado_eh_vendedor: bool,
@@ -21998,6 +22021,12 @@ def _campanhas_vencimentos_montar_filtros_sql(
     if data_fim_filtro is not None:
         filtros_sql.append("vc.DataTermino IS NOT NULL AND CAST(vc.DataTermino AS date) <= :data_fim_filtro")
         params["data_fim_filtro"] = data_fim_filtro
+
+    if TIPO_VENCIMENTO_RENOVACAO_AUTOMATICA in tipos_selecionados:
+        # Renovação automática representa as campanhas cujo item possui um
+        # agendamento/fatiamento ativo na FatoAgendamentoFaceContrato. O bit é
+        # produzido na origem unificada; reservas recebem zero e ficam fora.
+        filtros_sql.append("ISNULL(vc.BitOcupacaoFatiada, 0) = 1")
 
     _campanhas_vencimentos_adicionar_filtro_in(
         filtros_sql,
@@ -25812,6 +25841,7 @@ def vencimentos_campanhas_euromidia():
 
     q = (request.args.get("q") or "").strip()[:160]
     status_ids_selecionados = _campanhas_vencimentos_normalizar_lista_int(request.args.getlist("status"))
+    tipos_selecionados = _campanhas_vencimentos_normalizar_tipos(request.args.getlist("tipo"))
     marcas_selecionadas = _campanhas_vencimentos_normalizar_lista_texto(request.args.getlist("marca"))
     vendedores_ids_selecionados = _campanhas_vencimentos_normalizar_lista_int(request.args.getlist("vendedor")) if usuario_logado_eh_admin else []
 
@@ -25841,6 +25871,7 @@ def vencimentos_campanhas_euromidia():
     where_sql, params = _campanhas_vencimentos_montar_filtros_sql(
         q=q,
         status_ids_selecionados=status_ids_selecionados,
+        tipos_selecionados=tipos_selecionados,
         marcas_selecionadas=marcas_selecionadas,
         vendedores_ids_selecionados=vendedores_ids_selecionados,
         usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,
@@ -26054,6 +26085,7 @@ def vencimentos_campanhas_euromidia():
         periodo_filtro_ativo=periodo_filtro_ativo,
         bisemanas_select=bisemanas_select,
         status_ids_selecionados=status_ids_selecionados,
+        tipos_selecionados=tipos_selecionados,
         marcas_selecionadas=marcas_selecionadas,
         vendedores_ids_selecionados=vendedores_ids_selecionados,
         paginacao={
@@ -26086,6 +26118,7 @@ def vencimentos_campanhas_sugestoes():
         return jsonify({"ok": True, "items": []})
 
     status_ids_selecionados = _campanhas_vencimentos_normalizar_lista_int(request.args.getlist("status"))
+    tipos_selecionados = _campanhas_vencimentos_normalizar_tipos(request.args.getlist("tipo"))
     marcas_selecionadas = _campanhas_vencimentos_normalizar_lista_texto(request.args.getlist("marca"))
     vendedores_ids_selecionados = _campanhas_vencimentos_normalizar_lista_int(request.args.getlist("vendedor")) if usuario_logado_eh_admin else []
 
@@ -26104,6 +26137,7 @@ def vencimentos_campanhas_sugestoes():
     where_sql, params = _campanhas_vencimentos_montar_filtros_sql(
         q=q,
         status_ids_selecionados=status_ids_selecionados,
+        tipos_selecionados=tipos_selecionados,
         marcas_selecionadas=marcas_selecionadas,
         vendedores_ids_selecionados=vendedores_ids_selecionados,
         usuario_logado_eh_vendedor=usuario_logado_eh_vendedor,

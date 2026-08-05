@@ -4158,10 +4158,10 @@ def lista_paineis():
     if codpontos_pagina:
         partes_sql_ocupacoes_lista = ["""
             SELECT
-                 IDFatoOcupacaoPaineisEuromidia = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                 IDFatoOcupacaoPaineisEuromidia = oc.IDFatoOcupacaoPaineisEuromidia
                 ,IDItemRepresentante = COALESCE(
-                     TRY_CONVERT(int, item_representante.IDFatoControleContratosItensEuromidia),
-                     TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                     item_representante.IDFatoControleContratosItensEuromidia,
+                     oc.IDFatoControleContratosItemOrigem
                  )
                 ,CodPonto = TRY_CONVERT(int, oc.CodPonto)
                 ,CodFace = LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), '')))
@@ -4175,27 +4175,27 @@ def lista_paineis():
                     i_rep.IDFatoControleContratosItensEuromidia
                 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i_rep WITH (NOLOCK)
                 WHERE
-                       TRY_CONVERT(int, i_rep.IDFatoControleContratosItensEuromidia)
-                           = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                       i_rep.IDFatoControleContratosItensEuromidia
+                           = oc.IDFatoControleContratosItemOrigem
                     OR EXISTS
                     (
                         SELECT 1
                         FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_rep WITH (NOLOCK)
-                        WHERE TRY_CONVERT(int, vinc_rep.IDFatoOcupacaoPaineisEuromidia)
-                                  = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
-                          AND TRY_CONVERT(int, vinc_rep.IDFatoControleContratosItensEuromidia)
-                                  = TRY_CONVERT(int, i_rep.IDFatoControleContratosItensEuromidia)
+                        WHERE vinc_rep.IDFatoOcupacaoPaineisEuromidia
+                                  = oc.IDFatoOcupacaoPaineisEuromidia
+                          AND vinc_rep.IDFatoControleContratosItensEuromidia
+                                  = i_rep.IDFatoControleContratosItensEuromidia
                     )
                 ORDER BY
                      CASE
-                         WHEN TRY_CONVERT(int, i_rep.IDFatoControleContratosItensEuromidia)
-                                  = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                         WHEN i_rep.IDFatoControleContratosItensEuromidia
+                                  = oc.IDFatoControleContratosItemOrigem
                              THEN 0
                          ELSE 1
                       END
                     ,LEN(COALESCE(i_rep.NumeroContrato, '')) DESC
                     ,LEN(COALESCE(i_rep.NumeroPrevia, '')) DESC
-                    ,TRY_CONVERT(int, i_rep.IDFatoControleContratosItensEuromidia) DESC
+                    ,i_rep.IDFatoControleContratosItensEuromidia DESC
             ) AS item_representante
             WHERE TRY_CONVERT(int, oc.CodPonto) IN :codpontos_ocupacao_lista
               AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(30), oc.Origem), ''))))
@@ -4232,16 +4232,16 @@ def lista_paineis():
         # transformar as três marcas/empresas em três consumos de capacidade.
         relacao_item_ocupacao = """
             (
-                   TRY_CONVERT(int, item_filtro.IDFatoControleContratosItensEuromidia)
-                       = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                   item_filtro.IDFatoControleContratosItensEuromidia
+                       = oc.IDFatoControleContratosItemOrigem
                 OR EXISTS
                 (
                     SELECT 1
                     FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_rel WITH (NOLOCK)
-                    WHERE TRY_CONVERT(int, vinc_rel.IDFatoOcupacaoPaineisEuromidia)
-                              = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
-                      AND TRY_CONVERT(int, vinc_rel.IDFatoControleContratosItensEuromidia)
-                              = TRY_CONVERT(int, item_filtro.IDFatoControleContratosItensEuromidia)
+                    WHERE vinc_rel.IDFatoOcupacaoPaineisEuromidia
+                              = oc.IDFatoOcupacaoPaineisEuromidia
+                      AND vinc_rel.IDFatoControleContratosItensEuromidia
+                              = item_filtro.IDFatoControleContratosItensEuromidia
                 )
             )
         """
@@ -4284,10 +4284,10 @@ def lista_paineis():
                 "         SELECT 1"
                 "         FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_marca WITH (NOLOCK)"
                 "         LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_marca WITH (NOLOCK)"
-                "           ON TRY_CONVERT(int, item_marca.IDFatoControleContratosItensEuromidia)"
-                "              = TRY_CONVERT(int, vinc_marca.IDFatoControleContratosItensEuromidia)"
-                "         WHERE TRY_CONVERT(int, vinc_marca.IDFatoOcupacaoPaineisEuromidia)"
-                "                   = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)"
+                "           ON item_marca.IDFatoControleContratosItensEuromidia"
+                "              = vinc_marca.IDFatoControleContratosItensEuromidia"
+                "         WHERE vinc_marca.IDFatoOcupacaoPaineisEuromidia"
+                "                   = oc.IDFatoOcupacaoPaineisEuromidia"
                 "           AND ("
                 "                  LTRIM(RTRIM(COALESCE(CONVERT(nvarchar(200), vinc_marca.Marca), '')))"
                 "                      COLLATE Latin1_General_CI_AI IN :marcas_ocupacao_lista"
@@ -4298,8 +4298,8 @@ def lista_paineis():
                 "    OR EXISTS ("
                 "         SELECT 1"
                 "         FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_origem_marca WITH (NOLOCK)"
-                "         WHERE TRY_CONVERT(int, item_origem_marca.IDFatoControleContratosItensEuromidia)"
-                "                   = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)"
+                "         WHERE item_origem_marca.IDFatoControleContratosItensEuromidia"
+                "                   = oc.IDFatoControleContratosItemOrigem"
                 "           AND LTRIM(RTRIM(COALESCE(CONVERT(nvarchar(200), item_origem_marca.MarcaExibida), '')))"
                 "                   COLLATE Latin1_General_CI_AI IN :marcas_ocupacao_lista"
                 "       )"
@@ -4312,7 +4312,7 @@ def lista_paineis():
             " ORDER BY TRY_CONVERT(int, oc.CodPonto), "
             "LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), ''))), "
             "TRY_CONVERT(date, oc.DataInicio), "
-            "TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia) "
+            "oc.IDFatoOcupacaoPaineisEuromidia "
         )
 
         stmt_ocupacoes_lista = text("".join(partes_sql_ocupacoes_lista)).bindparams(
@@ -4338,15 +4338,15 @@ def lista_paineis():
         if ids_itens_representantes_lista:
             stmt_fim_preferencia_lista = text("""
                 SELECT
-                     TRY_CONVERT(int, oc_res.[IDFatoControleContratosItemOrigem]) AS IDItemRepresentante
+                     oc_res.[IDFatoControleContratosItemOrigem] AS IDItemRepresentante
                     ,MAX(TRY_CONVERT(date, oc_res.[DataFim])) AS DataFimReservaPreferencia
                 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc_res WITH (NOLOCK)
                 INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci_res WITH (NOLOCK)
-                    ON TRY_CONVERT(int, ci_res.[IDFatoControleContratosItensEuromidia])
-                         = TRY_CONVERT(int, oc_res.[IDFatoControleContratosItemOrigem])
-                   AND TRY_CONVERT(int, ci_res.[IDFatoControleContratoEuromidia])
-                         = TRY_CONVERT(int, oc_res.[IDFatoControleContratos])
-                WHERE TRY_CONVERT(int, oc_res.[IDFatoControleContratosItemOrigem])
+                    ON ci_res.[IDFatoControleContratosItensEuromidia]
+                         = oc_res.[IDFatoControleContratosItemOrigem]
+                   AND ci_res.[IDFatoControleContratoEuromidia]
+                         = oc_res.[IDFatoControleContratos]
+                WHERE oc_res.[IDFatoControleContratosItemOrigem]
                           IN :ids_itens_representantes_lista
                   AND UPPER(LTRIM(RTRIM(ISNULL(oc_res.[Origem], ''))))
                         COLLATE Latin1_General_CI_AI = 'RESERVA'
@@ -4382,7 +4382,7 @@ def lista_paineis():
                      OR UPPER(ISNULL(oc_res.[Observacao], ''))
                             COLLATE Latin1_General_CI_AI LIKE '%RENOVAÇÃO_CAMPANHA%'
                   )
-                GROUP BY TRY_CONVERT(int, oc_res.[IDFatoControleContratosItemOrigem])
+                GROUP BY oc_res.[IDFatoControleContratosItemOrigem]
             """).bindparams(bindparam("ids_itens_representantes_lista", expanding=True))
 
             rows_fim_preferencia_lista = db.session.execute(
@@ -6076,11 +6076,11 @@ def grade_painel(codponto: int):
             SELECT
                  IDItem = COALESCE(
                      item_representante.IDFatoControleContratosItensEuromidia,
-                     TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem),
-                     TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                     oc.IDFatoControleContratosItemOrigem,
+                     oc.IDFatoOcupacaoPaineisEuromidia
                  )
                 ,IDContrato = COALESCE(
-                     TRY_CONVERT(int, oc.IDFatoControleContratos),
+                     oc.IDFatoControleContratos,
                      item_representante.IDFatoControleContratoEuromidia
                  )
                 ,CodFace = LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), '')))
@@ -6113,14 +6113,14 @@ def grade_painel(codponto: int):
                 ,FaturamentoLiquidoFinalMensal = item_representante.FaturamentoLiquidoFinalMensal
                 ,TotalLiquidoContratoAGBRCTACORDO = item_representante.TotalLiquidoContratoAGBRCTACORDO
                 ,IDVendedor = COALESCE(
-                     TRY_CONVERT(int, oc.IDVendedor),
-                     TRY_CONVERT(int, item_representante.IDVendedor)
+                     oc.IDVendedor,
+                     item_representante.IDVendedor
                  )
                 ,LoopInicio = oc.LoopInicio
                 ,LoopFim = oc.LoopFim
                 ,TipoReserva = CAST(NULL AS int)
                 ,ExpiraEm = CAST(NULL AS datetime2(0))
-                ,IDFatoOcupacaoPaineisEuromidia = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                ,IDFatoOcupacaoPaineisEuromidia = oc.IDFatoOcupacaoPaineisEuromidia
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
             OUTER APPLY
             (
@@ -6136,27 +6136,27 @@ def grade_painel(codponto: int):
                     ,i.IDVendedor
                 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i WITH (NOLOCK)
                 WHERE
-                       TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
-                           = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                       i.IDFatoControleContratosItensEuromidia
+                           = oc.IDFatoControleContratosItemOrigem
                     OR EXISTS
                     (
                         SELECT 1
                         FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_item WITH (NOLOCK)
-                        WHERE TRY_CONVERT(int, vinc_item.IDFatoOcupacaoPaineisEuromidia)
-                                  = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
-                          AND TRY_CONVERT(int, vinc_item.IDFatoControleContratosItensEuromidia)
-                                  = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                        WHERE vinc_item.IDFatoOcupacaoPaineisEuromidia
+                                  = oc.IDFatoOcupacaoPaineisEuromidia
+                          AND vinc_item.IDFatoControleContratosItensEuromidia
+                                  = i.IDFatoControleContratosItensEuromidia
                     )
                 ORDER BY
                      CASE
-                         WHEN TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
-                                  = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                         WHEN i.IDFatoControleContratosItensEuromidia
+                                  = oc.IDFatoControleContratosItemOrigem
                              THEN 0
                          ELSE 1
                       END
                     ,LEN(COALESCE(i.NumeroContrato, '')) DESC
                     ,LEN(COALESCE(i.NumeroPrevia, '')) DESC
-                    ,TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia) DESC
+                    ,i.IDFatoControleContratosItensEuromidia DESC
             ) AS item_representante
             OUTER APPLY
             (
@@ -6183,8 +6183,8 @@ def grade_painel(codponto: int):
                                         )
                                     )
                                 FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_marca_barra WITH (NOLOCK)
-                                WHERE TRY_CONVERT(int, vinc_marca_barra.IDFatoOcupacaoPaineisEuromidia)
-                                          = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                                WHERE vinc_marca_barra.IDFatoOcupacaoPaineisEuromidia
+                                          = oc.IDFatoOcupacaoPaineisEuromidia
                                   AND NULLIF(
                                         LTRIM(RTRIM(CONVERT(nvarchar(4000), vinc_marca_barra.Marca))),
                                         ''
@@ -6289,10 +6289,10 @@ def grade_painel(codponto: int):
                         SELECT 1
                         FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_marca WITH (NOLOCK)
                         LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_marca WITH (NOLOCK)
-                            ON TRY_CONVERT(int, item_marca.IDFatoControleContratosItensEuromidia)
-                               = TRY_CONVERT(int, vinc_marca.IDFatoControleContratosItensEuromidia)
-                        WHERE TRY_CONVERT(int, vinc_marca.IDFatoOcupacaoPaineisEuromidia)
-                                  = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                            ON item_marca.IDFatoControleContratosItensEuromidia
+                               = vinc_marca.IDFatoControleContratosItensEuromidia
+                        WHERE vinc_marca.IDFatoOcupacaoPaineisEuromidia
+                                  = oc.IDFatoOcupacaoPaineisEuromidia
                           AND
                           (
                                  COALESCE(CONVERT(nvarchar(200), vinc_marca.Marca), '')
@@ -6349,10 +6349,10 @@ def grade_painel(codponto: int):
                     " SELECT 1"
                     " FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_vendedor WITH (NOLOCK)"
                     " INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_vendedor WITH (NOLOCK)"
-                    "   ON TRY_CONVERT(int, item_vendedor.IDFatoControleContratosItensEuromidia)"
-                    "      = TRY_CONVERT(int, vinc_vendedor.IDFatoControleContratosItensEuromidia)"
-                    " WHERE TRY_CONVERT(int, vinc_vendedor.IDFatoOcupacaoPaineisEuromidia)"
-                    "       = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)"
+                    "   ON item_vendedor.IDFatoControleContratosItensEuromidia"
+                    "      = vinc_vendedor.IDFatoControleContratosItensEuromidia"
+                    " WHERE vinc_vendedor.IDFatoOcupacaoPaineisEuromidia"
+                    "       = oc.IDFatoOcupacaoPaineisEuromidia"
                     "   AND (" + " OR ".join(filtros_vinculo_vendedor) + ")"
                     ")"
                 )
@@ -6372,15 +6372,15 @@ def grade_painel(codponto: int):
                 """
                 AND
                 (
-                       TRY_CONVERT(int, oc.IDFatoControleContratos) IN :contratos_segmento_ocupacao
-                    OR TRY_CONVERT(int, item_representante.IDFatoControleContratoEuromidia) IN :contratos_segmento_ocupacao
+                       oc.IDFatoControleContratos IN :contratos_segmento_ocupacao
+                    OR item_representante.IDFatoControleContratoEuromidia IN :contratos_segmento_ocupacao
                     OR EXISTS
                     (
                         SELECT 1
                         FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_segmento WITH (NOLOCK)
-                        WHERE TRY_CONVERT(int, vinc_segmento.IDFatoOcupacaoPaineisEuromidia)
-                                  = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
-                          AND TRY_CONVERT(int, vinc_segmento.IDFatoControleContratosEuromidia)
+                        WHERE vinc_segmento.IDFatoOcupacaoPaineisEuromidia
+                                  = oc.IDFatoOcupacaoPaineisEuromidia
+                          AND vinc_segmento.IDFatoControleContratosEuromidia
                                   IN :contratos_segmento_ocupacao
                     )
                 )
@@ -6391,7 +6391,7 @@ def grade_painel(codponto: int):
             " ORDER BY "
             " LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), ''))) ASC,"
             " TRY_CONVERT(date, oc.DataInicio) ASC,"
-            " TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia) ASC "
+            " oc.IDFatoOcupacaoPaineisEuromidia ASC "
         )
 
         stmt_ocupacoes = sql_text("".join(partes_sql))
@@ -6437,13 +6437,13 @@ def grade_painel(codponto: int):
         if ids_itens_contrato_grade:
             sql_fim_reserva_preferencia_grade = sql_text("""
                 SELECT
-                     TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) AS IDFatoControleContratosItensEuromidia
+                     oc.[IDFatoControleContratosItemOrigem] AS IDFatoControleContratosItensEuromidia
                     ,MAX(TRY_CONVERT(date, oc.[DataFim])) AS DataFimReservaPreferencia
                 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
                 INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
-                    ON TRY_CONVERT(int, ci.[IDFatoControleContratosItensEuromidia]) = TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem])
-                   AND TRY_CONVERT(int, ci.[IDFatoControleContratoEuromidia]) = TRY_CONVERT(int, oc.[IDFatoControleContratos])
-                WHERE TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) IN :ids_itens_contrato_grade
+                    ON ci.[IDFatoControleContratosItensEuromidia] = oc.[IDFatoControleContratosItemOrigem]
+                   AND ci.[IDFatoControleContratoEuromidia] = oc.[IDFatoControleContratos]
+                WHERE oc.[IDFatoControleContratosItemOrigem] IN :ids_itens_contrato_grade
                   AND UPPER(LTRIM(RTRIM(ISNULL(oc.[Origem], '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
                   AND UPPER(LTRIM(RTRIM(ISNULL(oc.[Status], '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
                   AND oc.[CanceladoEm] IS NULL
@@ -6466,7 +6466,7 @@ def grade_painel(codponto: int):
                      OR UPPER(ISNULL(oc.[Observacao], '')) COLLATE Latin1_General_CI_AI LIKE '%RENOVAÇÃO_CAMPANHA%'
                   )
                 GROUP BY
-                    TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem])
+                    oc.[IDFatoControleContratosItemOrigem]
             """).bindparams(bindparam("ids_itens_contrato_grade", expanding=True))
 
             rows_fim_reserva_preferencia = db.session.execute(
@@ -6517,8 +6517,8 @@ def grade_painel(codponto: int):
     #   algum campo com tipo não textual ou com tipo incompatível no ISNULL.
     sql_reservas_grade = sql_text("""
         SELECT
-             TRY_CONVERT(int, oc.[IDFatoOcupacaoPaineisEuromidia]) AS IDFatoOcupacaoPaineisEuromidia
-            ,TRY_CONVERT(int, oc.[IDFatoControleContratos]) AS IDFatoControleContratos
+             oc.[IDFatoOcupacaoPaineisEuromidia] AS IDFatoOcupacaoPaineisEuromidia
+            ,oc.[IDFatoControleContratos] AS IDFatoControleContratos
             ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[CodFace]), ''))) AS CodFace
             ,oc.[MarcaExibida]
             ,oc.[Vendedor]
@@ -6532,15 +6532,15 @@ def grade_painel(codponto: int):
             ,oc.[LoopInicio]
             ,oc.[LoopFim]
             ,TRY_CONVERT(int, oc.[SpanQtd]) AS SpanQtd
-            ,TRY_CONVERT(int, oc.[IDVendedor]) AS IDVendedor
-            ,TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) AS IDFatoControleContratosItemOrigem
+            ,oc.[IDVendedor] AS IDVendedor
+            ,oc.[IDFatoControleContratosItemOrigem] AS IDFatoControleContratosItemOrigem
             ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(250), oc.[TipoVinculoOrigem]), ''))) AS TipoVinculoOrigem
             ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(500), oc.[Observacao]), ''))) AS Observacao
             ,CASE
                 WHEN EXISTS (
                     SELECT 1
                     FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci_pref WITH (NOLOCK)
-                    WHERE TRY_CONVERT(int, ci_pref.[IDFatoControleContratosItensEuromidia]) = TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem])
+                    WHERE ci_pref.[IDFatoControleContratosItensEuromidia] = oc.[IDFatoControleContratosItemOrigem]
                       AND ISNULL(TRY_CONVERT(int, ci_pref.[BitPreferencia]), 0) = 1
                       AND ISNULL(TRY_CONVERT(int, ci_pref.[BitAtivo]), 1) = 1
                 ) THEN 1
@@ -6555,11 +6555,11 @@ def grade_painel(codponto: int):
                 ,CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 105), 120)
                 ,NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), oc.[ExpiraEm]))), '')
              ) AS ExpiraEm
-            ,TRY_CONVERT(int, oc.[CriadoPorIDUsuario]) AS IDUsuarioCriadorReserva
+            ,oc.[CriadoPorIDUsuario] AS IDUsuarioCriadorReserva
         FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
         WHERE (
                 oc.[CodPonto] = :codponto
-                OR TRY_CONVERT(int, oc.[IDPainelEuromidia]) IN :ids_paineis_grade
+                OR oc.[IDPainelEuromidia] IN :ids_paineis_grade
               )
           AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[Origem]), '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
           AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[Status]), '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
@@ -6572,7 +6572,7 @@ def grade_painel(codponto: int):
              LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[CodFace]), ''))) ASC
             ,TRY_CONVERT(date, oc.[DataInicio]) ASC
             ,TRY_CONVERT(date, oc.[DataFim]) ASC
-            ,TRY_CONVERT(int, oc.[IDFatoOcupacaoPaineisEuromidia]) ASC;
+            ,oc.[IDFatoOcupacaoPaineisEuromidia] ASC;
     """).bindparams(bindparam("ids_paineis_grade", expanding=True))
 
     rows_reservas_raw = db.session.execute(
@@ -6853,12 +6853,12 @@ def grade_painel(codponto: int):
                         ,TRY_CONVERT(date, ci.[DataInicioPrevisto]) AS DataInicioItem
                         ,TRY_CONVERT(date, ci.[DataTerminoPrevisto]) AS DataTerminoItem
                         ,COALESCE(
-                            TRY_CONVERT(int, ci.[IDPainelEuromidia]),
-                            TRY_CONVERT(int, f.[IDDimPaineisEuromidia])
+                            ci.[IDPainelEuromidia],
+                            f.[IDDimPaineisEuromidia]
                          ) AS IDPainelEuromidia
                         ,COALESCE(
-                            TRY_CONVERT(int, ci.[IDDimFacesPaineis]),
-                            TRY_CONVERT(int, f.[IDDimFacesPaineis])
+                            ci.[IDDimFacesPaineis],
+                            f.[IDDimFacesPaineis]
                          ) AS IDDimFacesPaineis
                     FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
                     LEFT JOIN [Integracao].[Silver].[DimFacesPaineis] AS f WITH (NOLOCK)
@@ -6886,19 +6886,19 @@ def grade_painel(codponto: int):
                    AND TRY_CONVERT(date, pri.[DataTerminoPrevisto]) >= ig.[DataInicioItem]
                    AND (
                         (
-                            TRY_CONVERT(int, pri.[IDDimFacesPaineis]) IS NOT NULL
-                            AND TRY_CONVERT(int, pri.[IDDimFacesPaineis]) > 0
-                            AND TRY_CONVERT(int, pri.[IDDimFacesPaineis]) = ig.[IDDimFacesPaineis]
+                            pri.[IDDimFacesPaineis] IS NOT NULL
+                            AND pri.[IDDimFacesPaineis] > 0
+                            AND pri.[IDDimFacesPaineis] = ig.[IDDimFacesPaineis]
                         )
                         OR
                         (
                             (
-                                TRY_CONVERT(int, pri.[IDDimFacesPaineis]) IS NULL
-                                OR TRY_CONVERT(int, pri.[IDDimFacesPaineis]) = 0
+                                pri.[IDDimFacesPaineis] IS NULL
+                                OR pri.[IDDimFacesPaineis] = 0
                             )
-                            AND TRY_CONVERT(int, pri.[IDPainelEuromidia]) IS NOT NULL
-                            AND TRY_CONVERT(int, pri.[IDPainelEuromidia]) > 0
-                            AND TRY_CONVERT(int, pri.[IDPainelEuromidia]) = ig.[IDPainelEuromidia]
+                            AND pri.[IDPainelEuromidia] IS NOT NULL
+                            AND pri.[IDPainelEuromidia] > 0
+                            AND pri.[IDPainelEuromidia] = ig.[IDPainelEuromidia]
                         )
                    )
                 GROUP BY ig.[IDFatoControleContratosItensEuromidia]
@@ -6930,8 +6930,8 @@ def grade_painel(codponto: int):
             sql_bit_preferencia_agendamento_grade = sql_text("""
                 WITH ItensGrade AS (
                     SELECT
-                         TRY_CONVERT(int, ci.[IDFatoControleContratosItensEuromidia]) AS IDFatoControleContratosItensEuromidia
-                        ,TRY_CONVERT(int, ci.[IDFatoControleContratoEuromidia]) AS IDFatoControleContratosEuromidia
+                         ci.[IDFatoControleContratosItensEuromidia] AS IDFatoControleContratosItensEuromidia
+                        ,ci.[IDFatoControleContratoEuromidia] AS IDFatoControleContratosEuromidia
                     FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
                     WHERE ci.[IDFatoControleContratosItensEuromidia] IN :ids_itens_grade
                 ),
@@ -6943,8 +6943,8 @@ def grade_painel(codponto: int):
                         ,TRY_CONVERT(date, ag.[DataTermino]) AS DataTerminoAgendamento
                     FROM [Integracao].[Silver].[FatoAgendamentoFaceContrato] AS ag WITH (NOLOCK)
                     INNER JOIN ItensGrade AS ig
-                        ON TRY_CONVERT(int, ag.[IDFatoControleContratosEuromidia]) = ig.[IDFatoControleContratosEuromidia]
-                       AND TRY_CONVERT(int, ag.[IDFatoControleContratosItensEuromidia]) = ig.[IDFatoControleContratosItensEuromidia]
+                        ON ag.[IDFatoControleContratosEuromidia] = ig.[IDFatoControleContratosEuromidia]
+                       AND ag.[IDFatoControleContratosItensEuromidia] = ig.[IDFatoControleContratosItensEuromidia]
                     WHERE ISNULL(TRY_CONVERT(int, ag.[BitAtivo]), 1) = 1
                       AND UPPER(LTRIM(RTRIM(COALESCE(ag.[Situacao], '')))) NOT IN ('CANCELADO', 'CANCELADA', 'INATIVO', 'INATIVA')
                       AND TRY_CONVERT(date, ag.[DataInicio]) IS NOT NULL
@@ -7012,9 +7012,9 @@ def grade_painel(codponto: int):
             sql_bit_preferencia_contrato_ocupacao_grade = sql_text("""
                 WITH ItensGrade AS (
                     SELECT
-                         TRY_CONVERT(int, ci.[IDFatoControleContratosItensEuromidia]) AS IDFatoControleContratosItensEuromidia
-                        ,TRY_CONVERT(int, ci.[IDFatoControleContratoEuromidia]) AS IDFatoControleContratosEuromidia
-                        ,TRY_CONVERT(int, c.[IDFatoControleContratosEuromidia]) AS IDFatoControleContratosCabecalho
+                         ci.[IDFatoControleContratosItensEuromidia] AS IDFatoControleContratosItensEuromidia
+                        ,ci.[IDFatoControleContratoEuromidia] AS IDFatoControleContratosEuromidia
+                        ,c.[IDFatoControleContratosEuromidia] AS IDFatoControleContratosCabecalho
                         ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(50), ci.[CodPonto]), ''))) AS CodPontoItem
                         ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), ci.[CodFace]), ''))) AS CodFaceItem
                         ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), ci.[NumeroContrato]), ''))) AS NumeroContratoItem
@@ -7030,7 +7030,7 @@ def grade_painel(codponto: int):
                         ,ISNULL(TRY_CONVERT(int, c.[BitAtivo]), 1) AS BitAtivoContrato
                     FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS ci WITH (NOLOCK)
                     LEFT JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS c WITH (NOLOCK)
-                        ON TRY_CONVERT(int, c.[IDFatoControleContratosEuromidia]) = TRY_CONVERT(int, ci.[IDFatoControleContratoEuromidia])
+                        ON c.[IDFatoControleContratosEuromidia] = ci.[IDFatoControleContratoEuromidia]
                     WHERE ci.[IDFatoControleContratosItensEuromidia] IN :ids_itens_grade
                 ),
                 OcupacoesPeriodos AS (
@@ -7041,10 +7041,10 @@ def grade_painel(codponto: int):
                     FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
                     INNER JOIN ItensGrade AS ig
                         ON (
-                            TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) = ig.[IDFatoControleContratosItensEuromidia]
+                            oc.[IDFatoControleContratosItemOrigem] = ig.[IDFatoControleContratosItensEuromidia]
                             OR
                             (
-                                TRY_CONVERT(int, oc.[IDFatoControleContratos]) = ig.[IDFatoControleContratosEuromidia]
+                                oc.[IDFatoControleContratos] = ig.[IDFatoControleContratosEuromidia]
                                 AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(50), oc.[CodPonto]), ''))) = ig.[CodPontoItem]
                                 AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[CodFace]), ''))) = ig.[CodFaceItem]
                                 AND (
@@ -7057,7 +7057,7 @@ def grade_painel(codponto: int):
                                         NULLIF(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[NumeroPrevia]), ''))), '') IS NOT NULL
                                         AND LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[NumeroPrevia]), ''))) = ig.[NumeroPreviaItem]
                                     )
-                                    OR TRY_CONVERT(int, oc.[IDFatoControleContratosItemOrigem]) = ig.[IDFatoControleContratosItensEuromidia]
+                                    OR oc.[IDFatoControleContratosItemOrigem] = ig.[IDFatoControleContratosItensEuromidia]
                                 )
                             )
                         )
@@ -10494,11 +10494,11 @@ def grade_painel_multi():
             SELECT
                  IDItem = COALESCE(
                      item_representante.IDFatoControleContratosItensEuromidia,
-                     TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem),
-                     TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                     oc.IDFatoControleContratosItemOrigem,
+                     oc.IDFatoOcupacaoPaineisEuromidia
                  )
                 ,IDContrato = COALESCE(
-                     TRY_CONVERT(int, oc.IDFatoControleContratos),
+                     oc.IDFatoControleContratos,
                      item_representante.IDFatoControleContratoEuromidia
                  )
                 ,CodFace = LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.CodFace), '')))
@@ -10525,15 +10525,15 @@ def grade_painel_multi():
                  )
                 ,CodPonto = TRY_CONVERT(int, oc.CodPonto)
                 ,IDVendedor = COALESCE(
-                     TRY_CONVERT(int, oc.IDVendedor),
-                     TRY_CONVERT(int, item_representante.IDVendedor)
+                     oc.IDVendedor,
+                     item_representante.IDVendedor
                  )
                 ,LoopInicio = oc.LoopInicio
                 ,LoopFim = oc.LoopFim
                 ,SpanQtd = TRY_CONVERT(int, oc.SpanQtd)
                 ,TipoReserva = CAST(NULL AS int)
                 ,ExpiraEm = CAST(NULL AS datetime2(0))
-                ,IDFatoOcupacaoPaineisEuromidia = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                ,IDFatoOcupacaoPaineisEuromidia = oc.IDFatoOcupacaoPaineisEuromidia
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
             OUTER APPLY
             (
@@ -10547,27 +10547,27 @@ def grade_painel_multi():
                     ,i.IDVendedor
                 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i WITH (NOLOCK)
                 WHERE
-                       TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
-                           = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                       i.IDFatoControleContratosItensEuromidia
+                           = oc.IDFatoControleContratosItemOrigem
                     OR EXISTS
                     (
                         SELECT 1
                         FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_item WITH (NOLOCK)
-                        WHERE TRY_CONVERT(int, vinc_item.IDFatoOcupacaoPaineisEuromidia)
-                                  = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
-                          AND TRY_CONVERT(int, vinc_item.IDFatoControleContratosItensEuromidia)
-                                  = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+                        WHERE vinc_item.IDFatoOcupacaoPaineisEuromidia
+                                  = oc.IDFatoOcupacaoPaineisEuromidia
+                          AND vinc_item.IDFatoControleContratosItensEuromidia
+                                  = i.IDFatoControleContratosItensEuromidia
                     )
                 ORDER BY
                      CASE
-                         WHEN TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
-                                  = TRY_CONVERT(int, oc.IDFatoControleContratosItemOrigem)
+                         WHEN i.IDFatoControleContratosItensEuromidia
+                                  = oc.IDFatoControleContratosItemOrigem
                              THEN 0
                          ELSE 1
                       END
                     ,LEN(COALESCE(i.NumeroContrato, '')) DESC
                     ,LEN(COALESCE(i.NumeroPrevia, '')) DESC
-                    ,TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia) DESC
+                    ,i.IDFatoControleContratosItensEuromidia DESC
             ) AS item_representante
             OUTER APPLY
             (
@@ -10592,8 +10592,8 @@ def grade_painel_multi():
                                         )
                                     )
                                 FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_marca_barra WITH (NOLOCK)
-                                WHERE TRY_CONVERT(int, vinc_marca_barra.IDFatoOcupacaoPaineisEuromidia)
-                                          = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                                WHERE vinc_marca_barra.IDFatoOcupacaoPaineisEuromidia
+                                          = oc.IDFatoOcupacaoPaineisEuromidia
                                   AND NULLIF(
                                         LTRIM(RTRIM(CONVERT(nvarchar(4000), vinc_marca_barra.Marca))),
                                         ''
@@ -10650,10 +10650,10 @@ def grade_painel_multi():
                         SELECT 1
                         FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_marca WITH (NOLOCK)
                         LEFT JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_marca WITH (NOLOCK)
-                            ON TRY_CONVERT(int, item_marca.IDFatoControleContratosItensEuromidia)
-                               = TRY_CONVERT(int, vinc_marca.IDFatoControleContratosItensEuromidia)
-                        WHERE TRY_CONVERT(int, vinc_marca.IDFatoOcupacaoPaineisEuromidia)
-                                  = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)
+                            ON item_marca.IDFatoControleContratosItensEuromidia
+                               = vinc_marca.IDFatoControleContratosItensEuromidia
+                        WHERE vinc_marca.IDFatoOcupacaoPaineisEuromidia
+                                  = oc.IDFatoOcupacaoPaineisEuromidia
                           AND
                           (
                                  COALESCE(CONVERT(nvarchar(200), vinc_marca.Marca), '')
@@ -10683,10 +10683,10 @@ def grade_painel_multi():
                     " SELECT 1"
                     " FROM [Integracao].[Silver].[FatoVinculaMarcasOcupacao] AS vinc_vendedor WITH (NOLOCK)"
                     " INNER JOIN [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_vendedor WITH (NOLOCK)"
-                    "   ON TRY_CONVERT(int, item_vendedor.IDFatoControleContratosItensEuromidia)"
-                    "      = TRY_CONVERT(int, vinc_vendedor.IDFatoControleContratosItensEuromidia)"
-                    " WHERE TRY_CONVERT(int, vinc_vendedor.IDFatoOcupacaoPaineisEuromidia)"
-                    "       = TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia)"
+                    "   ON item_vendedor.IDFatoControleContratosItensEuromidia"
+                    "      = vinc_vendedor.IDFatoControleContratosItensEuromidia"
+                    " WHERE vinc_vendedor.IDFatoOcupacaoPaineisEuromidia"
+                    "       = oc.IDFatoOcupacaoPaineisEuromidia"
                     "   AND COALESCE(CONVERT(nvarchar(200), item_vendedor.Vendedor), '')"
                     f"       COLLATE Latin1_General_CI_AI LIKE :{chave_v}"
                     ")"
@@ -10697,7 +10697,7 @@ def grade_painel_multi():
 
         partes_sql_itens_multi.append(
             " ORDER BY TRY_CONVERT(date, oc.DataInicio) ASC, "
-            " TRY_CONVERT(int, oc.IDFatoOcupacaoPaineisEuromidia) ASC "
+            " oc.IDFatoOcupacaoPaineisEuromidia ASC "
         )
 
         stmt_itens_multi = text("".join(partes_sql_itens_multi))
@@ -10729,8 +10729,8 @@ def grade_painel_multi():
 
             sql_reservas_multi = text("""
                 SELECT
-                     TRY_CONVERT(int, oc.[IDFatoOcupacaoPaineisEuromidia]) AS IDFatoOcupacaoPaineisEuromidia
-                    ,TRY_CONVERT(int, oc.[IDFatoControleContratos]) AS IDFatoControleContratos
+                     oc.[IDFatoOcupacaoPaineisEuromidia] AS IDFatoOcupacaoPaineisEuromidia
+                    ,oc.[IDFatoControleContratos] AS IDFatoControleContratos
                     ,LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[CodFace]), ''))) AS CodFace
                     ,oc.[MarcaExibida]
                     ,oc.[Vendedor]
@@ -10742,7 +10742,7 @@ def grade_painel_multi():
                     ,oc.[LoopInicio]
                     ,oc.[LoopFim]
                     ,TRY_CONVERT(int, oc.[SpanQtd]) AS SpanQtd
-                    ,TRY_CONVERT(int, oc.[IDVendedor]) AS IDVendedor
+                    ,oc.[IDVendedor] AS IDVendedor
                     ,TRY_CONVERT(int, oc.[TipoReserva]) AS TipoReserva
                     ,COALESCE(
                  CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 126), 120)
@@ -10752,11 +10752,11 @@ def grade_painel_multi():
                 ,CONVERT(varchar(19), TRY_CONVERT(datetime2(0), oc.[ExpiraEm], 105), 120)
                 ,NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), oc.[ExpiraEm]))), '')
              ) AS ExpiraEm
-                    ,TRY_CONVERT(int, oc.[CriadoPorIDUsuario]) AS IDUsuarioCriadorReserva
+                    ,oc.[CriadoPorIDUsuario] AS IDUsuarioCriadorReserva
                 FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS oc WITH (NOLOCK)
                 WHERE (
                         oc.[CodPonto] = :codponto
-                        OR TRY_CONVERT(int, oc.[IDPainelEuromidia]) IN :ids_paineis_grade_multi
+                        OR oc.[IDPainelEuromidia] IN :ids_paineis_grade_multi
                       )
                   AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[Origem]), '')))) COLLATE Latin1_General_CI_AI = 'RESERVA'
                   AND UPPER(LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[Status]), '')))) COLLATE Latin1_General_CI_AI = 'RESERVADO'
@@ -10769,7 +10769,7 @@ def grade_painel_multi():
                      LTRIM(RTRIM(COALESCE(CONVERT(varchar(100), oc.[CodFace]), ''))) ASC
                     ,TRY_CONVERT(date, oc.[DataInicio]) ASC
                     ,TRY_CONVERT(date, oc.[DataFim]) ASC
-                    ,TRY_CONVERT(int, oc.[IDFatoOcupacaoPaineisEuromidia]) ASC
+                    ,oc.[IDFatoOcupacaoPaineisEuromidia] ASC
             """).bindparams(bindparam("ids_paineis_grade_multi", expanding=True))
 
             rows_reservas_multi_raw = db.session.execute(
@@ -18223,8 +18223,8 @@ def _gerar_excel_ocupacao_ano_bytes(ano: int, dt_ini=None, dt_fim=None):
 
         sql_contratos = text(f"""
             SELECT
-                TRY_CONVERT(int, IDFatoControleContratosItensEuromidia) AS ID,
-                TRY_CONVERT(int, IDFatoControleContratoEuromidia) AS IDFatoControleContratos,
+                IDFatoControleContratosItensEuromidia AS ID,
+                IDFatoControleContratoEuromidia AS IDFatoControleContratos,
                 LTRIM(RTRIM(COALESCE(CodFace, ''))) AS CodFace,
                 MarcaExibida,
                 Vendedor,
@@ -18233,7 +18233,7 @@ def _gerar_excel_ocupacao_ano_bytes(ano: int, dt_ini=None, dt_fim=None):
                 Cota,
                 NumeroContrato,
                 NumeroPrevia,
-                TRY_CONVERT(int, IDVendedor) AS IDVendedor,
+                IDVendedor AS IDVendedor,
                 CAST(NULL AS int) AS IDReservaOriginal,
                 CAST(NULL AS int) AS SpanQtd,
                 CAST('CONTRATO' AS varchar(20)) AS OrigemItem
@@ -18258,8 +18258,8 @@ def _gerar_excel_ocupacao_ano_bytes(ano: int, dt_ini=None, dt_fim=None):
 
         sql_reservas = text(f"""
             SELECT
-                -ABS(TRY_CONVERT(int, IDFatoOcupacaoPaineisEuromidia)) AS ID,
-                TRY_CONVERT(int, IDFatoControleContratos) AS IDFatoControleContratos,
+                -ABS(IDFatoOcupacaoPaineisEuromidia) AS ID,
+                IDFatoControleContratos AS IDFatoControleContratos,
                 LTRIM(RTRIM(COALESCE(CodFace, ''))) AS CodFace,
                 MarcaExibida,
                 Vendedor,
@@ -18268,8 +18268,8 @@ def _gerar_excel_ocupacao_ano_bytes(ano: int, dt_ini=None, dt_fim=None):
                 Cota,
                 NumeroContrato,
                 NumeroPrevia,
-                TRY_CONVERT(int, IDVendedor) AS IDVendedor,
-                TRY_CONVERT(int, IDFatoOcupacaoPaineisEuromidia) AS IDReservaOriginal,
+                IDVendedor AS IDVendedor,
+                IDFatoOcupacaoPaineisEuromidia AS IDReservaOriginal,
                 TRY_CONVERT(int, SpanQtd) AS SpanQtd,
                 CAST('RESERVA' AS varchar(20)) AS OrigemItem
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
@@ -18662,9 +18662,9 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int, dt_ini=None, dt_fim=None):
     sql_ocupacoes = text("""
         SELECT
              TipoOrigem = CAST('CONTRATO' AS varchar(20))
-            ,ID = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
-            ,IDPainelEuromidia = TRY_CONVERT(int, i.IDPainelEuromidia)
-            ,IDDimFacesPaineis = TRY_CONVERT(int, i.IDDimFacesPaineis)
+            ,ID = i.IDFatoControleContratosItensEuromidia
+            ,IDPainelEuromidia = i.IDPainelEuromidia
+            ,IDDimFacesPaineis = i.IDDimFacesPaineis
             ,CodPonto = i.CodPonto
             ,CodFace = LTRIM(RTRIM(COALESCE(i.CodFace, '')))
             ,MarcaExibida = COALESCE(NULLIF(LTRIM(RTRIM(i.MarcaExibida)), ''), NULLIF(LTRIM(RTRIM(c.MarcaExibida)), ''))
@@ -18689,8 +18689,8 @@ def _gerar_excel_ocupacao_clientes_bytes(ano: int, dt_ini=None, dt_fim=None):
 
         SELECT
              TipoOrigem = CAST('RESERVA' AS varchar(20))
-            ,ID = -ABS(TRY_CONVERT(int, r.IDFatoOcupacaoPaineisEuromidia))
-            ,IDPainelEuromidia = TRY_CONVERT(int, r.IDPainelEuromidia)
+            ,ID = -ABS(r.IDFatoOcupacaoPaineisEuromidia)
+            ,IDPainelEuromidia = r.IDPainelEuromidia
             ,IDDimFacesPaineis = CAST(NULL AS int)
             ,CodPonto = r.CodPonto
             ,CodFace = LTRIM(RTRIM(COALESCE(r.CodFace, '')))
@@ -19777,6 +19777,22 @@ def _texto_excel_item(item: dict) -> str:
 @paineis_bp.route("/painel-detalhes/<int:codponto>", methods=["GET"])
 @login_required
 def painel_detalhes(codponto: int):
+    tempo_inicio_rota = time.perf_counter()
+    modo_bloco_detalhe = (request.args.get("_bloco") or "").strip().lower()
+
+    # A tela pode ser aberta para uma face específica. O bloco assíncrono de
+    # desempenho precisa respeitar a mesma face; antes ele filtrava apenas o
+    # CodPonto e misturava todas as faces do painel.
+    cod_face_filtro = (
+        request.args.get("codface")
+        or request.args.get("cod_face")
+        or request.args.get("selected_codface")
+        or request.args.get("face_principal")
+        or request.args.get("face")
+        or ""
+    ).strip()
+    cod_face_filtro_sql = cod_face_filtro.upper()
+
     def _texto_limpo(valor):
         try:
             return str(valor or "").strip()
@@ -20164,19 +20180,28 @@ def painel_detalhes(codponto: int):
             "formato_lxa": _texto_limpo(row_painel.get("FormatoLxA")),
         }
 
-    imagens_painel = _carregar_imagens_painel(int(painel["id_painel"]))
-
-    painel["imagens"] = imagens_painel
-    painel["imagem_principal"] = imagens_painel[0]["url"] if imagens_painel else url_for(
-        "static",
-        filename="imagens/painel-publicitario.png"
-    )
-    painel["quantidade_imagens"] = len(imagens_painel)
-    painel["tem_imagem_real"] = any(not img.get("eh_fallback") for img in imagens_painel)
+    # O endpoint assíncrono de desempenho precisa apenas do tipo e da quantidade
+    # de faces. Imagens e classificação continuam idênticas na página completa,
+    # mas não são consultadas novamente quando o navegador pede somente o bloco.
+    if modo_bloco_detalhe == "desempenho":
+        painel["imagens"] = []
+        painel["imagem_principal"] = None
+        painel["quantidade_imagens"] = 0
+        painel["tem_imagem_real"] = False
+        painel["classificacao"] = _classificacao_vazia_painel()
+    else:
+        imagens_painel = _carregar_imagens_painel(int(painel["id_painel"]))
+        painel["imagens"] = imagens_painel
+        painel["imagem_principal"] = imagens_painel[0]["url"] if imagens_painel else url_for(
+            "static",
+            filename="imagens/painel-publicitario.png"
+        )
+        painel["quantidade_imagens"] = len(imagens_painel)
+        painel["tem_imagem_real"] = any(not img.get("eh_fallback") for img in imagens_painel)
+        painel["classificacao"] = _carregar_classificacao_painel(int(painel["id_painel"]))
 
     painel["produto"] = painel.get("tipo") or ""
     painel["faces"] = painel.get("quantidade_faces")
-    painel["classificacao"] = _carregar_classificacao_painel(int(painel["id_painel"]))
 
     def _fmt_moeda_br(valor):
         try:
@@ -20233,15 +20258,14 @@ def painel_detalhes(codponto: int):
         return date(ano, mes, dia)
 
     def _periodos_desempenho_comercial():
-        hoje = date.today()
+        hoje = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
         primeiro_mes_atual = date(hoje.year, hoje.month, 1)
-        ultimo_dia_mes_atual = calendar.monthrange(hoje.year, hoje.month)[1]
-        fim = date(hoje.year, hoje.month, ultimo_dia_mes_atual)
-
         saida = []
         for meses, label in ((12, "Últimos 12 meses"), (24, "Últimos 24 meses"), (36, "Últimos 36 meses")):
+            # O faturamento é mensal: a janela contém exatamente N competências,
+            # incluindo a competência atual, e nunca avança além do dia de hoje.
             ini = _somar_meses(primeiro_mes_atual, -(meses - 1))
-            saida.append({"meses": meses, "label": label, "dt_ini": ini, "dt_fim": fim})
+            saida.append({"meses": meses, "label": label, "dt_ini": ini, "dt_fim": hoje})
         return saida
 
     def _buscar_preco_tabela_painel(cod_ponto: int, dt_ini_periodo: date, dt_fim_periodo: date):
@@ -20309,7 +20333,25 @@ def painel_detalhes(codponto: int):
         capacidade_dia = 16 if eh_digital else max(1, qtd_faces or 1)
 
         sql_painel_metricas = text("""
-            ;WITH BaseItensRaw AS (
+            ;WITH NumerosMes AS (
+                SELECT n
+                FROM (VALUES
+                    (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11),
+                    (12),(13),(14),(15),(16),(17),(18),(19),(20),(21),(22),(23),
+                    (24),(25),(26),(27),(28),(29),(30),(31),(32),(33),(34),(35)
+                ) AS numeros(n)
+            ), MesesPeriodo AS (
+                SELECT
+                    DATEADD(MONTH, n, DATEFROMPARTS(YEAR(CAST(:dt_ini AS date)), MONTH(CAST(:dt_ini AS date)), 1)) AS MesInicio,
+                    CASE
+                        WHEN EOMONTH(DATEADD(MONTH, n, CAST(:dt_ini AS date))) > CAST(:dt_fim AS date)
+                        THEN CAST(:dt_fim AS date)
+                        ELSE EOMONTH(DATEADD(MONTH, n, CAST(:dt_ini AS date)))
+                    END AS MesFim
+                FROM NumerosMes
+                WHERE DATEADD(MONTH, n, DATEFROMPARTS(YEAR(CAST(:dt_ini AS date)), MONTH(CAST(:dt_ini AS date)), 1))
+                      <= CAST(:dt_fim AS date)
+            ), BaseItensRaw AS (
                 SELECT
                     i.IDFatoControleContratosItensEuromidia AS IDItem,
                     i.IDFatoControleContratoEuromidia AS IDContrato,
@@ -20359,6 +20401,7 @@ def painel_detalhes(codponto: int):
                             TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 101)
                         ) AS DataTerminoPrevistoDate,
                     COALESCE(i.FaturamentoLiquidoFinalMensal, i.FaturamentoLiquidoMensal, i.Faturamento) AS ReceitaMensal,
+                    TRY_CONVERT(decimal(38,6), i.FaturamentoLiquidoFinalMensal) AS FaturamentoMensal,
                     CASE
                         WHEN :eh_digital = 1
                          AND TRY_CONVERT(decimal(18,2), REPLACE(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Cota))), ''), ',', '.')) >= 1080
@@ -20392,28 +20435,46 @@ def painel_detalhes(codponto: int):
                 LEFT JOIN [Kanban].[Silver].[FatoKanbanCard] AS k
                     ON k.IDFatoKanbanCard = COALESCE(rel.IDFatoKanbanCard, i.IDFatoKanbanCard)
                 WHERE i.CodPonto = :cod_ponto
-                  AND ISNULL(i.BitAtivo, 1) = 1
-                  AND (i.AtivoCancelamento IS NULL OR i.AtivoCancelamento = 'A')
+                  AND (
+                        :cod_face = ''
+                        OR UPPER(LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(50), i.CodFace), '')))) = :cod_face
+                  )
             ), BaseItens AS (
                 SELECT
                     IDItem,
                     IDContrato,
-                    COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate) AS DataEvento,
-                    CASE
-                        WHEN COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate) IS NULL THEN NULL
-                        ELSE DATEFROMPARTS(
-                            YEAR(COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate)),
-                            MONTH(COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate)),
-                            1
-                        )
-                    END AS DataRef,
+                    DataInicioPrevistoDate AS DataEvento,
+                    DataInicioPrevistoDate AS DataRef,
                     ReceitaMensal,
+                    FaturamentoMensal,
                     DataInicioPrevistoDate AS DataInicioPrevisto,
-                    COALESCE(DataFimEfetivaDate, DataTerminoPrevistoDate) AS DataFimPrevisto,
+                    DataTerminoPrevistoDate AS DataFimPrevisto,
+                    MIN(DataInicioPrevistoDate) OVER (
+                        PARTITION BY COALESCE(IDContrato, -IDItem)
+                    ) AS DataInicioContrato,
+                    MAX(DataTerminoPrevistoDate) OVER (
+                        PARTITION BY COALESCE(IDContrato, -IDItem)
+                    ) AS DataFimContrato,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(IDContrato, -IDItem)
+                        ORDER BY IDItem
+                    ) AS OrdemItemContrato,
                     SlotsItem,
                     FlagRenovacao,
                     IDFatoKanbanCard
                 FROM BaseItensRaw
+            ), FaturamentoPorMes AS (
+                SELECT
+                    m.MesInicio,
+                    SUM(ISNULL(b.FaturamentoMensal, 0.0)) AS FaturamentoMes
+                FROM MesesPeriodo AS m
+                INNER JOIN BaseItens AS b
+                    ON b.DataInicioPrevisto IS NOT NULL
+                   AND b.DataFimPrevisto IS NOT NULL
+                   AND b.DataFimPrevisto >= b.DataInicioPrevisto
+                   AND b.DataInicioPrevisto <= m.MesFim
+                   AND b.DataFimPrevisto >= m.MesInicio
+                GROUP BY m.MesInicio
             ), Negociacoes AS (
                 SELECT
                     n.IDFatoKanbanCard,
@@ -20479,20 +20540,33 @@ def painel_detalhes(codponto: int):
                         )
                     ) AS DataNegociacaoIA
                 FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
-            ), MesesContrato AS (
-                SELECT
-                    DataRef,
-                    COUNT(DISTINCT COALESCE(IDContrato, -IDItem)) AS QtdContratosMes
-                FROM BaseItens
-                WHERE DataRef >= :dt_ini
-                  AND DataRef <= :dt_fim
-                GROUP BY DataRef
             ), Resumo AS (
                 SELECT
-                    SUM(CASE WHEN DataRef >= :dt_ini AND DataRef <= :dt_fim THEN ISNULL(ReceitaMensal, 0.0) ELSE 0.0 END) AS Faturamento,
+                    -- Para cada competência da janela, soma uma única vez o
+                    -- FaturamentoLiquidoFinalMensal dos itens desta face que
+                    -- estavam vigentes naquele mês.
+                    CAST(
+                        ISNULL((SELECT SUM(FaturamentoMes) FROM FaturamentoPorMes), 0.0)
+                        AS decimal(38,6)
+                    ) AS Faturamento,
+                    SUM(CASE
+                            WHEN OrdemItemContrato = 1
+                             AND DataInicioContrato IS NOT NULL
+                             AND DataFimContrato IS NOT NULL
+                             AND DataFimContrato >= DataInicioContrato
+                             AND DataInicioContrato <= :dt_fim
+                             AND DataFimContrato >= :dt_ini
+                            THEN DATEDIFF(
+                                    DAY,
+                                    CASE WHEN DataInicioContrato < :dt_ini THEN CAST(:dt_ini AS date) ELSE DataInicioContrato END,
+                                    DATEADD(DAY, 1, CASE WHEN DataFimContrato > :dt_fim THEN CAST(:dt_fim AS date) ELSE DataFimContrato END)
+                                 )
+                            ELSE 0
+                        END) AS ContratoDiasAtivos,
                     SUM(CASE
                             WHEN DataInicioPrevisto IS NOT NULL
                              AND DataFimPrevisto IS NOT NULL
+                             AND DataFimPrevisto >= DataInicioPrevisto
                              AND DataInicioPrevisto <= :dt_fim
                              AND DataFimPrevisto >= :dt_ini
                             THEN DATEDIFF(
@@ -20502,8 +20576,23 @@ def painel_detalhes(codponto: int):
                                  ) * SlotsItem
                             ELSE 0
                         END) AS SlotDiasOcupados,
-                    COUNT(DISTINCT CASE WHEN DataRef >= :dt_ini AND DataRef <= :dt_fim THEN COALESCE(IDContrato, -IDItem) END) AS QtdContratosPeriodo,
-                    COUNT(DISTINCT CASE WHEN DataRef >= :dt_ini AND DataRef <= :dt_fim AND FlagRenovacao = 1 THEN COALESCE(IDContrato, -IDItem) END) AS QtdContratosRenovacao
+                    COUNT(DISTINCT CASE
+                        WHEN DataInicioContrato IS NOT NULL
+                         AND DataFimContrato IS NOT NULL
+                         AND DataFimContrato >= DataInicioContrato
+                         AND DataInicioContrato <= :dt_fim
+                         AND DataFimContrato >= :dt_ini
+                        THEN COALESCE(IDContrato, -IDItem)
+                    END) AS QtdContratosPeriodo,
+                    COUNT(DISTINCT CASE
+                        WHEN DataInicioContrato IS NOT NULL
+                         AND DataFimContrato IS NOT NULL
+                         AND DataFimContrato >= DataInicioContrato
+                         AND DataInicioContrato <= :dt_fim
+                         AND DataFimContrato >= :dt_ini
+                         AND FlagRenovacao = 1
+                        THEN COALESCE(IDContrato, -IDItem)
+                    END) AS QtdContratosRenovacao
                 FROM BaseItens
             ), UltPrecoNegociado AS (
                 SELECT TOP 1
@@ -20522,8 +20611,11 @@ def painel_detalhes(codponto: int):
                 SELECT TOP 1
                     COALESCE(ReceitaMensal, 0.0) AS PrecoNegociado
                 FROM BaseItens
-                WHERE DataRef >= :dt_ini
-                  AND DataRef <= :dt_fim
+                WHERE DataInicioContrato IS NOT NULL
+                  AND DataFimContrato IS NOT NULL
+                  AND DataFimContrato >= DataInicioContrato
+                  AND DataInicioContrato <= :dt_fim
+                  AND DataFimContrato >= :dt_ini
                   AND ReceitaMensal IS NOT NULL
                 ORDER BY DataEvento DESC, IDItem DESC
             ), UltPrecoIA AS (
@@ -20542,7 +20634,11 @@ def painel_detalhes(codponto: int):
             )
             SELECT
                 r.Faturamento,
-                ContratosMediaMes = ISNULL((SELECT SUM(CAST(m.QtdContratosMes AS float)) / :meses FROM MesesContrato AS m), 0.0),
+                ContratosMediaMes = CASE
+                    WHEN :dias_periodo > 0
+                    THEN CAST(ISNULL(r.ContratoDiasAtivos, 0) AS float) / CAST(:dias_periodo AS float)
+                    ELSE NULL
+                END,
                 OcupacaoPct = CASE
                     WHEN :capacidade_dia > 0 AND :dias_periodo > 0
                     THEN (CAST(ISNULL(r.SlotDiasOcupados, 0) AS float) / CAST((:capacidade_dia * :dias_periodo) AS float)) * 100.0
@@ -20559,7 +20655,25 @@ def painel_detalhes(codponto: int):
         """)
 
         sql_segmentos_metricas = text("""
-            ;WITH BaseItensRaw AS (
+            ;WITH NumerosMes AS (
+                SELECT n
+                FROM (VALUES
+                    (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11),
+                    (12),(13),(14),(15),(16),(17),(18),(19),(20),(21),(22),(23),
+                    (24),(25),(26),(27),(28),(29),(30),(31),(32),(33),(34),(35)
+                ) AS numeros(n)
+            ), MesesPeriodo AS (
+                SELECT
+                    DATEADD(MONTH, n, DATEFROMPARTS(YEAR(CAST(:dt_ini AS date)), MONTH(CAST(:dt_ini AS date)), 1)) AS MesInicio,
+                    CASE
+                        WHEN EOMONTH(DATEADD(MONTH, n, CAST(:dt_ini AS date))) > CAST(:dt_fim AS date)
+                        THEN CAST(:dt_fim AS date)
+                        ELSE EOMONTH(DATEADD(MONTH, n, CAST(:dt_ini AS date)))
+                    END AS MesFim
+                FROM NumerosMes
+                WHERE DATEADD(MONTH, n, DATEFROMPARTS(YEAR(CAST(:dt_ini AS date)), MONTH(CAST(:dt_ini AS date)), 1))
+                      <= CAST(:dt_fim AS date)
+            ), BaseItensRaw AS (
                 SELECT
                     i.IDFatoControleContratosItensEuromidia AS IDItem,
                     i.IDFatoControleContratoEuromidia AS IDContrato,
@@ -20609,6 +20723,7 @@ def painel_detalhes(codponto: int):
                             TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.DataTerminoPrevisto))), ''), 101)
                         ) AS DataTerminoPrevistoDate,
                     COALESCE(i.FaturamentoLiquidoFinalMensal, i.FaturamentoLiquidoMensal, i.Faturamento) AS ReceitaMensal,
+                    TRY_CONVERT(decimal(38,6), i.FaturamentoLiquidoFinalMensal) AS FaturamentoMensal,
                     CASE
                         WHEN :eh_digital = 1
                          AND TRY_CONVERT(decimal(18,2), REPLACE(NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), i.Cota))), ''), ',', '.')) >= 1080
@@ -20619,144 +20734,102 @@ def painel_detalhes(codponto: int):
                         WHEN UPPER(LTRIM(RTRIM(ISNULL(i.InicioRenovacao, '')))) = 'R'
                           OR UPPER(LTRIM(RTRIM(ISNULL(i.TipoDocumento, '')))) LIKE '%RENOV%'
                           OR UPPER(LTRIM(RTRIM(ISNULL(i.OBS, '')))) LIKE '%RENOV%'
-                          OR UPPER(LTRIM(RTRIM(ISNULL(k.Titulo, '')))) LIKE '%RENOV%'
-                          OR UPPER(LTRIM(RTRIM(ISNULL(k.Descricao, '')))) LIKE '%RENOV%'
                         THEN 1 ELSE 0
                     END AS FlagRenovacao,
-                    COALESCE(NULLIF(LTRIM(RTRIM(dc.Classe)), ''), 'Sem segmento') AS Classe,
+                    LTRIM(RTRIM(dc.Classe)) AS Classe,
                     dc.ScoreSetor AS ScoreSetor,
-                    COALESCE(NULLIF(LTRIM(RTRIM(dc.ClassificacaoMacro)), ''), '—') AS ClassificacaoMacro,
-                    COALESCE(rel.IDFatoKanbanCard, i.IDFatoKanbanCard) AS IDFatoKanbanCard
+                    NULLIF(LTRIM(RTRIM(dc.ClassificacaoMacro)), '') AS ClassificacaoMacro
                 FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS i
-                OUTER APPLY (
-                    SELECT TOP 1
-                        fcc.IDFatoKanbanCard
-                    FROM [Integracao].[Silver].[FatoContratoCardEuromidia] AS fcc
-                    WHERE fcc.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
-                      AND (
-                            fcc.IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia
-                         OR fcc.IDFatoControleContratosItensEuromidia IS NULL
-                      )
+                INNER JOIN [Integracao].[Silver].[FatoControleContratosEuromidia] AS c
+                    ON c.IDFatoControleContratosEuromidia = i.IDFatoControleContratoEuromidia
+                INNER JOIN [Integracao].[Silver].[DimEmpresas] AS e
+                    ON e.IDEmpresa = c.IDEmpresa
+                CROSS APPLY (
+                    SELECT TOP (1)
+                        cnae.Classe,
+                        cnae.ScoreSetor,
+                        cnae.ClassificacaoMacro
+                    FROM [Integracao].[Silver].[DimCnaes] AS cnae
+                    WHERE REPLACE(REPLACE(REPLACE(REPLACE(
+                              UPPER(LTRIM(RTRIM(ISNULL(CONVERT(varchar(50), cnae.cnaepadrao), ''))))
+                                  COLLATE Latin1_General_CI_AI,
+                              '.', ''), '-', ''), '/', ''), ' ', '')
+                        = REPLACE(REPLACE(REPLACE(REPLACE(
+                              UPPER(LTRIM(RTRIM(ISNULL(CONVERT(varchar(50), e.CNAE), ''))))
+                                  COLLATE Latin1_General_CI_AI,
+                              '.', ''), '-', ''), '/', ''), ' ', '')
+                      AND NULLIF(LTRIM(RTRIM(CONVERT(varchar(50), e.CNAE))), '') IS NOT NULL
+                      AND NULLIF(LTRIM(RTRIM(cnae.Classe)), '') IS NOT NULL
                     ORDER BY
-                        CASE WHEN fcc.IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia THEN 0 ELSE 1 END,
-                        fcc.DataAtualizacao DESC,
-                        fcc.IDFatoContratoCardEuromidia DESC
-                ) AS rel
-                LEFT JOIN [Kanban].[Silver].[FatoKanbanCard] AS k
-                    ON k.IDFatoKanbanCard = COALESCE(rel.IDFatoKanbanCard, i.IDFatoKanbanCard)
-                LEFT JOIN [Integracao].[Silver].[DimCnaes] AS dc
-                    ON dc.IDDimCnaes = k.IDDimCnaes
+                        cnae.DataAtualizacao DESC,
+                        cnae.IDDimCnaes DESC
+                ) AS dc
                 WHERE i.CodPonto = :cod_ponto
-                  AND ISNULL(i.BitAtivo, 1) = 1
-                  AND (i.AtivoCancelamento IS NULL OR i.AtivoCancelamento = 'A')
+                  AND (
+                        :cod_face = ''
+                        OR UPPER(LTRIM(RTRIM(ISNULL(CONVERT(nvarchar(50), i.CodFace), '')))) = :cod_face
+                  )
             ), BaseItens AS (
                 SELECT
                     IDItem,
                     IDContrato,
-                    COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate) AS DataEvento,
-                    CASE
-                        WHEN COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate) IS NULL THEN NULL
-                        ELSE DATEFROMPARTS(
-                            YEAR(COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate)),
-                            MONTH(COALESCE(ReferenciaDate, DataLancamentoDate, DataInicioPrevistoDate)),
-                            1
-                        )
-                    END AS DataRef,
+                    DataInicioPrevistoDate AS DataEvento,
+                    DataInicioPrevistoDate AS DataRef,
                     ReceitaMensal,
+                    FaturamentoMensal,
                     DataInicioPrevistoDate AS DataInicioPrevisto,
-                    COALESCE(DataFimEfetivaDate, DataTerminoPrevistoDate) AS DataFimPrevisto,
+                    DataTerminoPrevistoDate AS DataFimPrevisto,
+                    MIN(DataInicioPrevistoDate) OVER (
+                        PARTITION BY Classe, COALESCE(IDContrato, -IDItem)
+                    ) AS DataInicioContrato,
+                    MAX(DataTerminoPrevistoDate) OVER (
+                        PARTITION BY Classe, COALESCE(IDContrato, -IDItem)
+                    ) AS DataFimContrato,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY Classe, COALESCE(IDContrato, -IDItem)
+                        ORDER BY IDItem
+                    ) AS OrdemItemContrato,
                     SlotsItem,
                     FlagRenovacao,
                     Classe,
                     ScoreSetor,
-                    ClassificacaoMacro,
-                    IDFatoKanbanCard
+                    ClassificacaoMacro
                 FROM BaseItensRaw
-            ), Negociacoes AS (
+            ), FaturamentoSegmentoPeriodo AS (
                 SELECT
-                    n.IDFatoKanbanCard,
-                    n.IDFatoKanbanNegociacaoPreco,
-                    COALESCE(n.PrecoAprovado, n.PrecoProposto, n.PrecoAtual) AS PrecoNegociado,
-                    n.PrecoProposto AS PrecoProposto,
-                    COALESCE(
-                        COALESCE(
-                            TRY_CONVERT(date, n.DataAprovacaoPreco),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 23),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 103),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 120),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 121),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 126),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 101)
-                        ),
-                        COALESCE(
-                            TRY_CONVERT(date, n.DataPrecoProposto),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 23),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 103),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 120),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 121),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 126),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 101)
-                        ),
-                        COALESCE(
-                            TRY_CONVERT(date, n.PeriodoInicio),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 23),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 103),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 120),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 121),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 126),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 101)
-                        )
-                    ) AS DataNegociacaoPreco,
-                    COALESCE(
-                        COALESCE(
-                            TRY_CONVERT(date, n.DataPrecoProposto),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 23),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 103),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 120),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 121),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 126),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataPrecoProposto))), ''), 101)
-                        ),
-                        COALESCE(
-                            TRY_CONVERT(date, n.DataAprovacaoPreco),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 23),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 103),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 120),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 121),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 126),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.DataAprovacaoPreco))), ''), 101)
-                        ),
-                        COALESCE(
-                            TRY_CONVERT(date, n.PeriodoInicio),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 23),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 103),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 120),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 121),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 126),
-                            TRY_CONVERT(date, NULLIF(LTRIM(RTRIM(CONVERT(nvarchar(50), n.PeriodoInicio))), ''), 101)
-                        )
-                    ) AS DataNegociacaoIA
-                FROM [Kanban].[Silver].[FatoKanbanNegociacaoPreco] AS n
-            ), MesesSegmento AS (
-                SELECT
-                    Classe,
-                    ScoreSetor,
-                    ClassificacaoMacro,
-                    DataRef,
-                    COUNT(DISTINCT COALESCE(IDContrato, -IDItem)) AS QtdContratosMes
-                FROM BaseItens
-                WHERE DataRef >= :dt_ini
-                  AND DataRef <= :dt_fim
-                GROUP BY Classe, ScoreSetor, ClassificacaoMacro, DataRef
+                    b.Classe,
+                    SUM(ISNULL(b.FaturamentoMensal, 0.0)) AS Faturamento
+                FROM MesesPeriodo AS m
+                INNER JOIN BaseItens AS b
+                    ON b.DataInicioPrevisto IS NOT NULL
+                   AND b.DataFimPrevisto IS NOT NULL
+                   AND b.DataFimPrevisto >= b.DataInicioPrevisto
+                   AND b.DataInicioPrevisto <= m.MesFim
+                   AND b.DataFimPrevisto >= m.MesInicio
+                GROUP BY b.Classe
             ), ResumoSegmento AS (
                 SELECT
                     Classe,
-                    ScoreSetor,
-                    ClassificacaoMacro,
-                    SUM(CASE WHEN DataRef >= :dt_ini AND DataRef <= :dt_fim THEN ISNULL(ReceitaMensal, 0.0) ELSE 0.0 END) AS Faturamento,
+                    MAX(ScoreSetor) AS ScoreSetor,
+                    MAX(ClassificacaoMacro) AS ClassificacaoMacro,
+                    SUM(CASE
+                            WHEN OrdemItemContrato = 1
+                             AND DataInicioContrato IS NOT NULL
+                             AND DataFimContrato IS NOT NULL
+                             AND DataFimContrato >= DataInicioContrato
+                             AND DataInicioContrato <= :dt_fim
+                             AND DataFimContrato >= :dt_ini
+                            THEN DATEDIFF(
+                                    DAY,
+                                    CASE WHEN DataInicioContrato < :dt_ini THEN CAST(:dt_ini AS date) ELSE DataInicioContrato END,
+                                    DATEADD(DAY, 1, CASE WHEN DataFimContrato > :dt_fim THEN CAST(:dt_fim AS date) ELSE DataFimContrato END)
+                                 )
+                            ELSE 0
+                        END) AS ContratoDiasAtivos,
                     SUM(CASE
                             WHEN DataInicioPrevisto IS NOT NULL
                              AND DataFimPrevisto IS NOT NULL
+                             AND DataFimPrevisto >= DataInicioPrevisto
                              AND DataInicioPrevisto <= :dt_fim
                              AND DataFimPrevisto >= :dt_ini
                             THEN DATEDIFF(
@@ -20766,118 +20839,91 @@ def painel_detalhes(codponto: int):
                                  ) * SlotsItem
                             ELSE 0
                         END) AS SlotDiasOcupados,
-                    COUNT(DISTINCT CASE WHEN DataRef >= :dt_ini AND DataRef <= :dt_fim THEN COALESCE(IDContrato, -IDItem) END) AS QtdContratosPeriodo,
-                    COUNT(DISTINCT CASE WHEN DataRef >= :dt_ini AND DataRef <= :dt_fim AND FlagRenovacao = 1 THEN COALESCE(IDContrato, -IDItem) END) AS QtdContratosRenovacao
+                    COUNT(DISTINCT CASE
+                        WHEN DataInicioContrato IS NOT NULL
+                         AND DataFimContrato IS NOT NULL
+                         AND DataFimContrato >= DataInicioContrato
+                         AND DataInicioContrato <= :dt_fim
+                         AND DataFimContrato >= :dt_ini
+                        THEN COALESCE(IDContrato, -IDItem)
+                    END) AS QtdContratosPeriodo,
+                    COUNT(DISTINCT CASE
+                        WHEN DataInicioContrato IS NOT NULL
+                         AND DataFimContrato IS NOT NULL
+                         AND DataFimContrato >= DataInicioContrato
+                         AND DataInicioContrato <= :dt_fim
+                         AND DataFimContrato >= :dt_ini
+                         AND FlagRenovacao = 1
+                        THEN COALESCE(IDContrato, -IDItem)
+                    END) AS QtdContratosRenovacao
                 FROM BaseItens
-                GROUP BY Classe, ScoreSetor, ClassificacaoMacro
-            ), UltPrecoNegociadoSegmento AS (
-                SELECT
-                    b.Classe,
-                    b.ScoreSetor,
-                    b.ClassificacaoMacro,
-                    n.PrecoNegociado AS PrecoNegociado,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY b.Classe, b.ScoreSetor, b.ClassificacaoMacro
-                        ORDER BY n.DataNegociacaoPreco DESC, n.IDFatoKanbanNegociacaoPreco DESC
-                    ) AS rn
-                FROM BaseItens AS b
-                INNER JOIN Negociacoes AS n
-                    ON n.IDFatoKanbanCard = b.IDFatoKanbanCard
-                WHERE b.IDFatoKanbanCard IS NOT NULL
-                  AND n.DataNegociacaoPreco >= :dt_ini
-                  AND n.DataNegociacaoPreco <= :dt_fim
-                  AND n.PrecoNegociado IS NOT NULL
+                GROUP BY Classe
             ), UltPrecoETLSegmento AS (
                 SELECT
                     Classe,
-                    ScoreSetor,
-                    ClassificacaoMacro,
                     ReceitaMensal AS PrecoNegociado,
                     ROW_NUMBER() OVER (
-                        PARTITION BY Classe, ScoreSetor, ClassificacaoMacro
+                        PARTITION BY Classe
                         ORDER BY DataEvento DESC, IDItem DESC
                     ) AS rn
                 FROM BaseItens
-                WHERE DataRef >= :dt_ini
-                  AND DataRef <= :dt_fim
+                WHERE DataInicioContrato IS NOT NULL
+                  AND DataFimContrato IS NOT NULL
+                  AND DataFimContrato >= DataInicioContrato
+                  AND DataInicioContrato <= :dt_fim
+                  AND DataFimContrato >= :dt_ini
                   AND ReceitaMensal IS NOT NULL
-            ), UltPrecoIASegmento AS (
-                SELECT
-                    b.Classe,
-                    b.ScoreSetor,
-                    b.ClassificacaoMacro,
-                    n.PrecoProposto AS PrecoRecomendadoIA,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY b.Classe, b.ScoreSetor, b.ClassificacaoMacro
-                        ORDER BY n.DataNegociacaoIA DESC, n.IDFatoKanbanNegociacaoPreco DESC
-                    ) AS rn
-                FROM BaseItens AS b
-                INNER JOIN Negociacoes AS n
-                    ON n.IDFatoKanbanCard = b.IDFatoKanbanCard
-                WHERE b.IDFatoKanbanCard IS NOT NULL
-                  AND n.DataNegociacaoIA >= :dt_ini
-                  AND n.DataNegociacaoIA <= :dt_fim
-                  AND n.PrecoProposto IS NOT NULL
             )
             SELECT
                 r.Classe,
                 r.ScoreSetor,
                 r.ClassificacaoMacro,
-                r.Faturamento,
-                ContratosMediaMes = ISNULL((
-                    SELECT SUM(CAST(m.QtdContratosMes AS float)) / :meses
-                    FROM MesesSegmento AS m
-                    WHERE m.Classe = r.Classe
-                      AND (m.ScoreSetor = r.ScoreSetor OR (m.ScoreSetor IS NULL AND r.ScoreSetor IS NULL))
-                      AND m.ClassificacaoMacro = r.ClassificacaoMacro
-                ), 0.0),
+                ISNULL(fat.Faturamento, 0.0) AS Faturamento,
+                ContratosMediaMes = CASE
+                    WHEN :dias_periodo > 0
+                    THEN CAST(ISNULL(r.ContratoDiasAtivos, 0) AS float) / CAST(:dias_periodo AS float)
+                    ELSE NULL
+                END,
                 OcupacaoPct = CASE
                     WHEN :capacidade_dia > 0 AND :dias_periodo > 0
                     THEN (CAST(ISNULL(r.SlotDiasOcupados, 0) AS float) / CAST((:capacidade_dia * :dias_periodo) AS float)) * 100.0
                     ELSE NULL
                 END,
-                UltimoPrecoNegociado = COALESCE(neg.PrecoNegociado, etl.PrecoNegociado),
-                PrecoRecomendadoIA = ia.PrecoRecomendadoIA,
+                UltimoPrecoNegociado = etl.PrecoNegociado,
+                PrecoRecomendadoIA = CAST(NULL AS decimal(18,2)),
+                r.QtdContratosPeriodo,
                 RenovacaoPct = CASE
                     WHEN ISNULL(r.QtdContratosPeriodo, 0) > 0
                     THEN (CAST(ISNULL(r.QtdContratosRenovacao, 0) AS float) / CAST(r.QtdContratosPeriodo AS float)) * 100.0
                     ELSE NULL
                 END
             FROM ResumoSegmento AS r
-            LEFT JOIN UltPrecoNegociadoSegmento AS neg
-                ON neg.Classe = r.Classe
-               AND (neg.ScoreSetor = r.ScoreSetor OR (neg.ScoreSetor IS NULL AND r.ScoreSetor IS NULL))
-               AND neg.ClassificacaoMacro = r.ClassificacaoMacro
-               AND neg.rn = 1
+            LEFT JOIN FaturamentoSegmentoPeriodo AS fat
+                ON fat.Classe = r.Classe
             LEFT JOIN UltPrecoETLSegmento AS etl
                 ON etl.Classe = r.Classe
-               AND (etl.ScoreSetor = r.ScoreSetor OR (etl.ScoreSetor IS NULL AND r.ScoreSetor IS NULL))
-               AND etl.ClassificacaoMacro = r.ClassificacaoMacro
                AND etl.rn = 1
-            LEFT JOIN UltPrecoIASegmento AS ia
-                ON ia.Classe = r.Classe
-               AND (ia.ScoreSetor = r.ScoreSetor OR (ia.ScoreSetor IS NULL AND r.ScoreSetor IS NULL))
-               AND ia.ClassificacaoMacro = r.ClassificacaoMacro
-               AND ia.rn = 1
-            WHERE ISNULL(r.Faturamento, 0.0) <> 0.0
+            WHERE ISNULL(fat.Faturamento, 0.0) <> 0.0
                OR ISNULL(r.QtdContratosPeriodo, 0) > 0
-            ORDER BY r.Faturamento DESC, r.Classe ASC;
+            ORDER BY ISNULL(r.QtdContratosPeriodo, 0) DESC, ISNULL(fat.Faturamento, 0.0) DESC, r.Classe ASC;
         """)
 
         linhas_painel = []
         linhas_segmentos = []
+        precos_tabela_por_periodo = {}
 
         for periodo in periodos:
             dt_ini_periodo = periodo["dt_ini"]
             dt_fim_periodo = periodo["dt_fim"]
             dias_periodo = (dt_fim_periodo - dt_ini_periodo).days + 1
             preco_tabela = _buscar_preco_tabela_painel(cod_ponto, dt_ini_periodo, dt_fim_periodo)
+            precos_tabela_por_periodo[periodo["label"]] = preco_tabela
 
             params = {
                 "cod_ponto": int(cod_ponto),
+                "cod_face": cod_face_filtro_sql,
                 "dt_ini": dt_ini_periodo,
                 "dt_fim": dt_fim_periodo,
-                "meses": int(periodo["meses"]),
                 "dias_periodo": int(dias_periodo),
                 "capacidade_dia": int(capacidade_dia),
                 "eh_digital": int(eh_digital),
@@ -20939,7 +20985,8 @@ def painel_detalhes(codponto: int):
                 renovacao_seg = _clamp_pct(row_seg.get("RenovacaoPct")) if row_seg.get("RenovacaoPct") is not None else None
                 linhas_segmentos.append({
                     "periodo": periodo["label"],
-                    "classe": _texto_limpo(row_seg.get("Classe")) or "Sem segmento",
+                    "periodo_meses": int(periodo["meses"]),
+                    "classe": _texto_limpo(row_seg.get("Classe")),
                     "score_setor": row_seg.get("ScoreSetor"),
                     "score_setor_txt": _fmt_numero_br(row_seg.get("ScoreSetor"), 2),
                     "classificacao_macro": _texto_limpo(row_seg.get("ClassificacaoMacro")) or "—",
@@ -20958,7 +21005,75 @@ def painel_detalhes(codponto: int):
                     "desempenho_renovacao_pct": renovacao_seg,
                     "desempenho_renovacao_txt": _fmt_pct_br(renovacao_seg, 0),
                     "desempenho_renovacao_barra": _clamp_pct(renovacao_seg),
+                    "_qtd_contratos_periodo": int(row_seg.get("QtdContratosPeriodo") or 0),
                 })
+
+        # Cada Classe da DimCnaes forma um bloco único de três linhas. A lista
+        # nasce exclusivamente dos contratos/itens encontrados no horizonte de
+        # 36 meses; períodos sem movimento recebem uma linha zerada para manter
+        # sempre a sequência 12, 24 e 36 meses do mesmo segmento.
+        segmentos_por_classe = {}
+        for linha in linhas_segmentos:
+            classe = _texto_limpo(linha.get("classe"))
+            if not classe:
+                continue
+            grupo = segmentos_por_classe.setdefault(
+                classe,
+                {"meta": linha, "periodos": {}},
+            )
+            grupo["periodos"][int(linha.get("periodo_meses") or 0)] = linha
+            if grupo["meta"].get("score_setor") is None and linha.get("score_setor") is not None:
+                grupo["meta"] = linha
+
+        def _chave_ordem_segmento(item):
+            classe, grupo = item
+            linha_36 = grupo["periodos"].get(36) or {}
+            return (
+                -int(linha_36.get("_qtd_contratos_periodo") or 0),
+                -float(linha_36.get("faturamento") or 0.0),
+                classe.casefold(),
+            )
+
+        linhas_segmentos_ordenadas = []
+        for indice_grupo, (classe, grupo) in enumerate(
+            sorted(segmentos_por_classe.items(), key=_chave_ordem_segmento),
+            start=1,
+        ):
+            meta = grupo["meta"]
+            for periodo in periodos:
+                meses = int(periodo["meses"])
+                linha = grupo["periodos"].get(meses)
+                if linha is None:
+                    preco_tabela = precos_tabela_por_periodo.get(periodo["label"])
+                    linha = {
+                        "periodo": periodo["label"],
+                        "periodo_meses": meses,
+                        "classe": classe,
+                        "score_setor": meta.get("score_setor"),
+                        "score_setor_txt": meta.get("score_setor_txt") or "—",
+                        "classificacao_macro": meta.get("classificacao_macro") or "—",
+                        "faturamento": 0.0,
+                        "faturamento_txt": _fmt_moeda_br(0.0),
+                        "contratos_media_mes": 0.0,
+                        "contratos_media_mes_txt": _fmt_numero_br(0.0, 1),
+                        "taxa_ocupacao_pct": 0.0,
+                        "taxa_ocupacao_txt": _fmt_pct_br(0.0, 1),
+                        "ultimo_preco_negociado": None,
+                        "ultimo_preco_negociado_txt": "—",
+                        "preco_tabela": preco_tabela,
+                        "preco_tabela_txt": _fmt_moeda_br(preco_tabela),
+                        "preco_recomendado_ia": None,
+                        "preco_recomendado_ia_txt": "—",
+                        "desempenho_renovacao_pct": 0.0,
+                        "desempenho_renovacao_txt": _fmt_pct_br(0.0, 0),
+                        "desempenho_renovacao_barra": 0.0,
+                        "_qtd_contratos_periodo": 0,
+                    }
+                linha["segmento_grupo"] = indice_grupo
+                linha.pop("_qtd_contratos_periodo", None)
+                linhas_segmentos_ordenadas.append(linha)
+
+        linhas_segmentos = linhas_segmentos_ordenadas
 
         return {
             "painel": linhas_painel,
@@ -20967,7 +21082,48 @@ def painel_detalhes(codponto: int):
             "eh_digital": bool(eh_digital),
         }
 
-    desempenho_comercial = _carregar_desempenho_comercial_painel(int(painel["id_painel"]), painel)
+    if modo_bloco_detalhe == "desempenho":
+        chave_face_cache = cod_face_filtro_sql or "TODAS"
+        cache_key_desempenho = (
+            f"painel_detalhes:desempenho:v9:{int(painel['id_painel'])}:{chave_face_cache}"
+        )
+        ignorar_cache_desempenho = str(request.args.get("nocache") or "").strip().lower() in {
+            "1", "true", "sim", "yes"
+        }
+
+        desempenho_comercial = None
+        origem_desempenho = "sql"
+        if not ignorar_cache_desempenho:
+            desempenho_comercial = _cache_get_seguro_paineis(cache_key_desempenho, padrao=None)
+            if desempenho_comercial is not None:
+                origem_desempenho = "cache"
+
+        if desempenho_comercial is None:
+            desempenho_comercial = _carregar_desempenho_comercial_painel(
+                int(painel["id_painel"]),
+                painel,
+            )
+            _cache_set_seguro_paineis(
+                cache_key_desempenho,
+                desempenho_comercial,
+                timeout_segundos=120,
+            )
+
+        try:
+            current_app.logger.info(
+                "PAINEL_DETALHES | bloco=desempenho | codponto=%s | origem=%s | tempo=%.3fs",
+                int(painel["id_painel"]),
+                origem_desempenho,
+                time.perf_counter() - tempo_inicio_rota,
+            )
+        except Exception:
+            pass
+
+        return jsonify(desempenho_comercial)
+
+    # O HTML inicial não aguarda as nove consultas do desempenho comercial.
+    # O template preserva as mesmas tabelas e as preenche pelo endpoint acima.
+    desempenho_comercial = {"painel": [], "segmentos": []}
 
     try:
         dt_ini_str = request.args.get("dt_ini") or request.args.get("dtIni") or request.args.get("data_ini") or ""
@@ -21687,133 +21843,44 @@ def painel_detalhes(codponto: int):
             }
         })
 
-    # Lista do filtro Segmento.
-    # Importante: não carregamos mais a lista oficial inteira da DimCnaes.
-    # Aqui entram apenas as Classes que possuem empresa da Receita Federal
-    # com Latitude/Longitude dentro do raio do painel aberto.
-    # Isso evita o usuário selecionar segmento sem empresa na região.
+    # A lista regional de segmentos continua sendo calculada com a mesma consulta
+    # e o mesmo corte circular, porém agora pela API de empresas. A varredura de
+    # até 50 mil linhas não bloqueia mais o primeiro byte do HTML.
     segmentos_cnae = []
-    try:
-        lat_painel_seg = _to_float_br(painel.get("lat"))
-        lng_painel_seg = _to_float_br(painel.get("lng"))
-        raio_segmentos_m = max(100, min(int(raio_m or 1000), 20000))
-
-        if lat_painel_seg is not None and lng_painel_seg is not None:
-            lat_delta_seg = raio_segmentos_m / 111320.0
-            cos_lat_seg = max(0.15, abs(math.cos(math.radians(float(lat_painel_seg)))))
-            lng_delta_seg = raio_segmentos_m / (111320.0 * cos_lat_seg)
-
-            # Busca só o box geográfico do painel para não varrer a base inteira.
-            # O filtro circular exato continua no Python usando a mesma função
-            # de distância já usada nesta tela.
-            sql_cnaes_segmentos_no_box = text("""
-                SELECT TOP (50000)
-                    e.CNAE AS CNAE,
-                    e.Latitude AS lat,
-                    e.Longitude AS lng,
-                    DistanciaAproximada = (
-                        POWER(e.Latitude - :lat_painel, 2) + POWER(e.Longitude - :lng_painel, 2)
-                    )
-                FROM [ReceitaFederal].[Silver].[DimEmpresasReceita] e
-                WHERE e.CNAE IS NOT NULL
-                  AND e.Latitude IS NOT NULL
-                  AND e.Longitude IS NOT NULL
-                  AND e.Latitude BETWEEN :lat_min AND :lat_max
-                  AND e.Longitude BETWEEN :lng_min AND :lng_max
-                  AND e.Latitude BETWEEN -90 AND 90
-                  AND e.Longitude BETWEEN -180 AND 180
-                ORDER BY DistanciaAproximada ASC;
-            """)
-
-            rows_cnaes_segmentos_no_box = db.session.execute(
-                sql_cnaes_segmentos_no_box,
-                {
-                    "lat_painel": float(lat_painel_seg),
-                    "lng_painel": float(lng_painel_seg),
-                    "lat_min": float(lat_painel_seg - lat_delta_seg),
-                    "lat_max": float(lat_painel_seg + lat_delta_seg),
-                    "lng_min": float(lng_painel_seg - lng_delta_seg),
-                    "lng_max": float(lng_painel_seg + lng_delta_seg),
-                }
-            ).mappings().all()
-
-            cnaes_no_raio = []
-            cnaes_no_raio_vistos = set()
-
-            for row_seg in rows_cnaes_segmentos_no_box:
-                lat_emp_seg = _to_float_br(row_seg.get("lat"))
-                lng_emp_seg = _to_float_br(row_seg.get("lng"))
-                if lat_emp_seg is None or lng_emp_seg is None:
-                    continue
-
-                dist_seg_m = _distancia_haversine_m(lat_painel_seg, lng_painel_seg, lat_emp_seg, lng_emp_seg)
-                if dist_seg_m is None or dist_seg_m > raio_segmentos_m:
-                    continue
-
-                cnae_txt_seg = re.sub(r"\D+", "", str(row_seg.get("CNAE") or "").strip())
-                if not cnae_txt_seg or cnae_txt_seg in cnaes_no_raio_vistos:
-                    continue
-
-                cnaes_no_raio_vistos.add(cnae_txt_seg)
-                cnaes_no_raio.append(cnae_txt_seg)
-
-            if cnaes_no_raio:
-                sql_segmentos_cnae = text("""
-                    SELECT DISTINCT
-                        Classe = LTRIM(RTRIM(CAST([Classe] AS nvarchar(250))))
-                    FROM [Integracao].[Silver].[DimCnaes]
-                    WHERE CAST(cnaepadrao AS varchar(30)) IN :cnaes
-                      AND NULLIF(LTRIM(RTRIM(CAST([Classe] AS nvarchar(250)))), '') IS NOT NULL
-                    ORDER BY Classe ASC
-                """).bindparams(bindparam("cnaes", expanding=True))
-
-                segmentos_cnae = [
-                    (row.get("Classe") or "").strip()
-                    for row in db.session.execute(sql_segmentos_cnae, {"cnaes": cnaes_no_raio}).mappings().all()
-                    if (row.get("Classe") or "").strip()
-                ]
-
-    except Exception as exc:
-        try:
-            current_app.logger.warning(
-                "Falha ao carregar segmentos disponíveis do painel %s: %s",
-                painel.get("id_painel"),
-                exc,
-            )
-        except Exception:
-            pass
-
-        # Fallback seguro: mantém o mapa funcionando e usa somente os segmentos
-        # que já existem no payload atual do mapa.
-        segmentos_cnae = sorted({
-            str(e.get("classe_cnae") or e.get("segmento") or "").strip()
-            for e in empresas_no_raio
-            if str(e.get("classe_cnae") or e.get("segmento") or "").strip()
-        }, key=lambda x: x.casefold())
 
     # Lista oficial do filtro Concorrente.
     # A tela exibe os valores distintos de [DataMining].[Silver].[DimConcorrentesEuromidia].[EmpresaProprietaria].
     # Importante: a lista do SELECT não filtra Latitude/Longitude; o nome do concorrente precisa aparecer no filtro
     # mesmo quando algum ponto da base ainda estiver sem coordenada. O mapa filtra coordenadas apenas no endpoint.
-    try:
-        sql_concorrentes_nomes = text("""
-            SELECT DISTINCT
-                EmpresaProprietaria = LTRIM(RTRIM(CAST([EmpresaProprietaria] AS nvarchar(260))))
-            FROM [DataMining].[Silver].[DimConcorrentesEuromidia]
-            WHERE NULLIF(LTRIM(RTRIM(CAST([EmpresaProprietaria] AS nvarchar(260)))), '') IS NOT NULL
-            ORDER BY EmpresaProprietaria ASC
-        """)
+    concorrentes_nomes = _cache_get_seguro_paineis(
+        "painel_detalhes:concorrentes_nomes:v2",
+        padrao=None,
+    )
+    if concorrentes_nomes is None:
+        try:
+            sql_concorrentes_nomes = text("""
+                SELECT DISTINCT
+                    EmpresaProprietaria = LTRIM(RTRIM(CAST([EmpresaProprietaria] AS nvarchar(260))))
+                FROM [DataMining].[Silver].[DimConcorrentesEuromidia]
+                WHERE NULLIF(LTRIM(RTRIM(CAST([EmpresaProprietaria] AS nvarchar(260)))), '') IS NOT NULL
+                ORDER BY EmpresaProprietaria ASC
+            """)
 
-        concorrentes_nomes = [
-            (row.get("EmpresaProprietaria") or "").strip()
-            for row in db.session.execute(sql_concorrentes_nomes).mappings().all()
-            if (row.get("EmpresaProprietaria") or "").strip()
-        ]
-    except Exception:
-        # Fallback seguro: se a consulta falhar, o HTML fica só com "Todos".
-        concorrentes_nomes = []
+            concorrentes_nomes = [
+                (row.get("EmpresaProprietaria") or "").strip()
+                for row in db.session.execute(sql_concorrentes_nomes).mappings().all()
+                if (row.get("EmpresaProprietaria") or "").strip()
+            ]
+            _cache_set_seguro_paineis(
+                "painel_detalhes:concorrentes_nomes:v2",
+                concorrentes_nomes,
+                timeout_segundos=600,
+            )
+        except Exception:
+            # Fallback seguro: se a consulta falhar, o HTML fica só com "Todos".
+            concorrentes_nomes = []
 
-    return render_template(
+    html_painel_detalhes = render_template(
         "euromidia/mapa_mercado.html",
         painel_json=painel,
         empresas_json=empresas_enriquecidas,
@@ -21835,6 +21902,17 @@ def painel_detalhes(codponto: int):
         fin_json=fin_json,
     )
 
+    try:
+        current_app.logger.info(
+            "PAINEL_DETALHES | bloco=html | codponto=%s | tempo=%.3fs",
+            int(painel["id_painel"]),
+            time.perf_counter() - tempo_inicio_rota,
+        )
+    except Exception:
+        pass
+
+    return html_painel_detalhes
+
 
 
 
@@ -21852,6 +21930,8 @@ def api_empresas_receita_segmento_painel(codponto: int):
     - Empresas vêm de [ReceitaFederal].[Silver].[DimEmpresasReceita].
     - Usa Latitude/Longitude da Receita e limita pelo raio do painel para não carregar a base inteira.
     """
+    tempo_inicio_api_empresas = time.perf_counter()
+
     if _usuario_logado_eh_perfil_vendedor():
         abort(403)
 
@@ -21947,6 +22027,31 @@ def api_empresas_receita_segmento_painel(codponto: int):
     limite_busca = max(limite * 4, 1000)
     limite_busca = min(limite_busca, 6000)
 
+    assinatura_filtro_empresas = hashlib.sha256(
+        json.dumps(
+            {
+                "codponto": int(codponto),
+                "raio_m": int(raio_m),
+                "limite": int(limite),
+                "segmentos": sorted(s.casefold() for s in segmentos),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8", errors="ignore")
+    ).hexdigest()
+    cache_key_api_empresas = f"painel_detalhes:empresas_receita:v3:{assinatura_filtro_empresas}"
+    resposta_empresas_cache = _cache_get_seguro_paineis(cache_key_api_empresas, padrao=None)
+    if resposta_empresas_cache is not None:
+        try:
+            current_app.logger.info(
+                "PAINEL_DETALHES | bloco=empresas_receita | codponto=%s | origem=cache | tempo=%.3fs",
+                int(codponto),
+                time.perf_counter() - tempo_inicio_api_empresas,
+            )
+        except Exception:
+            pass
+        return jsonify(resposta_empresas_cache)
+
     # Resolve a coordenada atual do painel aberto.
     sql_painel_coord = text("""
         SELECT TOP 1
@@ -21988,6 +22093,118 @@ def api_empresas_receita_segmento_painel(codponto: int):
     lat_delta = raio_m / 111320.0
     cos_lat = max(0.15, abs(math.cos(math.radians(lat_painel))))
     lng_delta = raio_m / (111320.0 * cos_lat)
+
+    # A consulta abaixo é a mesma que antes bloqueava a renderização do HTML.
+    # Ela permanece com TOP 50000, bounding box e Haversine para preservar o
+    # conjunto final de segmentos, mas agora roda sob demanda e fica em cache
+    # por painel/raio. O lote de 1800 CNAEs evita o limite de parâmetros do SQL Server.
+    cache_key_segmentos_disponiveis = (
+        f"painel_detalhes:segmentos_disponiveis:v2:{int(codponto)}:{int(raio_m)}"
+    )
+    segmentos_disponiveis = _cache_get_seguro_paineis(
+        cache_key_segmentos_disponiveis,
+        padrao=None,
+    )
+    segmentos_disponiveis_ok = segmentos_disponiveis is not None
+
+    if segmentos_disponiveis is None:
+        segmentos_disponiveis = []
+        try:
+            sql_cnaes_segmentos_no_box = text("""
+                SELECT TOP (50000)
+                    e.CNAE AS CNAE,
+                    e.Latitude AS lat,
+                    e.Longitude AS lng,
+                    DistanciaAproximada = (
+                        POWER(e.Latitude - :lat_painel, 2) + POWER(e.Longitude - :lng_painel, 2)
+                    )
+                FROM [ReceitaFederal].[Silver].[DimEmpresasReceita] e
+                WHERE e.CNAE IS NOT NULL
+                  AND e.Latitude IS NOT NULL
+                  AND e.Longitude IS NOT NULL
+                  AND e.Latitude BETWEEN :lat_min AND :lat_max
+                  AND e.Longitude BETWEEN :lng_min AND :lng_max
+                  AND e.Latitude BETWEEN -90 AND 90
+                  AND e.Longitude BETWEEN -180 AND 180
+                ORDER BY DistanciaAproximada ASC
+                OPTION (RECOMPILE);
+            """)
+
+            rows_cnaes_segmentos_no_box = db.session.execute(
+                sql_cnaes_segmentos_no_box,
+                {
+                    "lat_painel": float(lat_painel),
+                    "lng_painel": float(lng_painel),
+                    "lat_min": float(lat_painel - lat_delta),
+                    "lat_max": float(lat_painel + lat_delta),
+                    "lng_min": float(lng_painel - lng_delta),
+                    "lng_max": float(lng_painel + lng_delta),
+                },
+            ).mappings().all()
+
+            cnaes_no_raio = []
+            cnaes_no_raio_vistos = set()
+            for row_seg in rows_cnaes_segmentos_no_box:
+                lat_emp_seg = _to_float_api(row_seg.get("lat"))
+                lng_emp_seg = _to_float_api(row_seg.get("lng"))
+                if lat_emp_seg is None or lng_emp_seg is None:
+                    continue
+
+                distancia_seg = _distancia_haversine_api(
+                    lat_painel,
+                    lng_painel,
+                    lat_emp_seg,
+                    lng_emp_seg,
+                )
+                if distancia_seg is None or distancia_seg > raio_m:
+                    continue
+
+                cnae_normalizado = re.sub(r"\D+", "", _texto_limpo_api(row_seg.get("CNAE")))
+                if not cnae_normalizado or cnae_normalizado in cnaes_no_raio_vistos:
+                    continue
+
+                cnaes_no_raio_vistos.add(cnae_normalizado)
+                cnaes_no_raio.append(cnae_normalizado)
+
+            if cnaes_no_raio:
+                sql_segmentos_cnae_disponiveis = text("""
+                    SELECT DISTINCT
+                        Classe = LTRIM(RTRIM(CAST([Classe] AS nvarchar(250))))
+                    FROM [Integracao].[Silver].[DimCnaes]
+                    WHERE CAST(cnaepadrao AS varchar(30)) IN :cnaes
+                      AND NULLIF(LTRIM(RTRIM(CAST([Classe] AS nvarchar(250)))), '') IS NOT NULL
+                """).bindparams(bindparam("cnaes", expanding=True))
+
+                classes_vistas = set()
+                for inicio_lote in range(0, len(cnaes_no_raio), 1800):
+                    lote_cnaes = cnaes_no_raio[inicio_lote:inicio_lote + 1800]
+                    for row_classe in db.session.execute(
+                        sql_segmentos_cnae_disponiveis,
+                        {"cnaes": lote_cnaes},
+                    ).mappings().all():
+                        classe = _texto_limpo_api(row_classe.get("Classe"))
+                        if classe:
+                            classes_vistas.add(classe)
+
+                segmentos_disponiveis = sorted(classes_vistas, key=lambda valor: valor.casefold())
+
+            segmentos_disponiveis_ok = True
+            _cache_set_seguro_paineis(
+                cache_key_segmentos_disponiveis,
+                segmentos_disponiveis,
+                timeout_segundos=600,
+            )
+        except Exception as exc:
+            try:
+                current_app.logger.warning(
+                    "PAINEL_DETALHES | falha_segmentos_disponiveis | codponto=%s | erro=%s",
+                    int(codponto),
+                    exc,
+                )
+            except Exception:
+                pass
+            segmentos_disponiveis = []
+            segmentos_disponiveis_ok = False
 
     segmentos_norm = [s.upper() for s in segmentos if _texto_limpo_api(s)]
 
@@ -22033,6 +22250,8 @@ def api_empresas_receita_segmento_painel(codponto: int):
                 "items": [],
                 "total": 0,
                 "segmentos": segmentos,
+                "segmentos_disponiveis": segmentos_disponiveis,
+                "segmentos_disponiveis_ok": segmentos_disponiveis_ok,
                 "raio_m": raio_m,
                 "limite": limite,
             })
@@ -22067,12 +22286,28 @@ def api_empresas_receita_segmento_painel(codponto: int):
           AND ISNULL(c.BitAtivo, 1) = 1
     """)
 
-    cnpjs_clientes = {
-        cnpj_norm
-        for row_cnpj in db.session.execute(sql_cnpjs_clientes).mappings().all()
-        for cnpj_norm in [_normaliza_cnpj_api(row_cnpj.get("CNPJ"))]
-        if cnpj_norm
-    }
+    # O conjunto é global e idêntico para todos os painéis. Antes, as duas
+    # tabelas eram varridas a cada movimento de filtro do mapa. Mantemos a
+    # mesma consulta e a mesma normalização, reutilizando apenas o resultado.
+    cache_key_cnpjs_clientes = "painel_detalhes:cnpjs_clientes_ativos:v2"
+    cnpjs_clientes_cache = _cache_get_seguro_paineis(
+        cache_key_cnpjs_clientes,
+        padrao=None,
+    )
+    if cnpjs_clientes_cache is None:
+        cnpjs_clientes_cache = sorted({
+            cnpj_norm
+            for row_cnpj in db.session.execute(sql_cnpjs_clientes).mappings().all()
+            for cnpj_norm in [_normaliza_cnpj_api(row_cnpj.get("CNPJ"))]
+            if cnpj_norm
+        })
+        _cache_set_seguro_paineis(
+            cache_key_cnpjs_clientes,
+            cnpjs_clientes_cache,
+            timeout_segundos=300,
+        )
+
+    cnpjs_clientes = set(cnpjs_clientes_cache or [])
 
     cnpjs_painel = {
         cnpj_norm
@@ -22286,13 +22521,33 @@ def api_empresas_receita_segmento_painel(codponto: int):
     itens.sort(key=lambda item: (int(item.get("distancia_m") or 0), str(item.get("nome") or "")))
     itens = itens[:limite]
 
-    return jsonify({
+    resposta_empresas = {
         "items": itens,
         "total": len(itens),
         "segmentos": segmentos,
+        "segmentos_disponiveis": segmentos_disponiveis,
+        "segmentos_disponiveis_ok": segmentos_disponiveis_ok,
         "raio_m": raio_m,
         "limite": limite,
-    })
+    }
+    _cache_set_seguro_paineis(
+        cache_key_api_empresas,
+        resposta_empresas,
+        timeout_segundos=120,
+    )
+
+    try:
+        current_app.logger.info(
+            "PAINEL_DETALHES | bloco=empresas_receita | codponto=%s | origem=sql | itens=%s | segmentos=%s | tempo=%.3fs",
+            int(codponto),
+            len(itens),
+            len(segmentos_disponiveis or []),
+            time.perf_counter() - tempo_inicio_api_empresas,
+        )
+    except Exception:
+        pass
+
+    return jsonify(resposta_empresas)
 
 
 
@@ -22321,6 +22576,8 @@ def api_concorrentes_painel(codponto: int):
     - Se não existir concorrente dentro do raio, cai para a região do painel: Cidade/UF, depois UF, e por último a base mais próxima.
       Isso evita o problema de retornar 0 quando existe concorrente cadastrado, mas ele está fora do raio exato de 1 km.
     """
+    tempo_inicio_api_concorrentes = time.perf_counter()
+
     if _usuario_logado_eh_perfil_vendedor():
         abort(403)
 
@@ -22408,6 +22665,36 @@ def api_concorrentes_painel(codponto: int):
     raio_m = max(100, min(_to_int_api(request.args.get("raio_m"), 1000), 50000))
     limite = max(1, min(_to_int_api(request.args.get("limite"), 1200), 3000))
     limite_busca = max(limite * 3, 300)
+
+    assinatura_filtro_concorrentes = hashlib.sha256(
+        json.dumps(
+            {
+                "codponto": int(codponto),
+                "raio_m": int(raio_m),
+                "limite": int(limite),
+                "concorrentes": sorted(nome.casefold() for nome in concorrentes),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8", errors="ignore")
+    ).hexdigest()
+    cache_key_api_concorrentes = (
+        f"painel_detalhes:concorrentes:v3:{assinatura_filtro_concorrentes}"
+    )
+    resposta_concorrentes_cache = _cache_get_seguro_paineis(
+        cache_key_api_concorrentes,
+        padrao=None,
+    )
+    if resposta_concorrentes_cache is not None:
+        try:
+            current_app.logger.info(
+                "PAINEL_DETALHES | bloco=concorrentes | codponto=%s | origem=cache | tempo=%.3fs",
+                int(codponto),
+                time.perf_counter() - tempo_inicio_api_concorrentes,
+            )
+        except Exception:
+            pass
+        return jsonify(resposta_concorrentes_cache)
 
     # Resolve coordenada e região do painel aberto.
     sql_painel_dim = text("""
@@ -22653,7 +22940,7 @@ def api_concorrentes_painel(codponto: int):
     if not itens:
         escopo_usado = "sem_resultado"
 
-    return jsonify({
+    resposta_concorrentes = {
         "items": itens,
         "total": len(itens),
         "concorrentes": concorrentes_norm or ["todos"],
@@ -22669,7 +22956,25 @@ def api_concorrentes_painel(codponto: int):
             "lat": lat_painel,
             "lng": lng_painel,
         },
-    })
+    }
+    _cache_set_seguro_paineis(
+        cache_key_api_concorrentes,
+        resposta_concorrentes,
+        timeout_segundos=120,
+    )
+
+    try:
+        current_app.logger.info(
+            "PAINEL_DETALHES | bloco=concorrentes | codponto=%s | origem=sql | itens=%s | escopo=%s | tempo=%.3fs",
+            int(codponto),
+            len(itens),
+            escopo_usado,
+            time.perf_counter() - tempo_inicio_api_concorrentes,
+        )
+    except Exception:
+        pass
+
+    return jsonify(resposta_concorrentes)
 
 
 
@@ -23939,7 +24244,7 @@ def api_ocupacao_calendario():
             sql_existentes = text("""
                 SELECT
                      Origem = CAST('CONTRATO' AS varchar(20))
-                    ,IDItem = TRY_CONVERT(int, o.IDFatoOcupacaoPaineisEuromidia)
+                    ,IDItem = o.IDFatoOcupacaoPaineisEuromidia
                     ,DataInicio = TRY_CONVERT(date, o.DataInicio)
                     ,DataFim = TRY_CONVERT(date, o.DataFim)
                     ,Cota = o.Cota
@@ -23964,7 +24269,7 @@ def api_ocupacao_calendario():
 
                 SELECT
                      Origem = CAST('RESERVA' AS varchar(20))
-                    ,IDItem = TRY_CONVERT(int, o.IDFatoOcupacaoPaineisEuromidia)
+                    ,IDItem = o.IDFatoOcupacaoPaineisEuromidia
                     ,DataInicio = TRY_CONVERT(date, o.DataInicio)
                     ,DataFim = TRY_CONVERT(date, o.DataFim)
                     ,Cota = o.Cota
@@ -24441,12 +24746,12 @@ def api_ocupacao_reserva_dados_modal():
                     NULLIF(LTRIM(RTRIM(CAST(NumeroContrato AS varchar(50)))), ''),
                     CONCAT('C:', CONVERT(varchar(10), MIN(DataInicio), 23), '|', CONVERT(varchar(10), MAX(DataFim), 23))
                 ),
-                IDFatoControleContratosEuromidia = TRY_CONVERT(int, IDFatoControleContratos),
+                IDFatoControleContratosEuromidia = IDFatoControleContratos,
                 NumeroContrato = NULLIF(LTRIM(RTRIM(CAST(NumeroContrato AS varchar(50)))), ''),
                 NumeroPrevia = NULLIF(LTRIM(RTRIM(CAST(NumeroPrevia AS varchar(50)))), ''),
                 RazaoSocial = CAST('' AS varchar(200)),
                 CNPJ = CAST('' AS varchar(30)),
-                IDEmpresa = TRY_CONVERT(int, IDCliente)
+                IDEmpresa = IDCliente
             FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia]
             WHERE CodFace = :cod_face
               AND (:cod_ponto IS NULL OR :cod_ponto = '' OR CodPonto = :cod_ponto)
@@ -24908,17 +25213,17 @@ def _buscar_dados_email_confirmacao_reserva(ids_fato_ocupacao) -> dict:
         SELECT
              IDReserva = o.IDFatoOcupacaoPaineisEuromidia
             ,IDDimUsuariosDestinatario = COALESCE(
-                TRY_CONVERT(int, u_vendedor.IDDimUsuarios),
-                TRY_CONVERT(int, u_criador.IDDimUsuarios),
-                TRY_CONVERT(int, o.CriadoPorIDUsuario)
+                u_vendedor.IDDimUsuarios,
+                u_criador.IDDimUsuarios,
+                o.CriadoPorIDUsuario
              )
-            ,IDDimUsuariosVendedor = TRY_CONVERT(int, u_vendedor.IDDimUsuarios)
-            ,IDDimUsuariosCriador = TRY_CONVERT(int, u_criador.IDDimUsuarios)
-            ,IDUsuarioCriacaoRaw = TRY_CONVERT(int, o.CriadoPorIDUsuario)
-            ,IDFatoControleContratosEuromidia = TRY_CONVERT(int, o.IDFatoControleContratos)
+            ,IDDimUsuariosVendedor = u_vendedor.IDDimUsuarios
+            ,IDDimUsuariosCriador = u_criador.IDDimUsuarios
+            ,IDUsuarioCriacaoRaw = o.CriadoPorIDUsuario
+            ,IDFatoControleContratosEuromidia = o.IDFatoControleContratos
             ,IDFatoControleContratosItensEuromidia = CONVERT(int, NULL)
-            ,IDCliente = TRY_CONVERT(int, o.IDCliente)
-            ,IDVendedorReserva = TRY_CONVERT(int, o.IDVendedor)
+            ,IDCliente = o.IDCliente
+            ,IDVendedorReserva = o.IDVendedor
             ,EmailUsuario = COALESCE(
                 NULLIF(LTRIM(RTRIM(u_vendedor.Email)), ''),
                 NULLIF(LTRIM(RTRIM(u_criador.Email)), '')
@@ -26400,7 +26705,7 @@ def _calcular_plano_encaixe_range_reserva_digital(
     sql_existentes = text("""
         SELECT
              Origem = CAST('CONTRATO' AS varchar(20))
-            ,IDItem = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia)
+            ,IDItem = i.IDFatoControleContratosItensEuromidia
             ,DataInicio = TRY_CONVERT(date, i.DataInicioPrevisto)
             ,DataFim = COALESCE(
                 TRY_CONVERT(date, i.DataCancelamento),
@@ -26425,7 +26730,7 @@ def _calcular_plano_encaixe_range_reserva_digital(
 
         SELECT
              Origem = CAST('RESERVA' AS varchar(20))
-            ,IDItem = TRY_CONVERT(int, o.IDFatoOcupacaoPaineisEuromidia)
+            ,IDItem = o.IDFatoOcupacaoPaineisEuromidia
             ,DataInicio = TRY_CONVERT(date, o.DataInicio)
             ,DataFim = TRY_CONVERT(date, o.DataFim)
             ,Cota = o.Cota
@@ -28629,7 +28934,7 @@ def ocupacao_alterar_status(id_ocupacao: int):
                 IDDimFacesPaineis
             FROM [Integracao].[Silver].[DimFacesPaineis]
             WHERE
-                TRY_CONVERT(int, IDDimPaineisEuromidia) = TRY_CONVERT(int, :id_painel)
+                IDDimPaineisEuromidia = TRY_CONVERT(int, :id_painel)
                 AND LTRIM(RTRIM(ISNULL(CodFace,''))) = LTRIM(RTRIM(:codface))
             ORDER BY IDDimFacesPaineis DESC
         """)
@@ -29303,9 +29608,9 @@ def _obter_item_contrato_checkin(
     """Eu localizo o item ativo exato do contrato selecionado para o checkin."""
     sql = text("""
         SELECT TOP (1)
-            IDFatoControleContratosItensEuromidia = TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia),
-            IDFatoControleContratoEuromidia = TRY_CONVERT(int, i.IDFatoControleContratoEuromidia),
-            IDEmpresaAgencia = TRY_CONVERT(int, i.IDEmpresaAgencia),
+            IDFatoControleContratosItensEuromidia = i.IDFatoControleContratosItensEuromidia,
+            IDFatoControleContratoEuromidia = i.IDFatoControleContratoEuromidia,
+            IDEmpresaAgencia = i.IDEmpresaAgencia,
             BitAtivo = CAST(ISNULL(i.BitAtivo, 1) AS bit)
         FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
         WHERE
@@ -29313,7 +29618,7 @@ def _obter_item_contrato_checkin(
             AND i.CodPonto = :cod_ponto
             AND UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50))))) = UPPER(LTRIM(RTRIM(:cod_face)))
             AND ISNULL(i.BitAtivo, 1) = 1
-        ORDER BY TRY_CONVERT(int, i.IDFatoControleContratosItensEuromidia) DESC
+        ORDER BY i.IDFatoControleContratosItensEuromidia DESC
     """)
 
     row = db.session.execute(
@@ -29359,20 +29664,20 @@ def _buscar_destinatarios_externos_do_item_checkin(
             i.IDFatoControleContratosItensEuromidia = :id_fato_controle_contratos_item
             AND i.IDFatoControleContratoEuromidia = :id_fato_controle_contratos
             AND de.IDFatoControleContratosEuromidia = c.IDFatoControleContratosEuromidia
-            AND TRY_CONVERT(int, de.IDEmpresa) = TRY_CONVERT(int, c.IDEmpresa)
+            AND de.IDEmpresa = c.IDEmpresa
             AND ISNULL(i.BitAtivo, 1) = 1
             AND ISNULL(c.BitAtivo, 1) = 1
             AND ISNULL(de.BitAtivo, 1) = 1
             AND ISNULL(dei.BitAtivo, 1) = 1
             AND (
                 (
-                    TRY_CONVERT(int, i.IDEmpresaAgencia) IS NOT NULL
-                    AND TRY_CONVERT(int, de.IDEmpresaDestinatario) = TRY_CONVERT(int, i.IDEmpresaAgencia)
+                    i.IDEmpresaAgencia IS NOT NULL
+                    AND de.IDEmpresaDestinatario = i.IDEmpresaAgencia
                 )
                 OR
                 (
-                    TRY_CONVERT(int, i.IDEmpresaAgencia) IS NULL
-                    AND TRY_CONVERT(int, de.IDEmpresaDestinatario) = TRY_CONVERT(int, c.IDEmpresa)
+                    i.IDEmpresaAgencia IS NULL
+                    AND de.IDEmpresaDestinatario = c.IDEmpresa
                 )
             )
         ORDER BY
@@ -30401,8 +30706,8 @@ def _obter_card_vinculado_item_contrato_checkin(
 
     sql = text("""
         SELECT TOP (1)
-            id_card = TRY_CONVERT(int, i.IDFatoKanbanCard),
-            id_empresa_proprietaria = TRY_CONVERT(int, c.IDEmpresaProprietaria)
+            id_card = i.IDFatoKanbanCard,
+            id_empresa_proprietaria = c.IDEmpresaProprietaria
         FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] i
         LEFT JOIN [Kanban].[Silver].[FatoKanbanCard] c
             ON c.IDFatoKanbanCard = i.IDFatoKanbanCard
@@ -31738,12 +32043,12 @@ def checkin_contratos():
 
         sql_contratos_por_empresa = text("""
             SELECT DISTINCT TOP (200)
-                IDFatoControleContratosEuromidia = TRY_CONVERT(int, c.IDFatoControleContratosEuromidia),
+                IDFatoControleContratosEuromidia = c.IDFatoControleContratosEuromidia,
                 NumeroContrato = NULLIF(LTRIM(RTRIM(CAST(c.NumeroContrato AS varchar(50)))), ''),
                 NumeroPrevia = NULLIF(LTRIM(RTRIM(CAST(c.NumeroPrevia AS varchar(50)))), ''),
                 RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(c.RazaoSocial, c.MarcaExibida, ''))), ''),
                 CNPJ = NULLIF(LTRIM(RTRIM(CAST(c.CNPJ AS varchar(30)))), ''),
-                IDEmpresa = TRY_CONVERT(int, c.IDEmpresa)
+                IDEmpresa = c.IDEmpresa
             FROM [Integracao].[Silver].[FatoControleContratosEuromidia] c
             WHERE
                 c.IDEmpresa = :id_empresa
@@ -31755,7 +32060,7 @@ def checkin_contratos():
                     OR COALESCE(c.RazaoSocial, c.MarcaExibida, '') LIKE :q_like
                     OR REPLACE(REPLACE(REPLACE(REPLACE(CAST(c.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', ''), ' ', '') LIKE :q_digitos_like
                 )
-            ORDER BY TRY_CONVERT(int, c.IDFatoControleContratosEuromidia) DESC
+            ORDER BY c.IDFatoControleContratosEuromidia DESC
         """)
 
         contratos = []
@@ -31768,12 +32073,12 @@ def checkin_contratos():
         if not contratos and cnpj_empresa:
             sql_contratos_por_cnpj = text("""
                 SELECT DISTINCT TOP (200)
-                    IDFatoControleContratosEuromidia = TRY_CONVERT(int, c.IDFatoControleContratosEuromidia),
+                    IDFatoControleContratosEuromidia = c.IDFatoControleContratosEuromidia,
                     NumeroContrato = NULLIF(LTRIM(RTRIM(CAST(c.NumeroContrato AS varchar(50)))), ''),
                     NumeroPrevia = NULLIF(LTRIM(RTRIM(CAST(c.NumeroPrevia AS varchar(50)))), ''),
                     RazaoSocial = NULLIF(LTRIM(RTRIM(COALESCE(c.RazaoSocial, c.MarcaExibida, ''))), ''),
                     CNPJ = NULLIF(LTRIM(RTRIM(CAST(c.CNPJ AS varchar(30)))), ''),
-                    IDEmpresa = TRY_CONVERT(int, c.IDEmpresa)
+                    IDEmpresa = c.IDEmpresa
                 FROM [Integracao].[Silver].[FatoControleContratosEuromidia] c
                 WHERE
                     REPLACE(REPLACEPLACE(REPLACE(REPLACE(REPLACE(CAST(c.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', ''), ' ', '') = :cnpj
@@ -31785,7 +32090,7 @@ def checkin_contratos():
                         OR COALESCE(c.RazaoSocial, c.MarcaExibida, '') LIKE :q_like
                         OR REPLACE(REPLACE(REPLACE(REPLACE(CAST(c.CNPJ AS varchar(30)), '.', ''), '/', ''), '-', ''), ' ', '') LIKE :q_digitos_like
                     )
-                ORDER BY TRY_CONVERT(int, c.IDFatoControleContratosEuromidia) DESC
+                ORDER BY c.IDFatoControleContratosEuromidia DESC
             """)
 
             contratos = db.session.execute(
@@ -32265,10 +32570,7 @@ def _listar_checkins_publicos_por_compartilhamento(id_compartilhamento: int) -> 
                 ON de.IDFatoControleContratosEuromidia = cb.IDFatoControleContratosEuromidia
             WHERE
                 ISNULL(de.BitAtivo, 1) = 1
-                AND TRY_CONVERT(int, de.IDEmpresaDestinatario) = TRY_CONVERT(
-                    int,
-                    COALESCE(cb.IDEmpresaCompartilhamento, cb.IDEmpresaCheckinOrigem)
-                )
+                AND de.IDEmpresaDestinatario = COALESCE(cb.IDEmpresaCompartilhamento, cb.IDEmpresaCheckinOrigem)
             ORDER BY de.IDFatoContratoDestinatarioExterno DESC
         ),
         ItensPermitidos AS (
@@ -32277,7 +32579,7 @@ def _listar_checkins_publicos_por_compartilhamento(id_compartilhamento: int) -> 
                 i.IDFatoControleContratoEuromidia,
                 i.CodPonto AS CodPonto,
                 UPPER(LTRIM(RTRIM(CAST(i.CodFace AS varchar(50))))) AS CodFace,
-                TRY_CONVERT(int, i.IDEmpresaAgencia) AS IDEmpresaAgencia
+                i.IDEmpresaAgencia AS IDEmpresaAgencia
             FROM DestinatarioBase d
             INNER JOIN [Integracao].[Silver].[FatoContratoDestinatarioExternoItens] dei
                 ON dei.IDFatoContratoDestinatarioExterno = d.IDFatoContratoDestinatarioExterno
@@ -32289,13 +32591,13 @@ def _listar_checkins_publicos_por_compartilhamento(id_compartilhamento: int) -> 
                 AND ISNULL(i.BitAtivo, 1) = 1
                 AND (
                     (
-                        TRY_CONVERT(int, i.IDEmpresaAgencia) IS NOT NULL
-                        AND TRY_CONVERT(int, d.IDEmpresaDestinatario) = TRY_CONVERT(int, i.IDEmpresaAgencia)
+                        i.IDEmpresaAgencia IS NOT NULL
+                        AND d.IDEmpresaDestinatario = i.IDEmpresaAgencia
                     )
                     OR
                     (
-                        TRY_CONVERT(int, i.IDEmpresaAgencia) IS NULL
-                        AND TRY_CONVERT(int, d.IDEmpresaDestinatario) = TRY_CONVERT(int, d.IDEmpresa)
+                        i.IDEmpresaAgencia IS NULL
+                        AND d.IDEmpresaDestinatario = d.IDEmpresa
                     )
                 )
         )
@@ -32340,14 +32642,14 @@ def _listar_checkins_publicos_por_compartilhamento(id_compartilhamento: int) -> 
             AND (
                 (
                     ip.IDEmpresaAgencia IS NOT NULL
-                    AND TRY_CONVERT(int, ch.IDEmpresa) = TRY_CONVERT(int, d.IDEmpresaDestinatario)
+                    AND ch.IDEmpresa = d.IDEmpresaDestinatario
                 )
                 OR
                 (
                     ip.IDEmpresaAgencia IS NULL
                     AND (
-                        TRY_CONVERT(int, ch.IDEmpresa) = TRY_CONVERT(int, d.IDEmpresaDestinatario)
-                        OR TRY_CONVERT(int, ch.IDEmpresa) = TRY_CONVERT(int, d.IDEmpresa)
+                        ch.IDEmpresa = d.IDEmpresaDestinatario
+                        OR ch.IDEmpresa = d.IDEmpresa
                         OR ch.IDEmpresa IS NULL
                     )
                 )
@@ -33858,8 +34160,8 @@ def _buscar_registro_anexo_contrato_euromidia(id_contrato: int, id_arquivo: int)
         LEFT JOIN [Integracao].[Silver].[FatoContratoD4] AS d4 WITH (NOLOCK)
             ON d4.IDFatoContratoD4 = a.IDFatoContratoD4
            AND ISNULL(d4.BitAtivo, 1) = 1
-        WHERE TRY_CONVERT(int, a.IDFatoArquivosContratos) = :id_arquivo
-          AND TRY_CONVERT(int, a.IDFatoControleContratosEuromidia) = :id_contrato;
+        WHERE a.IDFatoArquivosContratos = :id_arquivo
+          AND a.IDFatoControleContratosEuromidia = :id_contrato;
     """)
 
     try:
@@ -33903,7 +34205,7 @@ def _buscar_registros_anexos_pdf_contrato_euromidia(id_contrato: int) -> list[di
         LEFT JOIN [Integracao].[Silver].[FatoContratoD4] AS d4 WITH (NOLOCK)
             ON d4.IDFatoContratoD4 = a.IDFatoContratoD4
            AND ISNULL(d4.BitAtivo, 1) = 1
-        WHERE TRY_CONVERT(int, a.IDFatoControleContratosEuromidia) = :id_contrato
+        WHERE a.IDFatoControleContratosEuromidia = :id_contrato
           AND (
                 LOWER(REPLACE(LTRIM(RTRIM(COALESCE(a.Extensao, ''))), '.', '')) = 'pdf'
              OR LOWER(LTRIM(RTRIM(COALESCE(a.NomeArquivo, '')))) LIKE '%.pdf'
@@ -36508,7 +36810,7 @@ def contratos_detalhe(id_contrato: int):
             LEFT JOIN [Integracao].[Silver].[FatoContratoD4] AS d4 WITH (NOLOCK)
                 ON d4.IDFatoContratoD4 = a.IDFatoContratoD4
                AND ISNULL(d4.BitAtivo, 1) = 1
-            WHERE TRY_CONVERT(int, a.IDFatoControleContratosEuromidia) = :id_contrato
+            WHERE a.IDFatoControleContratosEuromidia = :id_contrato
               AND (
                     LOWER(REPLACE(LTRIM(RTRIM(COALESCE(a.Extensao, ''))), '.', '')) = 'pdf'
                  OR LOWER(LTRIM(RTRIM(COALESCE(a.NomeArquivo, '')))) LIKE '%.pdf'
