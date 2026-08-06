@@ -13715,7 +13715,10 @@ def lista_aprovacao_contratos():
     status_selecionados = _normalizar_lista_status()
     tipos_selecionados = _normalizar_lista_tipo_solicitacao()
 
-    where_parts = ["ISNULL(fsce.[BitAtivo], 1) = 1"]
+    where_parts = [
+        "ISNULL(fsce.[BitAtivo], 1) = 1",
+        "fsce.[IDDimUsuariosEnvioAvaliacao] IS NOT NULL",
+    ]
     params = {}
 
     if q:

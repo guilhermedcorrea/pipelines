@@ -264,6 +264,15 @@
     line-height: 1;
   }
 
+  /*
+   * A classe .kb-btn define display:inline-flex e, por ser CSS da aplicação,
+   * pode prevalecer sobre o display:none padrão do atributo HTML hidden.
+   * Esta regra garante que o envio para aprovação não apareça fora da fase 4.
+   */
+  #btnEnviarAprovacao[hidden]{
+    display:none !important;
+  }
+
   .kb-btn:hover{
     box-shadow: var(--kb-shadow2);
     transform: translateY(-1px);
@@ -4747,6 +4756,7 @@
       <div id="listaNotas" style="display:grid;gap:10px;"></div>
 
       <div class="kb-row" style="justify-content:flex-end;">
+        <button class="kb-btn" id="btnEnviarAprovacao" type="button" hidden disabled title="Enviar este contrato para a tela de aprovação." aria-busy="false">Enviar Aprovação</button>
         <button class="kb-btn primary" id="btnSalvarCard">Salvar alterações</button>
       </div>
 
@@ -5083,6 +5093,7 @@
     "urlObservacoesOrcamento": url_for('static', filename='imagens/OrcamentoEuromidia/Observacoes.png'),
     "urlRodapeOrcamento": url_for('static', filename='imagens/OrcamentoEuromidia/RodapeOrcamentoEuromidia.jpeg'),
     "urlApiCardDetalheTemplate": url_for('kanban.api_card_detalhe', id_card=0).replace('/0', '/__ID_CARD__'),
+    "urlApiEnviarAprovacaoTemplate": url_for('kanban.api_card_enviar_aprovacao', id_card=0).replace('/0/', '/__ID_CARD__/'),
     "urlApiCardOrcamentoTemplate": url_for('kanban.api_card_orcamento', id_card=0).replace('/0/', '/__ID_CARD__/')
   } | tojson }}
 </script>
@@ -6149,6 +6160,226 @@
 })();
 </script>
 <script src="{{ url_for('static', filename='kanbanJS/kanban_view.js', v='20260731_orcamento_impressao_faixa_v2') }}"></script>
+<script>
+(() => {
+  "use strict";
+
+  const ID_FASE_ENVIO_APROVACAO = 4;
+  const botaoEnviar = document.getElementById("btnEnviarAprovacao");
+  const cardIdVisual = document.getElementById("cardIdVisual");
+  const modalCard = document.getElementById("modalCard");
+  const mensagemCard = document.getElementById("msgCard");
+  const elementoConfig = document.getElementById("kanban-view-config");
+
+  if (!(botaoEnviar instanceof HTMLButtonElement) || !elementoConfig) return;
+
+  let configuracao = {};
+  try {
+    configuracao = JSON.parse(elementoConfig.textContent || "{}");
+  } catch (_) {
+    configuracao = {};
+  }
+
+  const urlDetalheTemplate = String(configuracao.urlApiCardDetalheTemplate || "").trim();
+  const urlEnviarTemplate = String(configuracao.urlApiEnviarAprovacaoTemplate || "").trim();
+  const fetchAnterior = window.fetch.bind(window);
+  const seletorDetalheCard = /\/api\/cards\/(\d+)\/?(?:[?#]|$)/i;
+  let sequenciaCarregamentoEstado = 0;
+  const estado = {
+    idCard: null,
+    idFase: null,
+    enviado: false,
+    enviando: false
+  };
+
+  function atualizarBotao() {
+    const deveExibir = Number(estado.idFase || 0) === ID_FASE_ENVIO_APROVACAO
+      && Number(estado.idCard || 0) > 0;
+
+    botaoEnviar.hidden = !deveExibir;
+    botaoEnviar.style.display = deveExibir ? "" : "none";
+    botaoEnviar.disabled = !deveExibir || estado.enviado || estado.enviando;
+    botaoEnviar.textContent = estado.enviando ? "Enviando..." : "Enviar Aprovação";
+    botaoEnviar.title = estado.enviado
+      ? "Este contrato já foi enviado para a tela de aprovação."
+      : "Enviar este contrato para a tela de aprovação.";
+    botaoEnviar.setAttribute("aria-busy", estado.enviando ? "true" : "false");
+  }
+
+  function exibirMensagem(texto, sucesso) {
+    if (!mensagemCard) {
+      window.alert(texto);
+      return;
+    }
+
+    mensagemCard.textContent = texto;
+    mensagemCard.style.display = "block";
+    mensagemCard.style.color = sucesso ? "#166534" : "#B91C1C";
+  }
+
+  function aplicarPayloadDetalhe(payload, idCardUrl) {
+    if (!payload || typeof payload !== "object") return;
+
+    const card = payload.card && typeof payload.card === "object" ? payload.card : {};
+    const idCard = Number(card.IDFatoKanbanCard || card.id_card || idCardUrl || 0);
+    const idFase = Number(card.IDDimKanbanFaseAtual || card.id_fase_atual || 0);
+
+    if (!idCard || !idFase) return;
+
+    const mudouCard = Number(estado.idCard || 0) !== idCard;
+    estado.idCard = idCard;
+    estado.idFase = idFase;
+    estado.enviando = false;
+
+    if (Object.prototype.hasOwnProperty.call(payload, "envio_aprovacao")) {
+      estado.enviado = Boolean(payload.envio_aprovacao?.enviado);
+    } else if (mudouCard) {
+      estado.enviado = false;
+    }
+
+    atualizarBotao();
+  }
+
+  function sincronizarEstadoComModal() {
+    const idCard = Number(String(cardIdVisual?.textContent || "").replace(/\D+/g, "") || 0);
+    const idFase = Number(modalCard?.dataset?.idFaseAtual || 0);
+
+    if (!idCard || !idFase) {
+      estado.idCard = idCard || null;
+      estado.idFase = idFase || null;
+      estado.enviando = false;
+      atualizarBotao();
+      return;
+    }
+
+    const mudouCard = Number(estado.idCard || 0) !== idCard;
+    const mudouFase = Number(estado.idFase || 0) !== idFase;
+
+    estado.idCard = idCard;
+    estado.idFase = idFase;
+    estado.enviando = false;
+
+    if (mudouCard) {
+      estado.enviado = false;
+    }
+
+    atualizarBotao();
+
+    if (mudouCard || mudouFase) {
+      carregarEstadoCard(idCard);
+    }
+  }
+
+  function obterUrl(recurso) {
+    if (typeof recurso === "string") return recurso;
+    if (recurso instanceof URL) return recurso.href;
+    if (recurso && typeof recurso.url === "string") return recurso.url;
+    return "";
+  }
+
+  async function carregarEstadoCard(idCard) {
+    const idCardInt = Number(idCard || 0);
+    if (!idCardInt || !urlDetalheTemplate) return;
+
+    const sequenciaAtual = ++sequenciaCarregamentoEstado;
+    try {
+      const url = urlDetalheTemplate.replace("__ID_CARD__", String(idCardInt));
+      const resposta = await fetchAnterior(url, {
+        method: "GET",
+        headers: { "Accept": "application/json" }
+      });
+      const payload = await resposta.json().catch(() => ({}));
+
+      if (sequenciaAtual !== sequenciaCarregamentoEstado || !resposta.ok) return;
+      aplicarPayloadDetalhe(payload, idCardInt);
+    } catch (_) {
+      /* O carregamento normal do modal continua funcionando mesmo sem este fallback. */
+    }
+  }
+
+  window.fetch = async (...argumentos) => {
+    const resposta = await fetchAnterior(...argumentos);
+    const url = obterUrl(argumentos[0]);
+    const correspondencia = url.match(seletorDetalheCard);
+
+    if (correspondencia) {
+      resposta.clone().json().then((payload) => {
+        aplicarPayloadDetalhe(payload, Number(correspondencia[1] || 0));
+      }).catch(() => {
+        /* A resposta original continua sendo tratada pelo Kanban. */
+      });
+    }
+
+    return resposta;
+  };
+
+  document.addEventListener("click", (evento) => {
+    if (evento.target instanceof Element && evento.target.closest(".kb-card")) {
+      botaoEnviar.hidden = true;
+    }
+  }, true);
+
+  if (cardIdVisual) {
+    new MutationObserver(() => {
+      sincronizarEstadoComModal();
+    }).observe(cardIdVisual, { childList: true, subtree: true, characterData: true });
+  }
+
+  if (modalCard) {
+    new MutationObserver(() => {
+      sincronizarEstadoComModal();
+    }).observe(modalCard, {
+      attributes: true,
+      attributeFilter: ["data-id-fase-atual"]
+    });
+  }
+
+  botaoEnviar.addEventListener("click", async () => {
+    const idCard = Number(estado.idCard || 0);
+    if (!idCard || Number(estado.idFase || 0) !== ID_FASE_ENVIO_APROVACAO || estado.enviado || estado.enviando) {
+      return;
+    }
+
+    if (!urlEnviarTemplate) {
+      exibirMensagem("A rota de envio para aprovação não está configurada.", false);
+      return;
+    }
+
+    estado.enviando = true;
+    atualizarBotao();
+
+    try {
+      const tokenCsrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+      const url = urlEnviarTemplate.replace("__ID_CARD__", String(idCard));
+      const resposta = await fetchAnterior(url, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "X-CSRFToken": tokenCsrf
+        },
+        body: JSON.stringify({})
+      });
+      const payload = await resposta.json().catch(() => ({}));
+
+      if (!resposta.ok || payload.ok !== true) {
+        throw new Error(payload.msg || "Não foi possível enviar o contrato para aprovação.");
+      }
+
+      estado.enviado = Boolean(payload.envio_aprovacao?.enviado || payload.ja_enviado);
+      estado.enviando = false;
+      atualizarBotao();
+      exibirMensagem(payload.msg || "Contrato enviado para aprovação com sucesso.", true);
+    } catch (erro) {
+      estado.enviando = false;
+      atualizarBotao();
+      exibirMensagem(erro?.message || "Não foi possível enviar o contrato para aprovação.", false);
+    }
+  });
+
+  atualizarBotao();
+})();
+</script>
 <script>
 (() => {
   "use strict";

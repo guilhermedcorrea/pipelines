@@ -8403,6 +8403,63 @@ def _obter_solicitacao_contrato_ativa_por_card(id_card: int) -> dict[str, Any] |
     return dict(row) if row else None
 
 
+def _obter_estado_envio_aprovacao_card(id_card: int) -> dict[str, Any]:
+    """Retorna se a solicitação mais recente do card já foi enviada manualmente para aprovação."""
+    estado_padrao = {
+        "id_solicitacao": None,
+        "enviado": False,
+        "id_usuario_envio": None,
+        "data_envio": None,
+        "id_status_contrato": None,
+    }
+
+    if not _objeto_existe(TABELA_SOLICITACAO_CONTRATO):
+        return estado_padrao
+
+    try:
+        row = db.session.execute(
+            text(
+                f"""
+                SELECT TOP (1)
+                    IDFatoSolicitacaoContratoEuromidia,
+                    IDDimUsuariosEnvioAvaliacao,
+                    DataEnvioAvaliacao,
+                    IDDimStatusContratos
+                FROM {TABELA_SOLICITACAO_CONTRATO}
+                WHERE IDFatoKanbanCard = :id_card
+                ORDER BY
+                    DataAtualizacao DESC,
+                    DataCriacao DESC,
+                    IDFatoSolicitacaoContratoEuromidia DESC;
+                """
+            ),
+            {"id_card": int(id_card)},
+        ).mappings().first()
+    except Exception:
+        current_app.logger.exception(
+            "KANBAN | falha ao consultar estado de envio para aprovação | id_card=%s",
+            id_card,
+        )
+        return estado_padrao
+
+    if not row:
+        return estado_padrao
+
+    data_envio = row.get("DataEnvioAvaliacao")
+    id_usuario_envio = _int_ou_none(row.get("IDDimUsuariosEnvioAvaliacao"))
+
+    return {
+        "id_solicitacao": _int_ou_none(row.get("IDFatoSolicitacaoContratoEuromidia")),
+        # O usuário de envio é o marcador explícito do clique. Registros antigos da
+        # fase 4 podem ter DataEnvioAvaliacao preenchida automaticamente, mas não
+        # possuem IDDimUsuariosEnvioAvaliacao e, portanto, continuam como rascunho.
+        "enviado": bool(id_usuario_envio),
+        "id_usuario_envio": id_usuario_envio,
+        "data_envio": data_envio.isoformat() if hasattr(data_envio, "isoformat") else data_envio,
+        "id_status_contrato": _int_ou_none(row.get("IDDimStatusContratos")),
+    }
+
+
 def _card_tem_tag_contrato_em_avaliacao(id_card: int) -> bool:
     sql = text(
         """
@@ -10722,7 +10779,9 @@ def _sincronizar_snapshot_solicitacao_contrato_do_card(
             TABELA_SOLICITACAO_CONTRATO,
             "IDFatoSolicitacaoContratoEuromidia",
             valores_solicitacao,
-            colunas_getdate=("DataCriacao", "DataAtualizacao", "DataEnvioAvaliacao"),
+            # Chegar à fase 4 cria apenas o rascunho. DataEnvioAvaliacao passa a
+            # existir somente quando o usuário clicar em "Enviar Aprovação".
+            colunas_getdate=("DataCriacao", "DataAtualizacao"),
         )
         header_igual = False
 
@@ -21461,6 +21520,7 @@ def api_card_detalhe(id_card: int):
 
             if versao_cache:
                 _aplicar_versao_concorrencia_dict(card_cache, versao_cache)
+                em_cache["envio_aprovacao"] = _obter_estado_envio_aprovacao_card(int(id_card))
                 return jsonify(em_cache)
 
             current_app.logger.warning(
@@ -21569,6 +21629,8 @@ def api_card_detalhe(id_card: int):
     if "painelFaces" not in payload:
         payload["painelFaces"] = payload.get("painel_faces", []) or []
 
+    payload["envio_aprovacao"] = _obter_estado_envio_aprovacao_card(int(id_card))
+
     if not pode_ver_custo_margem:
         payload = _ocultar_custo_margem_payload(payload)
 
@@ -21585,6 +21647,186 @@ def api_card_detalhe(id_card: int):
 
 
 
+
+
+@kanban_bp.route("/api/cards/<int:id_card>/enviar-aprovacao", methods=["POST"])
+@login_required
+@limiter.limit("30/minute")
+def api_card_enviar_aprovacao(id_card: int):
+    """Libera manualmente para a fila administrativa a solicitação do card na fase 4."""
+    id_usuario = _assert_login()
+    id_emp = _id_empresa_usuario_or_403()
+
+    try:
+        card = _obter_card_autorizado(int(id_card))
+        if not card:
+            return jsonify({"ok": False, "msg": "Card não encontrado."}), 404
+
+        id_fase_atual = int(card.get("IDDimKanbanFaseAtual") or 0)
+        if id_fase_atual != int(ID_FASE_FORMULARIO_CONTRATO):
+            return jsonify(
+                {
+                    "ok": False,
+                    "msg": "O contrato somente pode ser enviado para aprovação quando o card estiver na fase 4.",
+                }
+            ), 409
+
+        id_kanban = int(card.get("IDDimKanban") or 0)
+        estado_antes = _obter_estado_envio_aprovacao_card(int(id_card))
+
+        if estado_antes.get("enviado"):
+            return jsonify(
+                {
+                    "ok": True,
+                    "msg": "Este contrato já foi enviado para aprovação.",
+                    "envio_aprovacao": estado_antes,
+                    "ja_enviado": True,
+                }
+            )
+
+        # Atualiza o snapshot com os últimos dados efetivamente salvos no card antes
+        # de liberar a solicitação para a tela administrativa.
+        sincronizacao = _sincronizar_ativacao_solicitacao_por_fase_do_card(
+            id_card=int(id_card),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
+        )
+
+        if not sincronizacao.get("sincronizado"):
+            motivo = str(sincronizacao.get("motivo") or "solicitacao_nao_sincronizada").strip()
+            raise ValueError(
+                "Não foi possível preparar o contrato para aprovação. "
+                f"Motivo técnico: {motivo}."
+            )
+
+        id_solicitacao = _int_ou_none(sincronizacao.get("id_solicitacao"))
+        if not id_solicitacao:
+            estado_sincronizado = _obter_estado_envio_aprovacao_card(int(id_card))
+            id_solicitacao = _int_ou_none(estado_sincronizado.get("id_solicitacao"))
+
+        if not id_solicitacao:
+            raise ValueError("A solicitação do contrato não foi encontrada após salvar o card.")
+
+        resultado_update = db.session.execute(
+            text(
+                f"""
+                UPDATE {TABELA_SOLICITACAO_CONTRATO}
+                   SET IDDimUsuariosEnvioAvaliacao = :id_usuario,
+                       DataEnvioAvaliacao = GETDATE(),
+                       IDDimStatusContratos = :id_status_contrato,
+                       BitAtivo = 1,
+                       DataAtualizacao = GETDATE()
+                 WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
+                   AND IDFatoKanbanCard = :id_card
+                   AND IDDimUsuariosEnvioAvaliacao IS NULL;
+                """
+            ),
+            {
+                "id_usuario": int(id_usuario),
+                "id_status_contrato": int(_obter_id_status_contrato_em_avaliacao()),
+                "id_solicitacao": int(id_solicitacao),
+                "id_card": int(id_card),
+            },
+        )
+
+        if int(resultado_update.rowcount or 0) == 0:
+            estado_concorrente = _obter_estado_envio_aprovacao_card(int(id_card))
+            if estado_concorrente.get("enviado"):
+                db.session.rollback()
+                return jsonify(
+                    {
+                        "ok": True,
+                        "msg": "Este contrato já foi enviado para aprovação.",
+                        "envio_aprovacao": estado_concorrente,
+                        "ja_enviado": True,
+                    }
+                )
+            raise RuntimeError("Nenhuma solicitação pendente foi liberada para aprovação.")
+
+        coluna_atividade_item = _obter_nome_coluna_atividade_solicitacao_item()
+        if coluna_atividade_item and _objeto_existe(TABELA_SOLICITACAO_CONTRATO_ITEM):
+            sets_atividade_item = [f"[{coluna_atividade_item}] = 1"]
+            if coluna_atividade_item != "BitAtivo" and _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "BitAtivo"):
+                sets_atividade_item.append("BitAtivo = 1")
+            if _coluna_existe(TABELA_SOLICITACAO_CONTRATO_ITEM, "DataAtualizacao"):
+                sets_atividade_item.append("DataAtualizacao = GETDATE()")
+
+            db.session.execute(
+                text(
+                    f"""
+                    UPDATE {TABELA_SOLICITACAO_CONTRATO_ITEM}
+                       SET {', '.join(sets_atividade_item)}
+                     WHERE IDFatoSolicitacaoContratoEuromidia = :id_solicitacao
+                       AND IDFatoKanbanCard = :id_card;
+                    """
+                ),
+                {
+                    "id_solicitacao": int(id_solicitacao),
+                    "id_card": int(id_card),
+                },
+            )
+
+        _aplicar_tag_no_card(
+            id_card=int(id_card),
+            id_tag=int(ID_TAG_CONTRATO_EM_AVALIACAO),
+            id_usuario=int(id_usuario),
+            id_empresa_proprietaria=int(id_emp),
+        )
+
+        estado_depois = _obter_estado_envio_aprovacao_card(int(id_card))
+        _registrar_log_card(
+            id_card=int(id_card),
+            id_kanban=int(id_kanban),
+            id_empresa_proprietaria=int(id_emp),
+            id_usuario_acao=int(id_usuario),
+            tipo_evento="CONTRATO_ENVIADO_APROVACAO",
+            subtipo_evento="ENVIO_MANUAL_FASE_4",
+            id_fase_de=int(id_fase_atual),
+            id_fase_para=int(id_fase_atual),
+            observacao=f"Solicitação #{int(id_solicitacao)} enviada manualmente para aprovação.",
+            tabela_origem=TABELA_SOLICITACAO_CONTRATO,
+            id_registro_origem=int(id_solicitacao),
+            payload_antes={"envio_aprovacao": estado_antes},
+            payload_depois={"envio_aprovacao": estado_depois},
+        )
+
+        db.session.commit()
+        _invalidar_kanban(id_emp=int(id_emp), id_kanban=int(id_kanban), id_card=int(id_card))
+        _emitir_evento_kanban(
+            int(id_kanban),
+            "contrato_enviado_aprovacao",
+            {
+                "id_card": int(id_card),
+                "id_solicitacao": int(id_solicitacao),
+                "id_fase": int(id_fase_atual),
+                "envio_aprovacao": estado_depois,
+            },
+        )
+
+        return jsonify(
+            {
+                "ok": True,
+                "msg": "Contrato enviado para aprovação com sucesso.",
+                "id_solicitacao": int(id_solicitacao),
+                "envio_aprovacao": estado_depois,
+            }
+        )
+
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "msg": str(exc)}), 400
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            "KANBAN | erro ao enviar contrato para aprovação | id_card=%s",
+            id_card,
+        )
+        return jsonify(
+            {
+                "ok": False,
+                "msg": f"Não foi possível enviar o contrato para aprovação: {str(exc)}",
+            }
+        ), 500
 
 
 @kanban_bp.route("/api/cards/<int:id_card>/orcamento", methods=["GET"])
