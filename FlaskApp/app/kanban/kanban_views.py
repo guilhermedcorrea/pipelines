@@ -8487,6 +8487,63 @@ def _obter_nome_coluna_atividade_solicitacao_item() -> str | None:
     return None
 
 
+def _excluir_solicitacoes_contrato_do_card(id_card: int) -> dict[str, int]:
+    """Exclui, de forma transacional, as solicitacoes vinculadas ao card encerrado.
+
+    Os itens sao removidos antes dos cabecalhos para respeitar a dependencia
+    entre FatoSolicitacaoContratoItemEuromidia e
+    FatoSolicitacaoContratoEuromidia. Alem do vinculo direto pelo card, removo
+    os itens que apontam para qualquer cabecalho do mesmo card, cobrindo dados
+    antigos em que IDFatoKanbanCard do item tenha ficado nulo ou divergente.
+
+    Esta funcao nao confirma a transacao. O commit permanece sob responsabilidade
+    do fluxo que inativa o card, garantindo que encerramento e exclusoes sejam
+    aplicados ou revertidos em conjunto.
+    """
+    id_card_int = int(id_card or 0)
+    if id_card_int <= 0:
+        return {"itens_excluidos": 0, "solicitacoes_excluidas": 0}
+
+    parametros = {"id_card": id_card_int}
+
+    resultado_itens = db.session.execute(
+        text(
+            f"""
+            DELETE item_solicitacao
+              FROM {TABELA_SOLICITACAO_CONTRATO_ITEM} AS item_solicitacao
+             WHERE item_solicitacao.IDFatoKanbanCard = :id_card
+                OR EXISTS
+                   (
+                       SELECT 1
+                         FROM {TABELA_SOLICITACAO_CONTRATO} AS solicitacao
+                        WHERE solicitacao.IDFatoSolicitacaoContratoEuromidia =
+                              item_solicitacao.IDFatoSolicitacaoContratoEuromidia
+                          AND solicitacao.IDFatoKanbanCard = :id_card
+                   );
+            """
+        ),
+        parametros,
+    )
+
+    resultado_solicitacoes = db.session.execute(
+        text(
+            f"""
+            DELETE FROM {TABELA_SOLICITACAO_CONTRATO}
+             WHERE IDFatoKanbanCard = :id_card;
+            """
+        ),
+        parametros,
+    )
+
+    rowcount_itens = getattr(resultado_itens, "rowcount", -1)
+    rowcount_solicitacoes = getattr(resultado_solicitacoes, "rowcount", -1)
+
+    return {
+        "itens_excluidos": max(int(rowcount_itens or 0), 0),
+        "solicitacoes_excluidas": max(int(rowcount_solicitacoes or 0), 0),
+    }
+
+
 def _normalizar_valor_snapshot_solicitacao(valor: Any) -> Any:
     if valor is None:
         return None
@@ -24098,9 +24155,28 @@ def api_card_inativar(id_card: int):
         """
         Idempotência para tempo real:
         se outra aba/usuário já inativou o card, eu respondo sucesso e mando o evento
-        para a tela remover o card sem exigir F5.
+        para a tela remover o card sem exigir F5. A limpeza das solicitações
+        também roda aqui para corrigir cards encerrados por uma requisição anterior
+        ou por outra sessão.
         """
-        db.session.rollback()
+        try:
+            solicitacoes_contrato_removidas = _excluir_solicitacoes_contrato_do_card(
+                int(id_card)
+            )
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception(
+                "KANBAN: erro ao excluir solicitacoes de contrato de card ja inativo. id_card=%s",
+                id_card,
+            )
+            return jsonify(
+                {
+                    "ok": False,
+                    "msg": f"Erro ao remover solicitações de contrato do card: {str(exc)}",
+                }
+            ), 500
+
         _invalidar_kanban(id_emp=id_emp, id_kanban=id_kanban, id_card=id_card)
         _emitir_evento_kanban(
             id_kanban,
@@ -24114,6 +24190,7 @@ def api_card_inativar(id_card: int):
                 "id_motivo_encerramento": int(motivo_normalizado.get("IDDimKanbanMotivoEncerramento") or 0),
                 "descricao": descricao or None,
                 "ja_inativo": True,
+                "solicitacoes_contrato_removidas": solicitacoes_contrato_removidas,
             },
         )
         return jsonify(
@@ -24123,6 +24200,7 @@ def api_card_inativar(id_card: int):
                 "id_card": int(id_card),
                 "id_fase_de": int(id_fase_atual or 0),
                 "id_fase_para": 9,
+                "solicitacoes_contrato_removidas": solicitacoes_contrato_removidas,
                 "msg": "Card já estava inativo. A tela foi sincronizada.",
             }
         )
@@ -24321,6 +24399,9 @@ def api_card_inativar(id_card: int):
             id_card=int(id_card),
         )
         marcas_temporarias_removidas = _apagar_marcas_ocupacao_card(int(id_card))
+        solicitacoes_contrato_removidas = _excluir_solicitacoes_contrato_do_card(
+            int(id_card)
+        )
 
         _registrar_ocorrencia_card_tipo_documento_kanban(
             id_fato_kanban_card=id_card,
@@ -24367,6 +24448,7 @@ def api_card_inativar(id_card: int):
                 "sincronizacao_reservas": sincronizacao_reservas,
                 "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
                 "marcas_temporarias_removidas": int(marcas_temporarias_removidas or 0),
+                "solicitacoes_contrato_removidas": solicitacoes_contrato_removidas,
                 "payload_minimo": True,
                 "id_movimento": int(row_mov.get("IDFatoKanbanCardMovimento") or 0) if row_mov else None,
                 "id_observacao": int(row_observacao.get("IDFatoKanbanCardObservacoes") or 0) if row_observacao else None,
@@ -24374,12 +24456,15 @@ def api_card_inativar(id_card: int):
         )
 
         current_app.logger.info(
-            "KANBAN: card inativado com sucesso. id_card=%s id_usuario=%s motivo=%s codigo=%s id_motivo=%s",
+            "KANBAN: card inativado com sucesso. id_card=%s id_usuario=%s motivo=%s "
+            "codigo=%s id_motivo=%s solicitacoes_excluidas=%s itens_solicitacao_excluidos=%s",
             id_card,
             id_usuario,
             motivo_texto,
             motivo_normalizado.get("Codigo"),
             id_motivo_encerramento,
+            int(solicitacoes_contrato_removidas.get("solicitacoes_excluidas") or 0),
+            int(solicitacoes_contrato_removidas.get("itens_excluidos") or 0),
         )
 
         return jsonify(
@@ -24391,6 +24476,7 @@ def api_card_inativar(id_card: int):
                 "sincronizacao_reservas": sincronizacao_reservas,
                 "sincronizacao_contato_contrato": sincronizacao_contato_contrato,
                 "marcas_temporarias_removidas": int(marcas_temporarias_removidas or 0),
+                "solicitacoes_contrato_removidas": solicitacoes_contrato_removidas,
                 "payload_minimo": True,
                 "id_movimento": int(row_mov.get("IDFatoKanbanCardMovimento") or 0) if row_mov else None,
                 "id_observacao": int(row_observacao.get("IDFatoKanbanCardObservacoes") or 0) if row_observacao else None,
