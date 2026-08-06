@@ -21916,6 +21916,183 @@ def painel_detalhes(codponto: int):
 
 
 
+@paineis_bp.route("/recomendacoes-paineis/empresa", methods=["GET"])
+@login_required
+def resolver_recomendacoes_paineis_empresa():
+    """
+    Resolve a melhor referência disponível para a empresa selecionada.
+
+    O mapa pode estar com uma resposta antiga em cache e, nesses casos, o
+    objeto do marcador pode trazer somente CNPJ ou IDDimEmpresasReceita. Esta
+    rota tenta localizar o IDEmpresa em Integracao.Silver.DimEmpresas. Quando
+    não houver correspondência, a tela ainda será aberta com
+    IDDimEmpresasReceita e CNPJ, pois a ausência na DimEmpresas não invalida a
+    empresa exibida no mapa.
+    """
+
+    def _inteiro_positivo(valor):
+        try:
+            numero = int(str(valor or "").strip())
+            return numero if numero > 0 else None
+        except Exception:
+            return None
+
+    def _somente_digitos_local(valor):
+        return re.sub(r"\D+", "", str(valor or ""))
+
+    def _cnpj_formatado_local(cnpj_digitos):
+        if len(cnpj_digitos) != 14:
+            return ""
+        return (
+            f"{cnpj_digitos[:2]}.{cnpj_digitos[2:5]}.{cnpj_digitos[5:8]}/"
+            f"{cnpj_digitos[8:12]}-{cnpj_digitos[12:]}"
+        )
+
+    id_empresa_informado = _inteiro_positivo(request.args.get("id_empresa"))
+    id_dim_receita = _inteiro_positivo(request.args.get("id_dim_empresas_receita"))
+    cnpj_digitos = _somente_digitos_local(request.args.get("cnpj"))[:14]
+    codponto_origem = _inteiro_positivo(request.args.get("codponto_origem"))
+
+    id_empresa_resolvido = None
+
+    # Primeiro caminho: IDEmpresa já veio no marcador. Eu confirmo sua
+    # existência para não confundir um ID da Receita com o ID da DimEmpresas.
+    if id_empresa_informado:
+        id_empresa_resolvido = db.session.execute(
+            text("""
+                SELECT TOP (1) IDEmpresa
+                FROM [Integracao].[Silver].[DimEmpresas]
+                WHERE IDEmpresa = :id_empresa
+            """),
+            {"id_empresa": id_empresa_informado},
+        ).scalar()
+
+    # Segundo caminho: uma resposta legada pode trazer somente o identificador
+    # da DimEmpresasReceita. Uso-o apenas para obter o CNPJ; a identidade final
+    # continua sendo obrigatoriamente o IDEmpresa da DimEmpresas.
+    if id_empresa_resolvido is None and id_dim_receita:
+        row_receita = db.session.execute(
+            text("""
+                SELECT TOP (1)
+                    IDEmpresa,
+                    CAST(CNPJ AS varchar(32)) AS CNPJ
+                FROM [ReceitaFederal].[Silver].[DimEmpresasReceita]
+                WHERE IDDimEmpresasReceita = :id_dim_empresas_receita
+            """),
+            {"id_dim_empresas_receita": id_dim_receita},
+        ).mappings().first()
+
+        if row_receita:
+            id_receita_como_empresa = _inteiro_positivo(row_receita.get("IDEmpresa"))
+            if id_receita_como_empresa:
+                id_empresa_resolvido = db.session.execute(
+                    text("""
+                        SELECT TOP (1) IDEmpresa
+                        FROM [Integracao].[Silver].[DimEmpresas]
+                        WHERE IDEmpresa = :id_empresa
+                    """),
+                    {"id_empresa": id_receita_como_empresa},
+                ).scalar()
+
+            if len(cnpj_digitos) != 14:
+                cnpj_digitos = _somente_digitos_local(row_receita.get("CNPJ"))[:14]
+
+    # Terceiro caminho: CNPJ do marcador. Tento primeiro os dois formatos
+    # usuais, preservando possibilidade de uso de índice em DimEmpresas.
+    if id_empresa_resolvido is None and len(cnpj_digitos) == 14:
+        candidatos_cnpj = [cnpj_digitos, _cnpj_formatado_local(cnpj_digitos)]
+        sql_empresa_cnpj_exato = text("""
+            SELECT TOP (1) IDEmpresa
+            FROM [Integracao].[Silver].[DimEmpresas]
+            WHERE CNPJ IN :cnpjs
+            ORDER BY IDEmpresa ASC
+        """).bindparams(bindparam("cnpjs", expanding=True))
+
+        id_empresa_resolvido = db.session.execute(
+            sql_empresa_cnpj_exato,
+            {"cnpjs": candidatos_cnpj},
+        ).scalar()
+
+    # Fallback apenas para bases legadas com espaços ou pontuação fora do
+    # padrão. Ele só é executado no clique e somente se a busca exata falhar.
+    if id_empresa_resolvido is None and len(cnpj_digitos) == 14:
+        id_empresa_resolvido = db.session.execute(
+            text("""
+                SELECT TOP (1) IDEmpresa
+                FROM [Integracao].[Silver].[DimEmpresas]
+                WHERE REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                REPLACE(COALESCE(CAST(CNPJ AS varchar(32)), ''), '.', ''),
+                            '/', ''),
+                        '-', ''),
+                    ' ', '') = :cnpj
+                ORDER BY IDEmpresa ASC
+            """),
+            {"cnpj": cnpj_digitos},
+        ).scalar()
+
+    id_empresa_resolvido = _inteiro_positivo(id_empresa_resolvido)
+
+    # Quando existe IDEmpresa, mantenho a URL canônica baseada na DimEmpresas.
+    if id_empresa_resolvido:
+        parametros_destino = {"id_empresa": id_empresa_resolvido}
+        if codponto_origem:
+            parametros_destino["codponto_origem"] = codponto_origem
+
+        return redirect(
+            url_for("Paineis.recomendacoes_paineis_empresa", **parametros_destino)
+        )
+
+    # Uma empresa pode existir no conjunto geográfico usado pelo mapa e ainda
+    # não possuir linha correspondente na DimEmpresas. Isso não deve impedir a
+    # abertura da futura tela de recomendações. O template recebe as
+    # referências disponíveis e continuará intencionalmente em branco nesta
+    # primeira etapa.
+    if not id_dim_receita and len(cnpj_digitos) != 14:
+        abort(400, description="O marcador não possui referência válida de empresa.")
+
+    return render_template(
+        "euromidia/recomendacoes_paineis_empresa.html",
+        id_empresa=None,
+        id_dim_empresas_receita=id_dim_receita,
+        cnpj_empresa=cnpj_digitos if len(cnpj_digitos) == 14 else None,
+        codponto_origem=codponto_origem,
+        empresa_encontrada_dim_empresas=False,
+    )
+
+
+
+@paineis_bp.route(
+    "/recomendacoes-paineis/empresa/<int:id_empresa>",
+    methods=["GET"],
+)
+@login_required
+def recomendacoes_paineis_empresa(id_empresa: int):
+    """
+    Renderiza a tela-base das recomendações de painéis para uma empresa.
+
+    Neste primeiro estágio, a rota apenas valida e entrega ao template o
+    IDEmpresa da Integracao.Silver.DimEmpresas selecionado no mapa. A futura
+    regra de recomendação poderá usar esse identificador sem depender de nome,
+    CNPJ ou estado mantido no navegador. A DimClientes ficará restrita à
+    classificação de cliente e não será usada como origem do marcador.
+    """
+    if int(id_empresa) <= 0:
+        abort(404)
+
+    codponto_origem = request.args.get("codponto_origem", type=int)
+    if codponto_origem is not None and codponto_origem <= 0:
+        codponto_origem = None
+
+    return render_template(
+        "euromidia/recomendacoes_paineis_empresa.html",
+        id_empresa=int(id_empresa),
+        codponto_origem=codponto_origem,
+    )
+
+
+
 @paineis_bp.route("/api/painel-detalhes/<int:codponto>/empresas-segmento", methods=["GET"])
 @login_required
 @limiter.limit("90 per minute", methods=["GET"])
@@ -22450,6 +22627,12 @@ def api_empresas_receita_segmento_painel(codponto: int):
         except Exception:
             id_receita_int = 0
 
+        id_empresa = row.get("IDEmpresa")
+        try:
+            id_empresa_int = int(id_empresa) if id_empresa is not None else 0
+        except Exception:
+            id_empresa_int = 0
+
         nome = _texto_limpo_api(row.get("Nome")) or "Empresa sem nome"
         cnae_txt = _texto_limpo_api(row.get("CNAE"))
         cnae_key = re.sub(r"\D+", "", cnae_txt)
@@ -22474,9 +22657,11 @@ def api_empresas_receita_segmento_painel(codponto: int):
             status_relacao = "prospect_receita"
 
         itens.append({
-            "id_empresa": f"receita_{id_receita_int or len(itens) + 1}",
+            "id_empresa": id_empresa_int or None,
+            "id_empresa_integracao": id_empresa_int or None,
+            "id_marcador": f"empresa_{id_empresa_int or id_receita_int or len(itens) + 1}",
             "id_dim_empresas_receita": id_receita_int or None,
-            "id_empresa_receita": row.get("IDEmpresa"),
+            "id_empresa_receita": id_empresa_int or None,
             "nome": nome,
             "nome_fantasia": _texto_limpo_api(row.get("NomeFantasia")),
             "razao_social": _texto_limpo_api(row.get("RazaoSocial")),

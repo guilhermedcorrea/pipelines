@@ -1486,6 +1486,11 @@
     color: #0b1a3a;
   }
   .acoes .btn-primary:hover{ filter: brightness(.98); }
+  .acoes .btn-primary:disabled{
+    cursor:not-allowed;
+    opacity:.45;
+    filter:none;
+  }
 
   /* Leaflet tweaks */
   .leaflet-control-attribution{ display:none; }
@@ -2732,7 +2737,7 @@
 
         <!-- ✅ Só mantém ação de produto: abrir ficha -->
         <div class="acoes">
-          <button type="button" class="btn-primary" id="btnAbrirFichaEmpresa">Abrir Ficha</button>
+          <button type="button" class="btn-primary" id="btnAbrirFichaEmpresa" disabled>Abrir Ficha</button>
         </div>
       </div>
     </div>
@@ -2950,6 +2955,10 @@
   // Endpoint sob demanda: painéis dos concorrentes por EmpresaProprietaria.
   const URL_API_CONCORRENTES_TEMPLATE = "{{ url_for('Paineis.api_concorrentes_painel', codponto=0) }}";
   const URL_API_CONCORRENTES = _trocarCodPontoUrlApi(URL_API_CONCORRENTES_TEMPLATE, "concorrentes");
+
+  // Endpoint que recebe a referência disponível no marcador e resolve, no
+  // backend, o IDEmpresa real da Integracao.Silver.DimEmpresas.
+  const URL_RESOLVER_RECOMENDACOES_EMPRESA = "{{ url_for('Paineis.resolver_recomendacoes_paineis_empresa') }}";
 
   // A mesma rota calcula o bloco comercial quando recebe _bloco=desempenho.
   // Preservamos os parâmetros atuais (inclusive codface/face_principal), para
@@ -4143,7 +4152,10 @@
       if(empresaStatus) empresaStatus.textContent = "—";
       if(empresaUltimoContato) empresaUltimoContato.textContent = "—";
       if(empresaBadgeStatus) empresaBadgeStatus.classList.remove("ok","warn");
-      if(btnAbrirFichaEmpresa) btnAbrirFichaEmpresa.onclick = null;
+      if(btnAbrirFichaEmpresa){
+        btnAbrirFichaEmpresa.disabled = true;
+        btnAbrirFichaEmpresa.onclick = null;
+      }
       return;
     }
 
@@ -4188,9 +4200,10 @@
     }
 
     if(btnAbrirFichaEmpresa){
+      btnAbrirFichaEmpresa.disabled = false;
       btnAbrirFichaEmpresa.onclick = ()=> {
-        if(empresaSelecionada && empresaSelecionada.url_ficha) window.location.href = empresaSelecionada.url_ficha;
-        else alert("Sem URL de ficha configurada para esta empresa.");
+        if(!empresaSelecionada) return;
+        _abrirRecomendacoesPaineisEmpresa(empresaSelecionada);
       };
     }
   }
@@ -4746,6 +4759,81 @@ function _criarOuAtualizarLegendaEmpresas(){
     return `${Math.round(d)} m`;
   }
 
+  function _referenciaEmpresaParaRecomendacoes(e){
+    if(!e || typeof e !== "object") return null;
+
+    function _inteiroPositivo(valor){
+      if(valor === null || valor === undefined || typeof valor === "boolean") return null;
+      const texto = String(valor).trim();
+      if(!/^\d+$/.test(texto)) return null;
+      const numero = Number(texto);
+      return Number.isSafeInteger(numero) && numero > 0 ? numero : null;
+    }
+
+    const idEmpresa = [
+      e.id_empresa_integracao,
+      e.IDEmpresa,
+      e.id_empresa_receita,
+      e.id_empresa
+    ].map(_inteiroPositivo).find(valor => valor !== null) ?? null;
+
+    let idDimEmpresasReceita = _inteiroPositivo(
+      e.id_dim_empresas_receita ?? e.IDDimEmpresasReceita
+    );
+
+    // Compatibilidade com respostas antigas do cache, nas quais id_empresa
+    // vinha como "receita_123" em vez de trazer o IDEmpresa numérico.
+    if(!idDimEmpresasReceita){
+      const idLegado = String(e.id_empresa ?? "").trim().match(/^receita_(\d+)$/i);
+      if(idLegado){
+        idDimEmpresasReceita = _inteiroPositivo(idLegado[1]);
+      }
+    }
+
+    const cnpj = String(e.cnpj ?? e.CNPJ ?? "").replace(/\D+/g, "").slice(0, 14);
+
+    if(!idEmpresa && !idDimEmpresasReceita && cnpj.length !== 14){
+      return null;
+    }
+
+    return {
+      id_empresa: idEmpresa,
+      id_dim_empresas_receita: idDimEmpresasReceita,
+      cnpj: cnpj.length === 14 ? cnpj : ""
+    };
+  }
+
+  function _urlRecomendacoesPaineisEmpresa(e){
+    const referencia = _referenciaEmpresaParaRecomendacoes(e);
+    if(!referencia) return null;
+
+    const destino = new URL(URL_RESOLVER_RECOMENDACOES_EMPRESA, window.location.origin);
+
+    if(referencia.id_empresa){
+      destino.searchParams.set("id_empresa", String(referencia.id_empresa));
+    }
+    if(referencia.id_dim_empresas_receita){
+      destino.searchParams.set("id_dim_empresas_receita", String(referencia.id_dim_empresas_receita));
+    }
+    if(referencia.cnpj){
+      destino.searchParams.set("cnpj", referencia.cnpj);
+    }
+
+    destino.searchParams.set("codponto_origem", _codPontoPainelAtual());
+    return destino.toString();
+  }
+
+  function _abrirRecomendacoesPaineisEmpresa(e){
+    const url = _urlRecomendacoesPaineisEmpresa(e);
+    if(!url){
+      console.error("Empresa sem IDEmpresa, CNPJ ou referência da Receita para abrir recomendações.", e);
+      alert("Não foi possível identificar esta empresa na DimEmpresas.");
+      return;
+    }
+
+    window.location.assign(url);
+  }
+
   function _criarMarcadorEmpresa(e, categoria){
     const lat = Number(e && e.lat);
     const lng = Number(e && e.lng);
@@ -4797,6 +4885,8 @@ function _criarOuAtualizarLegendaEmpresas(){
       </div>
     `, { direction:"top", opacity: 0.98, sticky: true, className: "mm-tt" });
 
+    // O marcador apenas seleciona a empresa. A navegação ocorre somente pelo
+    // botão "Abrir Ficha" do card EMPRESA SELECIONADA.
     m.on("click", ()=> _setEmpresaSelecionada(e));
     return m;
   }
