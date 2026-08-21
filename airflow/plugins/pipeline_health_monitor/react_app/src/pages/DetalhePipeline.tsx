@@ -234,7 +234,7 @@ export default function DetalhePipeline(): JSX.Element {
             <p className="phm-erro-texto">
               Informe um parâmetro válido na URL, por exemplo:
               {" "}
-              <strong>?dag_id=etl_ctr_controle_contratos_euromidia</strong>
+              <strong>?dag_id=etl_ctr_controle_contratos_midia</strong>
             </p>
           </section>
         ) : detalhe ? (

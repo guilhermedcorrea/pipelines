@@ -1,4 +1,4 @@
-{% extends "euromidia/base_euromidia.html" %}
+{% extends "midia/base_midia.html" %}
 {% block title %}{{ kanban.NomeKanban }} | Kanban{% endblock %}
 
 {% block content %}
@@ -93,7 +93,7 @@
         rgba(4,62,157,.68) 48%,
         rgba(5,43,123,.82) 100%
       ),
-      url("{{ url_for('static', filename='OrcamentoPaineisEuromidia/cabecalho_orcamento.JPG') }}");
+      url("{{ url_for('static', filename='OrcamentoPaineisMidia/cabecalho_orcamento.JPG') }}");
     background-repeat:no-repeat, no-repeat;
     background-position:center, center bottom;
     background-size:cover, 112% auto;
@@ -5088,10 +5088,10 @@
     "idUsuarioLogado": id_usuario_logado_kanban,
     "idVendedorLogado": id_vendedor_logado_kanban,
     "urlPainelPublicidade": url_for('static', filename='imagens/painel-publicitario.png'),
-    "urlCabecalhoOrcamentoPadrao": url_for('static', filename='imagens/OrcamentoEuromidia/capa_sem_o_pedaco.png'),
-    "urlLogoEuromidia": url_for('static', filename='imagens/logoeuro.png'),
-    "urlObservacoesOrcamento": url_for('static', filename='imagens/OrcamentoEuromidia/Observacoes.png'),
-    "urlRodapeOrcamento": url_for('static', filename='imagens/OrcamentoEuromidia/RodapeOrcamentoEuromidia.jpeg'),
+    "urlCabecalhoOrcamentoPadrao": url_for('static', filename='imagens/OrcamentoMidia/capa_sem_o_pedaco.png'),
+    "urlLogoMidia": url_for('static', filename='imagens/logoeuro.png'),
+    "urlObservacoesOrcamento": url_for('static', filename='imagens/OrcamentoMidia/Observacoes.png'),
+    "urlRodapeOrcamento": url_for('static', filename='imagens/OrcamentoMidia/RodapeOrcamentoMidia.jpeg'),
     "urlApiCardDetalheTemplate": url_for('kanban.api_card_detalhe', id_card=0).replace('/0', '/__ID_CARD__'),
     "urlApiEnviarAprovacaoTemplate": url_for('kanban.api_card_enviar_aprovacao', id_card=0).replace('/0/', '/__ID_CARD__/'),
     "urlApiCardOrcamentoTemplate": url_for('kanban.api_card_orcamento', id_card=0).replace('/0/', '/__ID_CARD__/')
@@ -5115,7 +5115,7 @@
       return {};
     }
   })();
-  const urlLogoEuromidia = String(configuracaoKanban.urlLogoEuromidia || "").trim();
+  const urlLogoMidia = String(configuracaoKanban.urlLogoMidia || "").trim();
   const urlObservacoesOrcamento = String(configuracaoKanban.urlObservacoesOrcamento || "").trim();
   const urlRodapeOrcamento = String(configuracaoKanban.urlRodapeOrcamento || "").trim();
   const formatadorMoeda = new Intl.NumberFormat("pt-BR", {
@@ -5353,7 +5353,7 @@
       descontoTexto,
       valorNegociadoTexto,
       tipoApresentacaoValores,
-      urlLogoEuromidia
+      urlLogoMidia
     ]);
 
     const faixaExistente = itemDom.querySelector(".kb-orcamento-faixa-institucional");
@@ -5411,13 +5411,13 @@
     );
     faixa.appendChild(texto);
 
-    if (urlLogoEuromidia) {
+    if (urlLogoMidia) {
       const marca = document.createElement("div");
       marca.className = "kb-orcamento-faixa-marca";
 
       const logo = document.createElement("img");
       logo.className = "kb-orcamento-faixa-logo";
-      logo.src = urlLogoEuromidia;
+      logo.src = urlLogoMidia;
       logo.alt = "Euromídia";
       logo.loading = "eager";
       logo.decoding = "async";

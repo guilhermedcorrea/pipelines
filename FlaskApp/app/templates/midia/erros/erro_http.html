@@ -1,0 +1,270 @@
+{% extends "midia/base_midia.html" %}
+
+{% block content %}
+<style>
+  .pagina-erro-http {
+    min-height: calc(100vh - 140px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 16px;
+    background: #f7f8fc;
+  }
+
+  .cartao-erro-http {
+    width: 100%;
+    max-width: 860px;
+    background: #ffffff;
+    border: 1px solid #e6e8f0;
+    border-radius: 20px;
+    box-shadow: 0 12px 40px rgba(31, 41, 55, 0.10);
+    overflow: hidden;
+  }
+
+  .cartao-erro-http__topo {
+    padding: 28px 32px 20px 32px;
+    background: linear-gradient(135deg, #554189 0%, #6c56a7 100%);
+    color: #ffffff;
+  }
+
+  .cartao-erro-http__codigo {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 96px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    margin-bottom: 14px;
+  }
+
+  .cartao-erro-http__titulo {
+    margin: 0;
+    font-size: 32px;
+    line-height: 1.2;
+    font-weight: 800;
+  }
+
+  .cartao-erro-http__mensagem {
+    margin: 12px 0 0 0;
+    font-size: 16px;
+    line-height: 1.65;
+    color: rgba(255, 255, 255, 0.96);
+    max-width: 700px;
+  }
+
+  .cartao-erro-http__corpo {
+    padding: 28px 32px 32px 32px;
+  }
+
+  .cartao-erro-http__bloco {
+    background: #f8f9fd;
+    border: 1px solid #e8ebf5;
+    border-radius: 16px;
+    padding: 18px 20px;
+    margin-bottom: 18px;
+  }
+
+  .cartao-erro-http__bloco-titulo {
+    margin: 0 0 10px 0;
+    font-size: 15px;
+    font-weight: 800;
+    color: #2d3748;
+  }
+
+  .cartao-erro-http__bloco-texto {
+    margin: 0;
+    color: #4a5568;
+    line-height: 1.7;
+    font-size: 14px;
+  }
+
+  .cartao-erro-http__lista {
+    margin: 0;
+    padding-left: 18px;
+    color: #4a5568;
+    line-height: 1.8;
+    font-size: 14px;
+  }
+
+  .cartao-erro-http__lista li + li {
+    margin-top: 4px;
+  }
+
+  .cartao-erro-http__acoes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 24px;
+  }
+
+  .cartao-erro-http__botao {
+    appearance: none;
+    border: 0;
+    border-radius: 12px;
+    padding: 12px 18px;
+    font-size: 14px;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    transition: 0.18s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .cartao-erro-http__botao--primario {
+    background: #554189;
+    color: #ffffff;
+  }
+
+  .cartao-erro-http__botao--primario:hover {
+    background: #483675;
+    color: #ffffff;
+    text-decoration: none;
+  }
+
+  .cartao-erro-http__botao--secundario {
+    background: #edf0f8;
+    color: #334155;
+    border: 1px solid #dce2ef;
+  }
+
+  .cartao-erro-http__botao--secundario:hover {
+    background: #e3e8f4;
+    color: #1f2937;
+    text-decoration: none;
+  }
+
+  .cartao-erro-http__rodape {
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid #eceff6;
+    color: #6b7280;
+    font-size: 13px;
+    display: grid;
+    gap: 6px;
+  }
+
+  .cartao-erro-http__detalhe {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  @media (max-width: 768px) {
+    .cartao-erro-http__topo,
+    .cartao-erro-http__corpo {
+      padding: 22px 18px;
+    }
+
+    .cartao-erro-http__titulo {
+      font-size: 26px;
+    }
+
+    .cartao-erro-http__acoes {
+      flex-direction: column;
+    }
+
+    .cartao-erro-http__botao {
+      width: 100%;
+    }
+  }
+</style>
+
+<div class="pagina-erro-http">
+  <div class="cartao-erro-http">
+    <div class="cartao-erro-http__topo">
+      <div class="cartao-erro-http__codigo">
+        ERRO {{ codigo_erro }}
+      </div>
+
+      <h1 class="cartao-erro-http__titulo">
+        {{ titulo_erro }}
+      </h1>
+
+      <p class="cartao-erro-http__mensagem">
+        {{ mensagem_erro }}
+      </p>
+    </div>
+
+    <div class="cartao-erro-http__corpo">
+      <div class="cartao-erro-http__bloco">
+        <h2 class="cartao-erro-http__bloco-titulo">O que você pode fazer agora</h2>
+
+        <ul class="cartao-erro-http__lista">
+          {% if codigo_erro == 400 %}
+            <li>Revise os dados informados e tente novamente.</li>
+            <li>Se a página ficou aberta por muito tempo, recarregue antes de enviar o formulário.</li>
+          {% elif codigo_erro == 401 %}
+            <li>Faça login novamente.</li>
+            <li>Depois, retorne para a operação desejada.</li>
+          {% elif codigo_erro == 403 %}
+            <li>Volte para a tela anterior.</li>
+            <li>Se você deveria ter acesso, revise o perfil/permissão do usuário.</li>
+          {% elif codigo_erro == 404 %}
+            <li>Confira se o endereço digitado está correto.</li>
+            <li>Se veio por link interno, revise a rota ou o endpoint no sistema.</li>
+          {% elif codigo_erro == 405 %}
+            <li>Revise se a rota aceita o método HTTP usado.</li>
+            <li>Verifique se a chamada deveria ser GET, POST, PUT ou DELETE.</li>
+          {% elif codigo_erro == 413 %}
+            <li>Reduza o tamanho do arquivo ou conteúdo enviado.</li>
+            <li>Se necessário, aumente o limite configurado na aplicação e no proxy.</li>
+          {% elif codigo_erro == 429 %}
+            <li>Aguarde alguns instantes antes de tentar novamente.</li>
+            <li>Se isso ocorrer com frequência, revise limites de rate limit e polling excessivo.</li>
+          {% elif codigo_erro >= 500 %}
+            <li>Tente recarregar a página.</li>
+            <li>Se o problema persistir, consulte os logs da aplicação para identificar a causa real.</li>
+          {% else %}
+            <li>Tente novamente em alguns instantes.</li>
+            <li>Se persistir, revise os logs e a rota acessada.</li>
+          {% endif %}
+        </ul>
+      </div>
+
+      {% if detalhe_erro %}
+        <div class="cartao-erro-http__bloco">
+          <h2 class="cartao-erro-http__bloco-titulo">Detalhe informado pelo sistema</h2>
+          <p class="cartao-erro-http__bloco-texto cartao-erro-http__detalhe">
+            {{ detalhe_erro }}
+          </p>
+        </div>
+      {% endif %}
+
+      <div class="cartao-erro-http__acoes">
+        {% if url_voltar %}
+          <a href="{{ url_voltar }}" class="cartao-erro-http__botao cartao-erro-http__botao--secundario">
+            Voltar para a página anterior
+          </a>
+        {% else %}
+          <button type="button"
+                  onclick="window.history.back()"
+                  class="cartao-erro-http__botao cartao-erro-http__botao--secundario">
+            Tentar voltar
+          </button>
+        {% endif %}
+
+        <a href="{{ url_inicio }}" class="cartao-erro-http__botao cartao-erro-http__botao--primario">
+          Ir para a tela inicial
+        </a>
+
+        <button type="button"
+                onclick="window.location.reload()"
+                class="cartao-erro-http__botao cartao-erro-http__botao--secundario">
+          Recarregar página
+        </button>
+      </div>
+
+      <div class="cartao-erro-http__rodape">
+        <div><strong>Código:</strong> {{ codigo_erro }}</div>
+        <div><strong>Rota:</strong> {{ rota_atual }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

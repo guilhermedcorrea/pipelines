@@ -4,14 +4,14 @@ from datetime import datetime
 from sqlalchemy import text
 
 
-class ShempoModel(db.Model):
-    """Base de todos os models legados armazenados no banco Shempo."""
+class SpModel(db.Model):
+    """Base de todos os models legados armazenados no banco Sp."""
 
     __abstract__ = True
-    __bind_key__ = "shempo"
+    __bind_key__ = "sp"
 
 
-class Familia(ShempoModel):
+class Familia(SpModel):
     __tablename__ = 'Familias'
     FamiliaID = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeFamilia = db.Column(db.String(40))
@@ -19,7 +19,7 @@ class Familia(ShempoModel):
     DescricaoFamilia = db.Column(db.String)
 
 
-class Pmv(ShempoModel):
+class Pmv(SpModel):
     __tablename__ = 'Pmv'
     PmvID = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomePMV = db.Column(db.String(50))
@@ -29,7 +29,7 @@ class Pmv(ShempoModel):
     BitAtivo = db.Column(db.Boolean)
 
 
-class Produto(ShempoModel):
+class Produto(SpModel):
     __tablename__ = 'Produto'
     IDItem = db.Column(db.Integer, primary_key=True, autoincrement=True)
     ReferenciaExterna = db.Column(db.Integer)
@@ -54,7 +54,7 @@ class Produto(ShempoModel):
 
 
 
-class Caracteristica(ShempoModel):
+class Caracteristica(SpModel):
     __tablename__ = 'Caracteristicas'
     IDCaracteristica = db.Column(db.Integer, primary_key=True, autoincrement=True)
     FamiliaID = db.Column(db.Integer)
@@ -67,7 +67,7 @@ class Caracteristica(ShempoModel):
 
 
 
-class PontosEuro(ShempoModel):
+class PontosEuro(SpModel):
     __tablename__ = 'PontosEuro'
     EuroID = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeEstoque = db.Column(db.String(50))
@@ -85,9 +85,9 @@ class PontosEuro(ShempoModel):
     BitAtivo = db.Column(db.Boolean)
 
 
-class ShempoTable(ShempoModel):
-    __tablename__ = 'Shempo'
-    ShempoId = db.Column(db.Integer, primary_key=True, autoincrement=True)
+class SpTable(SpModel):
+    __tablename__ = 'Sp'
+    SpId = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomePonto = db.Column(db.String(50))
     Municipio = db.Column(db.String(50))
     EmpresaID = db.Column(db.Integer)
@@ -103,7 +103,7 @@ class ShempoTable(ShempoModel):
 
 
 
-class Saldo(ShempoModel):
+class Saldo(SpModel):
     __tablename__ = 'Saldo'
     IDSaldo = db.Column(db.Integer, primary_key=True, autoincrement=True)
     Quantidade = db.Column(db.Integer)
@@ -113,7 +113,7 @@ class Saldo(ShempoModel):
 
 
 
-class CategoriasProdutos(ShempoModel):
+class CategoriasProdutos(SpModel):
     __tablename__ = 'CategoriasProdutos'
     IDCategoria = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeCategoria = db.Column(db.String(30))
@@ -121,7 +121,7 @@ class CategoriasProdutos(ShempoModel):
 
 
 
-class Empresa(ShempoModel):
+class Empresa(SpModel):
     __tablename__ = 'Empresas'
     EmpresaID = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeEmpresa = db.Column(db.String(255), nullable=False)
@@ -154,7 +154,7 @@ class Empresa(ShempoModel):
 
 
 
-class Usuario(ShempoModel):
+class Usuario(SpModel):
     __tablename__ = 'Usuarios'
     IDUsuario = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeUsuario = db.Column(db.String(50))
@@ -164,7 +164,7 @@ class Usuario(ShempoModel):
 
 
 
-class Movimentacao(ShempoModel):
+class Movimentacao(SpModel):
     __tablename__ = "Movimentacao"
     IDMovimentacao = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDUsuario = db.Column(db.Integer)
@@ -186,7 +186,7 @@ class Movimentacao(ShempoModel):
 
 
 
-class OS(ShempoModel):
+class OS(SpModel):
     __tablename__ = 'OS'
     IDOs = db.Column(db.Integer, primary_key=True, autoincrement=True)
     Data = db.Column(db.DateTime)
@@ -198,7 +198,7 @@ class OS(ShempoModel):
 
 
 
-class OsItens(ShempoModel):
+class OsItens(SpModel):
     __tablename__ = 'OsItens'
     IDOSIten = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDItem = db.Column(db.Integer)
@@ -215,7 +215,7 @@ class OsItens(ShempoModel):
 
 
 
-class Ativo(ShempoModel):
+class Ativo(SpModel):
     __tablename__ = 'Ativos'
     IDAtivo = db.Column(db.Integer, primary_key=True, autoincrement=True)
     ReferenciaExterna = db.Column(db.Integer)
@@ -242,7 +242,7 @@ class Ativo(ShempoModel):
 
 
 
-class Projeto(ShempoModel):
+class Projeto(SpModel):
     __tablename__ = 'Projetos'
     IDProjeto = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeProjeto = db.Column(db.String(200), nullable=False)
@@ -262,7 +262,7 @@ class Projeto(ShempoModel):
 
 
 
-class Funcionario(ShempoModel):
+class Funcionario(SpModel):
     __tablename__ = 'Funcionarios'
     IDFuncionario = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeFuncionario = db.Column(db.String(50), nullable=False)
@@ -271,7 +271,7 @@ class Funcionario(ShempoModel):
 
 
 
-class Estoques(ShempoModel):
+class Estoques(SpModel):
     __tablename__ = 'Estoques'
     IDEstoque = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDItem = db.Column(db.Integer)
@@ -292,7 +292,7 @@ class Estoques(ShempoModel):
 
 
 
-class EstoqueEuro(ShempoModel):
+class EstoqueEuro(SpModel):
     __tablename__ = 'EstoqueEuro'
     IDEstoque = db.Column(db.Integer, primary_key=True, autoincrement=True)
     EuroID = db.Column(db.Integer)
@@ -305,10 +305,10 @@ class EstoqueEuro(ShempoModel):
 
 
 
-class EstoqueShempo(ShempoModel):
-    __tablename__ = 'EstoqueShempo'
+class EstoqueSp(SpModel):
+    __tablename__ = 'EstoqueSp'
     IDEstoque = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    ShempoId = db.Column(db.Integer)
+    SpId = db.Column(db.Integer)
     IDItem = db.Column(db.Integer)
     CodPonto = db.Column(db.Integer)
     Saldo = db.Column(db.Integer)
@@ -316,7 +316,7 @@ class EstoqueShempo(ShempoModel):
     IDTipoEstoque = db.Column(db.Integer)
 
 
-class EstoqueMatriz(ShempoModel):
+class EstoqueMatriz(SpModel):
     __tablename__ = 'EstoqueMatriz'
     IDEstoque = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDItem = db.Column(db.Integer)
@@ -327,7 +327,7 @@ class EstoqueMatriz(ShempoModel):
 
 
 
-class Departamento(ShempoModel):
+class Departamento(SpModel):
     __tablename__ = 'Departamentos'
     IDDepartamento = db.Column(db.Integer, primary_key=True)
     NomeDepartamento = db.Column(db.String(100), nullable=False)
@@ -337,7 +337,7 @@ class Departamento(ShempoModel):
         return f"<Departamento {self.NomeDepartamento}>"
     
 
-class GruposCompativeis(ShempoModel):
+class GruposCompativeis(SpModel):
     __tablename__ = 'GruposCompativeis'
     IDGrupo = db.Column(db.Integer, primary_key=True)
     IDItem = db.Column(db.Integer, nullable=False)
@@ -348,7 +348,7 @@ class GruposCompativeis(ShempoModel):
 
 
 
-class EstoqueManutencaoInterna(ShempoModel):
+class EstoqueManutencaoInterna(SpModel):
     __tablename__ = 'EstoqueManutencaoInterna'
     IDEstoque = db.Column(db.Integer, primary_key=True, autoincrement=True)
     CodPonto = db.Column(db.Integer)
@@ -358,7 +358,7 @@ class EstoqueManutencaoInterna(ShempoModel):
     IDTipoEstoque = db.Column(db.Integer)
 
 
-class EstoqueContainer(ShempoModel):
+class EstoqueContainer(SpModel):
     __tablename__ = 'EstoqueContainer'
     IDEstoque = db.Column(db.Integer, primary_key=True, autoincrement=True)
     CodPonto = db.Column(db.Integer)
@@ -368,7 +368,7 @@ class EstoqueContainer(ShempoModel):
     IDTipoEstoque = db.Column(db.Integer)
 
 
-class EstoqueManutencaoExterna(ShempoModel):
+class EstoqueManutencaoExterna(SpModel):
     __tablename__ = 'EstoqueManutencaoExterna'
     IDEstoque = db.Column(db.Integer, primary_key=True, autoincrement=True)
     CodPonto = db.Column(db.Integer)
@@ -379,7 +379,7 @@ class EstoqueManutencaoExterna(ShempoModel):
 
 
 
-class DiagramaProduto(ShempoModel):
+class DiagramaProduto(SpModel):
     __tablename__ = 'DiagramaProduto'
     IDDiagrama = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDItemA = db.Column(db.Integer, nullable=False)
@@ -396,7 +396,7 @@ class DiagramaProduto(ShempoModel):
 
 
 
-class Pedidos(ShempoModel):
+class Pedidos(SpModel):
     __tablename__ = 'Pedidos'
     IDPedido = db.Column(db.Integer, primary_key=True, autoincrement=True)
     OPInicial = db.Column(db.Integer, nullable=True)
@@ -434,7 +434,7 @@ class Pedidos(ShempoModel):
 
 
 
-class PedidoItens(ShempoModel):
+class PedidoItens(SpModel):
     __tablename__ = 'PedidoItens'
     IDPedidoIten = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDPedido = db.Column(db.Integer, db.ForeignKey('Pedidos.IDPedido'), nullable=False)
@@ -458,7 +458,7 @@ class PedidoItens(ShempoModel):
     
 
 
-class EstoqueLotes(ShempoModel):
+class EstoqueLotes(SpModel):
     __tablename__ = 'EstoqueLotes'
     IDLote = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDItem = db.Column(db.Integer)
@@ -479,7 +479,7 @@ class EstoqueLotes(ShempoModel):
 
 
 
-class PedidoLotes(ShempoModel):
+class PedidoLotes(SpModel):
     __tablename__ = 'PedidoLotes'
 
     IDPedidoLote = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -500,7 +500,7 @@ class PedidoLotes(ShempoModel):
 
 
 
-class EstoqueSerie(ShempoModel):
+class EstoqueSerie(SpModel):
     __tablename__ = 'EstoqueSerie'
 
     IDSerie = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -516,7 +516,7 @@ class EstoqueSerie(ShempoModel):
 
 
 
-class PedidoItemSerie(ShempoModel):
+class PedidoItemSerie(SpModel):
     __tablename__ = 'PedidoItemSerie'
 
     IDPedidoSerie = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -534,7 +534,7 @@ class PedidoItemSerie(ShempoModel):
 
 
 
-class EntradasProdutos(ShempoModel):
+class EntradasProdutos(SpModel):
     __tablename__ = 'EntradasProdutos'
     IDEntrada = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDItem = db.Column(db.Integer)
@@ -553,7 +553,7 @@ class EntradasProdutos(ShempoModel):
 
 
 
-class TipoEstoque(ShempoModel):
+class TipoEstoque(SpModel):
     __tablename__ = 'TipoEstoque'
 
     IDTipoEstoque = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -565,7 +565,7 @@ class TipoEstoque(ShempoModel):
 
 
 
-class EstoqueEuroMatriz(ShempoModel):
+class EstoqueEuroMatriz(SpModel):
     __tablename__ = 'EstoqueEuroMatriz'
     IDEstoque = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDItem = db.Column(db.Integer, nullable=False)
@@ -580,7 +580,7 @@ class EstoqueEuroMatriz(ShempoModel):
 
 
 
-class VersaoFirmewire(ShempoModel):
+class VersaoFirmewire(SpModel):
     __tablename__ = 'VersaoFirmewire'
 
     FirmewireID = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -598,7 +598,7 @@ class VersaoFirmewire(ShempoModel):
 
 
 
-class ImagensProdutos(ShempoModel):
+class ImagensProdutos(SpModel):
     __tablename__ = 'ImagensProdutos'
 
     IDImagem = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -613,14 +613,14 @@ class ImagensProdutos(ShempoModel):
 
 
 
-class StatusPedido(ShempoModel):
+class StatusPedido(SpModel):
     __tablename__ = 'StatusPedido'
     IDStatusPedido = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeStatusPedido = db.Column(db.String)
     
 
 
-class ObservacoesPedidos(ShempoModel):
+class ObservacoesPedidos(SpModel):
     __tablename__ = 'ObservacoesPedidos'
     IDObservacao = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDPedido = db.Column(db.Integer)
@@ -630,7 +630,7 @@ class ObservacoesPedidos(ShempoModel):
 
 
 
-class AnexosPedidos(ShempoModel):
+class AnexosPedidos(SpModel):
     __tablename__ = 'AnexosPedidos'
     IDAnexo = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeArquivo = db.Column(db.String)
@@ -643,7 +643,7 @@ class AnexosPedidos(ShempoModel):
 
 
 
-class TabelaPrecos(ShempoModel):
+class TabelaPrecos(SpModel):
     __tablename__ = 'TabelaPRecos' 
     IDTabelaPreco = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeTabelaPReco = db.Column(db.String(30), nullable=False)
@@ -653,7 +653,7 @@ class TabelaPrecos(ShempoModel):
 
 
 
-class PrecosProdutos(ShempoModel):
+class PrecosProdutos(SpModel):
     __tablename__ = 'PrecosProdutos'
     IDPreco = db.Column(db.Integer, primary_key=True, autoincrement=True)
     ReferenciaTabelaPReco = db.Column(db.Integer)
@@ -673,7 +673,7 @@ class PrecosProdutos(ShempoModel):
 
 
 
-class ProdutoComposicao(ShempoModel):
+class ProdutoComposicao(SpModel):
     __tablename__ = 'ProdutoComposicao'
     IDProdutoPai = db.Column(db.Integer, primary_key=True)
     IDItem  = db.Column(db.Integer, primary_key=True)
@@ -681,7 +681,7 @@ class ProdutoComposicao(ShempoModel):
 
 
 
-class NotaDebito(ShempoModel):
+class NotaDebito(SpModel):
     __tablename__ = 'NotaDebito'
     IDNotaDebito = db.Column(db.Integer, primary_key=True, autoincrement=True)
     OPInicial = db.Column(db.Integer)
@@ -707,7 +707,7 @@ class NotaDebito(ShempoModel):
 
 
 
-class NotaDebitoItem(ShempoModel):
+class NotaDebitoItem(SpModel):
     __tablename__ = 'NotaDebitoItens'
     NotaDebitoItens = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDNotaDebito = db.Column(db.Integer)
@@ -727,14 +727,14 @@ class NotaDebitoItem(ShempoModel):
 
 
 
-class EstadoItem(ShempoModel):
+class EstadoItem(SpModel):
     __tablename__ = 'EstadoItem'
     IDEstadoItem = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeEstadoItem = db.Column(db.String)
 
 
 
-class ComposicaoAtivo(ShempoModel):
+class ComposicaoAtivo(SpModel):
     __tablename__ = 'ComposicaoAtivo'
     IDComposicaoAtivo = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDAtivo = db.Column(db.Integer)
@@ -748,7 +748,7 @@ class ComposicaoAtivo(ShempoModel):
 
 
 
-class MovimentacaoAtivo(ShempoModel):
+class MovimentacaoAtivo(SpModel):
     __tablename__ = 'MovimentacaoAtivo'
     IDMovimentacaoAtivo = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDProjetoOrigem = db.Column(db.Integer)
@@ -761,14 +761,14 @@ class MovimentacaoAtivo(ShempoModel):
 
 
 
-class TipoOperacao(ShempoModel):
+class TipoOperacao(SpModel):
     __tablename__ = 'TipoOperacao'
     IDOperacao = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeOperacao  = db.Column(db.String)
 
 
 
-class MovimentacaoPecas(ShempoModel):
+class MovimentacaoPecas(SpModel):
     __tablename__ = 'MovimentacaoPecas'
     IDMovimentacao  = db.Column(db.Integer, primary_key=True, autoincrement=True)
     DataMovimentacao = db.Column(db.DateTime, default=func.getdate())
@@ -790,7 +790,7 @@ class MovimentacaoPecas(ShempoModel):
 
 
 
-class PedidoAtivo(ShempoModel):
+class PedidoAtivo(SpModel):
     __tablename__ = 'PedidoAtivo'
     IDPedidoAtivo = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDAtivo = db.Column(db.Integer)
@@ -799,7 +799,7 @@ class PedidoAtivo(ShempoModel):
 
 
 
-class ClienteAuvo(ShempoModel):
+class ClienteAuvo(SpModel):
     __tablename__ = 'ClienteAuvo'
     IDClienteAuvo = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDGrupoAuvo = db.Column(db.Integer)
@@ -811,7 +811,7 @@ class ClienteAuvo(ShempoModel):
    
 
 
-class AtivoAuvo(ShempoModel):
+class AtivoAuvo(SpModel):
     __tablename__ = 'AtivoAuvo'
     IDAtivoAuvo = db.Column(db.Integer, primary_key=True, autoincrement=True)
     AuvoID = db.Column(db.Integer)
@@ -830,7 +830,7 @@ class AtivoAuvo(ShempoModel):
 
 
 
-class ClienteEmpresa(ShempoModel):
+class ClienteEmpresa(SpModel):
     __tablename__ = 'ClienteEmpresa'
     IDClienteEmpresa = db.Column(db.Integer, primary_key=True, autoincrement=True)
     EmpresaID = db.Column(db.Integer)
@@ -838,7 +838,7 @@ class ClienteEmpresa(ShempoModel):
 
 
 
-class Medicao(ShempoModel):
+class Medicao(SpModel):
     __tablename__ = 'Medicoes'
     IDMedicao = db.Column(db.Integer, primary_key=True)
     IDContrato = db.Column(db.Integer)
@@ -874,14 +874,14 @@ class Medicao(ShempoModel):
 
 
 
-class StatusMedicao(ShempoModel):
+class StatusMedicao(SpModel):
     __tablename__ = 'StatusMedicao'
     IDstatusMedicao = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeStatus = db.Column(db.String(100))
 
 
 
-class Contrato(ShempoModel):
+class Contrato(SpModel):
     __tablename__ = 'Contratos'
     IDContrato = db.Column(db.Integer, primary_key=True, autoincrement=True)
     ReferenciaExterna = db.Column(db.Integer)
@@ -921,21 +921,21 @@ class Contrato(ShempoModel):
     DataAlterado = db.Column(db.DateTime)
 
 
-class Vendedor(ShempoModel):
+class Vendedor(SpModel):
     __tablename__ = 'Vendedores'
     IDVendedor = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeVendedor = db.Column(db.String(500))
     BitAtivo = db.Column(db.Boolean)
 
 
-class TipoContrato(ShempoModel):
+class TipoContrato(SpModel):
     __tablename__ = 'TipoContrato'
     IDTipoContrato = db.Column(db.Integer, primary_key=True, autoincrement=True)
     TipoContrato = db.Column(db.String)
 
 
 
-class AprovarMedicao(ShempoModel):
+class AprovarMedicao(SpModel):
     __tablename__ = 'AprovarMedicoes'
     IDMedicaoAprovacao = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDContrato = db.Column(db.Integer)
@@ -965,7 +965,7 @@ class AprovarMedicao(ShempoModel):
 
 
 
-class MedicoesAprovada(ShempoModel):
+class MedicoesAprovada(SpModel):
     __tablename__ = 'MedicoesAprovadas'
     IDMedicaoAprovada = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NumeroMedicao = db.Column(db.Integer)
@@ -979,7 +979,7 @@ class MedicoesAprovada(ShempoModel):
 
 
 
-class EtiquetaProduto(ShempoModel):
+class EtiquetaProduto(SpModel):
     __tablename__ = 'EtiquetaProduto'
     IDEtiqueta = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDItem = db.Column(db.Integer)
@@ -990,7 +990,7 @@ class EtiquetaProduto(ShempoModel):
 
 
 
-class MedicoesItens(ShempoModel):
+class MedicoesItens(SpModel):
     __tablename__ = 'MedicoesItens'
 
     IDMedicaoItens  = db.Column(db.Integer, primary_key=True)
@@ -1022,7 +1022,7 @@ class MedicoesItens(ShempoModel):
 
 
 
-class AprovarMedicoesItens(ShempoModel):
+class AprovarMedicoesItens(SpModel):
     __tablename__ = 'AprovarMedicoesItens'
     IDAprovarMedicaoItens = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDItem = db.Column(db.Integer)
@@ -1053,7 +1053,7 @@ class AprovarMedicoesItens(ShempoModel):
 
 
 
-class OmieOS(ShempoModel):
+class OmieOS(SpModel):
     __tablename__ = 'OmieOS'
     IDOs = db.Column(db.Integer, primary_key=True, autoincrement=True)
     CodigoClienteOmie = db.Column(db.Integer)
@@ -1086,7 +1086,7 @@ class OmieOS(ShempoModel):
 
 
 
-class ContratoOmie(ShempoModel):
+class ContratoOmie(SpModel):
     __tablename__ = 'ContratoOmie'
     IDContratoOmie = db.Column(db.Integer, primary_key=True, autoincrement=True)
     CodigoContratoOmie= db.Column(db.String(50), nullable=False)
@@ -1112,7 +1112,7 @@ class ContratoOmie(ShempoModel):
 
 
 
-class FluxoMedicao(ShempoModel):
+class FluxoMedicao(SpModel):
     __tablename__ = 'FluxoMedicao'
     IDFluxo = db.Column(db.Integer, primary_key=True, autoincrement=True)
     CodigoContratoOmie = db.Column(db.Integer, nullable=False)
@@ -1141,7 +1141,7 @@ class FluxoMedicao(ShempoModel):
 
 
 
-class LancamentoOmie(ShempoModel):
+class LancamentoOmie(SpModel):
     __tablename__ = 'LancamentoOmie'
     IDLancamentoOmie = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NumeroMedicao = db.Column(db.Integer)
@@ -1167,7 +1167,7 @@ class LancamentoOmie(ShempoModel):
 
 
 
-class PagamentoMedicoesAtrasados(ShempoModel):
+class PagamentoMedicoesAtrasados(SpModel):
     __tablename__ = 'PagamentoMedicoesAtrasados'
     IDMedicaoAtrasada = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NumeroMedicao = db.Column(db.Integer)
@@ -1179,7 +1179,7 @@ class PagamentoMedicoesAtrasados(ShempoModel):
 
 
 
-class ContratoOmieItens(ShempoModel):
+class ContratoOmieItens(SpModel):
     __tablename__ = 'ContratoOmieItens'
     IDContratoItens = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDContratoOmie = db.Column(db.Integer)
@@ -1193,7 +1193,7 @@ class ContratoOmieItens(ShempoModel):
 
 
 
-class ClienteOmie(ShempoModel):
+class ClienteOmie(SpModel):
     __tablename__ = 'ClienteOmie'
     IDClienteOmie = db.Column(db.Integer, primary_key=True, autoincrement=True)
     EmpresaID  = db.Column(db.Integer)
@@ -1205,7 +1205,7 @@ class ClienteOmie(ShempoModel):
 
 
 
-class EmpresaProprietaria(ShempoModel):
+class EmpresaProprietaria(SpModel):
     __tablename__ = 'EmpresaProprietaria'
     IDEmpresaProprietaria = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NomeEmpresaProprietaria = db.Column(db.String)
@@ -1214,7 +1214,7 @@ class EmpresaProprietaria(ShempoModel):
 
 
 
-class LogMedicoes(ShempoModel):
+class LogMedicoes(SpModel):
     __tablename__ = 'LogMedicoes'
     IDLogMedicao = db.Column(db.Integer, primary_key=True, autoincrement=True)
     NumeroMedicao = db.Column(db.Integer, nullable=False)
@@ -1224,7 +1224,7 @@ class LogMedicoes(ShempoModel):
     DataAlteracao = db.Column(db.DateTime, nullable=False, server_default=db.text('GETDATE()'))
 
 
-class VendedoresOmie(ShempoModel):
+class VendedoresOmie(SpModel):
     __tablename__ = 'VendedoresOmie'
     IDVendedor = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDEmpresaProprietaria = db.Column(db.Integer, nullable=False)
@@ -1235,7 +1235,7 @@ class VendedoresOmie(ShempoModel):
     VisualizaPedido = db.Column(db.Boolean, default=False, nullable=False)
 
 
-class CategoriafinanceiraOmie(ShempoModel):
+class CategoriafinanceiraOmie(SpModel):
     __tablename__ = 'CategoriafinanceiraOmie'
     IDCategoriaFinanceira = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDEmpresaProprietaria = db.Column(db.Integer, nullable=False)
@@ -1254,7 +1254,7 @@ class CategoriafinanceiraOmie(ShempoModel):
 
 
 
-class ProjetosOmie(ShempoModel):
+class ProjetosOmie(SpModel):
     __tablename__ = 'ProjetosOmie'
     IDProjetoOmie = db.Column(db.Integer, primary_key=True, autoincrement=True)
     IDEmpresaProprietaria = db.Column(db.Integer, nullable=False)

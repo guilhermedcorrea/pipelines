@@ -42,11 +42,11 @@ class FatoMovimentoFinanceiroEmpresas(db.Model):
 
 
 
-class FatoMovimentoFinanceiroGranatumEuromidia(db.Model):
-    __tablename__ = "FatoMovimentoFinanceiroEuromidia"
+class FatoMovimentoFinanceiroGranatumMidia(db.Model):
+    __tablename__ = "FatoMovimentoFinanceiroMidia"
     __table_args__ = {"schema": "Silver"}
 
-    IDFatoMovimentoFinanceiroGranatumEuromidia = db.Column(
+    IDFatoMovimentoFinanceiroGranatumMidia = db.Column(
         db.Integer,
         primary_key=True,
         autoincrement=True

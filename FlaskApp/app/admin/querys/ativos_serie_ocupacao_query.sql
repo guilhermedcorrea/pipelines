@@ -49,9 +49,9 @@ SELECT TOP (1)
     UPPER(LTRIM(RTRIM(COALESCE(p.Tipo,'')))) AS TipoPainel,
     TRY_CONVERT(int, p.QuantidadeFaces)      AS QuantidadeFaces
 INTO #kp
-FROM Integracao.Silver.DimPaineisEuromidia p WITH (NOLOCK)
+FROM Integracao.Silver.DimPaineisMidia p WITH (NOLOCK)
 WHERE TRY_CONVERT(int, p.CodPonto) = @CodPonto
-ORDER BY p.IDDimPaineisEuromidia DESC;
+ORDER BY p.IDDimPaineisMidia DESC;
 
 IF NOT EXISTS (SELECT 1 FROM #kp)
 BEGIN
@@ -98,7 +98,7 @@ SELECT
     TRY_CONVERT(date, ftci.DataInicioPrevisto)  AS DtIni,
     TRY_CONVERT(date, ftci.DataTerminoPrevisto) AS DtFim
 INTO #base
-FROM Integracao.Silver.FatoControleContratosItensEuromidia ftci WITH (NOLOCK)
+FROM Integracao.Silver.FatoControleContratosItensMidia ftci WITH (NOLOCK)
 WHERE
     TRY_CONVERT(int, ftci.CodPonto) = @CodPonto
     AND ftci.DataInicioPrevisto IS NOT NULL

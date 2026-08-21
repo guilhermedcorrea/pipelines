@@ -32,7 +32,7 @@ def aquecer_cache_clientes_lista(filtros: dict | None = None, page: int = 1, per
     A tela continua funcionando mesmo sem essa task, mas quando o worker está ligado
     o Redis fica quente para página atual, próxima página e filtros principais.
     """
-    from app.euromidia.controle_paineis_views import (
+    from app.midia.controle_paineis_views import (
         _obter_total_clientes_cacheado,
         _obter_itens_clientes_cacheados,
         _obter_valores_distintos_filtro_clientes,

@@ -1,0 +1,68 @@
+{% extends "midia/base_midia.html" %}
+{% block title %}Admin | Usuários{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <h1 class="page-title" style="margin:0;">Admin · Usuários</h1>
+    <a class="btn btn-primary" href="{{ url_for('Paineis.admin_usuarios_novo_form') }}" style="text-decoration:none;">
+      + Novo Usuário
+    </a>
+  </div>
+
+  <div style="margin-top:12px;">
+    <form method="get" action="{{ url_for('Paineis.admin_usuarios_lista') }}">
+      <div class="grid" style="grid-template-columns: 1fr 220px; gap:10px;">
+        <div>
+          <label>Buscar</label>
+          <input name="q" value="{{ q or '' }}" placeholder="Email, nome ou perfil">
+        </div>
+        <div style="display:flex;align-items:flex-end;">
+          <button type="submit" class="btn btn-secondary" style="width:100%;">Filtrar</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div class="overflow-x" style="margin-top:14px;">
+    <table class="mr-table" style="width:100%; border-collapse:separate; border-spacing:0;">
+      <thead>
+        <tr>
+          <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">ID</th>
+          <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Nome</th>
+          <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Email</th>
+          <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Perfil</th>
+          <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Ativo</th>
+          <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Ações</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in usuarios %}
+        <tr>
+          <td style="padding:10px; border-bottom:1px solid var(--border);">{{ u.IDDimUsuarios }}</td>
+          <td style="padding:10px; border-bottom:1px solid var(--border);">{{ u.NomeUsuario or '—' }}</td>
+          <td style="padding:10px; border-bottom:1px solid var(--border);">{{ u.Email or '—' }}</td>
+          <td style="padding:10px; border-bottom:1px solid var(--border);">
+            {{ u.perfil.NomePerfil if u.perfil else '—' }}
+          </td>
+          <td style="padding:10px; border-bottom:1px solid var(--border);">
+            {% if u.BitAtivo %}Sim{% else %}Não{% endif %}
+          </td>
+          <td style="padding:10px; border-bottom:1px solid var(--border);">
+            <a class="btn btn-secondary" href="{{ url_for('Paineis.admin_usuarios_editar_form', id_usuario=u.IDDimUsuarios) }}" style="text-decoration:none;">
+              Editar
+            </a>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6" style="padding:12px;">
+            <span class="muted">Nenhum usuário encontrado.</span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

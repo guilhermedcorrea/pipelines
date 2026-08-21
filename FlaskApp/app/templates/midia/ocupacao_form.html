@@ -1,0 +1,667 @@
+{% extends "midia/base_midia.html" %}
+
+{% block title %}Cadastro de Ocupação | Euromídia{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1 class="page-title">Cadastro de Ocupação</h1>
+
+  <form method="POST" action="{{ url_for('Paineis.cadastrar_ocupacao') }}" id="formContrato">
+    {{ form.hidden_tag() }}
+
+    <style>
+      .itens-wrap{
+        margin-top: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .item-card{
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: #fff;
+        overflow: hidden;
+      }
+
+      .item-head{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border);
+        background: rgba(0,40,132,.03);
+      }
+
+      .item-title{
+        font-weight: 900;
+        color: var(--euro-blue);
+        display:flex;
+        align-items:center;
+        gap:10px;
+      }
+
+      .item-actions{
+        display:flex;
+        gap:8px;
+        align-items:center;
+      }
+
+      .btn-icon{
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #fff;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        cursor:pointer;
+        transition: .12s ease;
+      }
+      .btn-icon:hover{ transform: translateY(-1px); }
+      .btn-icon:active{ transform: translateY(0px); }
+      .btn-icon svg{ width: 18px; height: 18px; }
+
+      .item-body{
+        padding: 12px 14px 14px 14px;
+      }
+
+      .grid{
+        display:grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      @media (max-width: 900px){
+        .grid{ grid-template-columns: 1fr; }
+      }
+
+      .muted-mini{
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 6px;
+      }
+
+      .divider{
+        height: 1px;
+        background: var(--border);
+        margin: 10px 0 6px 0;
+      }
+    </style>
+
+    <div class="muted" style="margin-bottom:10px;">
+      Use o botão <b>+</b> para adicionar mais itens e o botão <b>–</b> para remover.
+    </div>
+
+    <div class="itens-wrap" id="itensWrap">
+
+      {# ========================================================= #}
+      {# ITEM 1 (usa WTForms pra não quebrar validate_on_submit)     #}
+      {# ========================================================= #}
+      <div class="item-card item-card-base" data-idx="1">
+        <div class="item-head">
+          <div class="item-title">
+            Item 1 do Contrato
+            <span class="muted" style="font-weight:700;">(CodPonto/CodFace + detalhes)</span>
+          </div>
+
+          <div class="item-actions">
+            <button class="btn-icon" type="button" id="btnAddItem" title="Adicionar item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="item-body">
+
+          <div class="grid">
+            <div>
+              <label for="cod_ponto">CodPonto</label>
+              <select name="cod_ponto" id="cod_ponto" required>
+                <option value="">Selecione o painel...</option>
+                {% for cp in codpontos %}
+                  <option value="{{ cp }}"
+                    {% if form.cod_ponto is defined and (form.cod_ponto.data|string) == (cp|string) %}selected{% endif %}>
+                    {{ cp }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div>
+              <label for="cod_face">CodFace</label>
+              <select name="cod_face" id="cod_face" required disabled>
+                <option value="">Selecione um CodPonto primeiro...</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="loop">Loop</label>
+              <select name="loop" id="loop" required>
+                {% set loops_list = loops if loops is defined and loops else ["1MIN","2MIN"] %}
+                {% for lp in loops_list %}
+                  <option value="{{ lp }}"
+                    {% if form.loop_tipo is defined and (form.loop_tipo.data|string) == (lp|string) %}selected{% endif %}>
+                    {{ lp }}
+                  </option>
+                {% endfor %}
+              </select>
+              <div class="muted-mini"><b>Dica:</b> painel não-digital força <b>2MIN</b> no backend.</div>
+            </div>
+
+            <div>
+              <label for="cota">Cota</label>
+              <input name="cota" id="cota" type="number" min="1" step="1"
+                     value="{% if form.cota is defined and form.cota.data %}{{ form.cota.data }}{% else %}1{% endif %}">
+            </div>
+
+            <div>
+              <label for="data_inicio">Data Início</label>
+              <input
+                name="data_inicio"
+                id="data_inicio"
+                type="date"
+                required
+                value="{% if form.data_inicio_previsto is defined and form.data_inicio_previsto.data %}{{ form.data_inicio_previsto.data.strftime('%Y-%m-%d') }}{% endif %}"
+              >
+            </div>
+
+            <div>
+              <label for="data_fim">Data Fim</label>
+              <input
+                name="data_fim"
+                id="data_fim"
+                type="date"
+                required
+                value="{% if form.data_termino_previsto is defined and form.data_termino_previsto.data %}{{ form.data_termino_previsto.data.strftime('%Y-%m-%d') }}{% endif %}"
+              >
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="grid">
+            <div>
+              <label for="quantidade_parcelas">Quantidade Parcelas (opcional)</label>
+              <input name="quantidade_parcelas" id="quantidade_parcelas" type="number" min="1" step="1"
+                     value="{% if form.quantidade_parcelas is defined and form.quantidade_parcelas.data %}{{ form.quantidade_parcelas.data }}{% endif %}">
+            </div>
+
+            <div>
+              <label for="faturamento_bruto_mensal">Faturamento Bruto Mensal (opcional)</label>
+              <input name="faturamento_bruto_mensal" id="faturamento_bruto_mensal" placeholder="Ex: 15000.00">
+            </div>
+
+            <div>
+              <label for="faturamento_liquido_mensal">Faturamento Líquido Mensal (opcional)</label>
+              <input name="faturamento_liquido_mensal" id="faturamento_liquido_mensal" placeholder="Ex: 12000.00">
+            </div>
+
+            <div>
+              <label for="permuta">Permuta</label>
+              <select name="permuta" id="permuta">
+                <option value="0" {% if form.permuta is defined and (form.permuta.data|string) == "0" %}selected{% endif %}>Não</option>
+                <option value="1" {% if form.permuta is defined and (form.permuta.data|string) == "1" %}selected{% endif %}>Sim</option>
+              </select>
+            </div>
+
+            <div style="grid-column: 1 / -1;">
+              <label for="valor_permuta">Valor Permuta (opcional)</label>
+              <input name="valor_permuta" id="valor_permuta" placeholder="Ex: 3000.00">
+              <div class="muted-mini">Se Permuta = Sim, informe o valor (se existir).</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    {# ========================================================= #}
+    {# CAMPOS GERAIS DO CONTRATO (uma vez só)                     #}
+    {# ========================================================= #}
+    <div class="divider"></div>
+
+    <div class="grid" style="margin-top:10px;">
+      <div style="grid-column: 1 / -1;">
+        <label for="cliente_id">Cliente (vira MarcaExibida)</label>
+        <select name="cliente_id" id="cliente_id" required>
+          <option value="">Selecione um cliente...</option>
+          {% for c in clientes %}
+            <option value="{{ c.IDCliente }}"
+              {% if form.cliente_id is defined and (form.cliente_id.data|string) == (c.IDCliente|string) %}selected{% endif %}>
+              {{ (c.NomeFantasia or c.RazaoSocial or "Cliente sem nome") }}{% if c.CNPJ %} — {{ c.CNPJ }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div style="grid-column: 1 / -1;">
+        <label for="vendedor_id">Vendedor</label>
+        <select name="vendedor_id" id="vendedor_id" required>
+          <option value="">Selecione um vendedor...</option>
+          {% for v in vendedores %}
+            <option value="{{ v.IDVendedor }}"
+              {% if form.vendedor_id is defined and (form.vendedor_id.data|string) == (v.IDVendedor|string) %}selected{% endif %}>
+              {{ v.NomeVendedor }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="actions" style="margin-top:14px;">
+      <button class="btn btn-secondary" type="reset" id="btn_limpar">Limpar</button>
+      <button class="btn btn-primary" type="submit">Salvar Ocupação</button>
+    </div>
+  </form>
+</div>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.css">
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
+
+<script>
+  const facesPorPonto = {{ faces_por_ponto|tojson }};
+  const loopsPermitidos = {{ (loops if loops is defined else ["1MIN","2MIN"])|tojson }};
+
+  // defaults do item 1 (form -> senão cai pro 118/118AD)
+  const defaultPonto1 = "{% if form.cod_ponto is defined and form.cod_ponto.data %}{{ form.cod_ponto.data }}{% else %}118{% endif %}";
+  const defaultFace1  = "{% if form.cod_face is defined and form.cod_face.data %}{{ form.cod_face.data }}{% else %}118AD{% endif %}";
+
+  function limparFaces(selectEl, msg){
+    selectEl.innerHTML = "";
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = msg;
+    selectEl.appendChild(opt);
+  }
+
+  function carregarFacesPara(selectCodFace, codPontoSelecionado, defaultFace){
+    const key = String(codPontoSelecionado || "").trim();
+    const cp  = key ? parseInt(key, 10) : null;
+
+    if (!cp || !facesPorPonto[cp] || facesPorPonto[cp].length === 0){
+      selectCodFace.disabled = true;
+      limparFaces(selectCodFace, "Nenhuma face encontrada para este CodPonto.");
+      return;
+    }
+
+    selectCodFace.disabled = false;
+    selectCodFace.innerHTML = "";
+
+    const opt0 = document.createElement("option");
+    opt0.value = "";
+    opt0.textContent = "Selecione a face...";
+    selectCodFace.appendChild(opt0);
+
+    const faces = facesPorPonto[cp];
+    for (const face of faces){
+      const opt = document.createElement("option");
+      opt.value = face;
+      opt.textContent = face;
+      selectCodFace.appendChild(opt);
+    }
+
+    if (defaultFace && faces.includes(defaultFace)){
+      selectCodFace.value = defaultFace;
+    } else {
+      selectCodFace.value = "";
+    }
+  }
+
+  function criarSelectLoop(name){
+    const sel = document.createElement("select");
+    sel.name = name;
+    sel.required = true;
+    for (const lp of loopsPermitidos){
+      const o = document.createElement("option");
+      o.value = lp;
+      o.textContent = lp;
+      sel.appendChild(o);
+    }
+    return sel;
+  }
+
+  // =========================================================
+  // TomSelect init helpers
+  // =========================================================
+  function initTomSelect(el, placeholder){
+    if (!el) return null;
+    return new TomSelect(el, {
+      create: false,
+      persist: false,
+      maxItems: 1,
+      allowEmptyOption: true,
+      placeholder: placeholder || "Selecione...",
+      sortField: [{field: "text", direction: "asc"}],
+    });
+  }
+
+  // =========================================================
+  // ITEM 1: init faces + TomSelect
+  // =========================================================
+  const elCodPonto1 = document.getElementById("cod_ponto");
+  const elCodFace1  = document.getElementById("cod_face");
+
+  (function initItem1(){
+    if (defaultPonto1){
+      carregarFacesPara(elCodFace1, defaultPonto1, defaultFace1);
+    } else {
+      limparFaces(elCodFace1, "Selecione um CodPonto primeiro...");
+    }
+  })();
+
+  // TomSelect base
+  const tsCodPonto1 = initTomSelect("#cod_ponto", "Digite para buscar CodPonto...");
+  let tsCodFace1 = initTomSelect("#cod_face", "Selecione a face...");
+  initTomSelect("#cliente_id", "Digite para buscar Cliente...");
+  initTomSelect("#vendedor_id", "Digite para buscar Vendedor...");
+
+  // Ao mudar CodPonto1, recarrega faces e reinicia TomSelect do CodFace1
+  if (tsCodPonto1){
+    tsCodPonto1.on("change", (value) => {
+      carregarFacesPara(elCodFace1, value, "");
+      if (tsCodFace1){
+        tsCodFace1.destroy();
+        tsCodFace1 = null;
+      }
+      tsCodFace1 = initTomSelect("#cod_face", "Selecione a face...");
+    });
+  }
+
+  // =========================================================
+  // ADD/REMOVE itens extras
+  // =========================================================
+  const itensWrap = document.getElementById("itensWrap");
+  const btnAddItem = document.getElementById("btnAddItem");
+
+  function proximoIndice(){
+    // item base é 1, extras começam no 2
+    const cards = itensWrap.querySelectorAll(".item-card");
+    return cards.length + 1;
+  }
+
+  function criarItemExtra(idx){
+    const card = document.createElement("div");
+    card.className = "item-card item-card-extra";
+    card.dataset.idx = String(idx);
+
+    // header com botão remover
+    const head = document.createElement("div");
+    head.className = "item-head";
+
+    const title = document.createElement("div");
+    title.className = "item-title";
+    title.innerHTML = `Item ${idx} do Contrato <span class="muted" style="font-weight:700;">(CodPonto/CodFace + detalhes)</span>`;
+
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+
+    const btnRemove = document.createElement("button");
+    btnRemove.type = "button";
+    btnRemove.className = "btn-icon";
+    btnRemove.title = "Remover item";
+    btnRemove.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M5 12h14"/>
+      </svg>
+    `;
+    btnRemove.addEventListener("click", () => {
+      card.remove();
+      // renumera títulos
+      renumerarItens();
+    });
+
+    actions.appendChild(btnRemove);
+
+    head.appendChild(title);
+    head.appendChild(actions);
+
+    const body = document.createElement("div");
+    body.className = "item-body";
+
+    // grid
+    const grid1 = document.createElement("div");
+    grid1.className = "grid";
+
+    // CodPonto
+    const boxCp = document.createElement("div");
+    const lblCp = document.createElement("label");
+    lblCp.textContent = "CodPonto";
+    const selCp = document.createElement("select");
+    selCp.name = "itens_cod_ponto[]";
+    selCp.required = true;
+
+    const opt0 = document.createElement("option");
+    opt0.value = "";
+    opt0.textContent = "Selecione o painel...";
+    selCp.appendChild(opt0);
+
+    // popula opções do CodPonto com base no select 1 (já tem tudo)
+    for (const opt of elCodPonto1.options){
+      if (!opt.value) continue;
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.textContent;
+      selCp.appendChild(o);
+    }
+
+    boxCp.appendChild(lblCp);
+    boxCp.appendChild(selCp);
+
+    // CodFace
+    const boxCf = document.createElement("div");
+    const lblCf = document.createElement("label");
+    lblCf.textContent = "CodFace";
+    const selCf = document.createElement("select");
+    selCf.name = "itens_cod_face[]";
+    selCf.required = true;
+    selCf.disabled = true;
+    limparFaces(selCf, "Selecione um CodPonto primeiro...");
+
+    boxCf.appendChild(lblCf);
+    boxCf.appendChild(selCf);
+
+    // Loop
+    const boxLoop = document.createElement("div");
+    const lblLoop = document.createElement("label");
+    lblLoop.textContent = "Loop";
+    const selLoop = criarSelectLoop("itens_loop[]");
+    const hintLoop = document.createElement("div");
+    hintLoop.className = "muted-mini";
+    hintLoop.innerHTML = "<b>Dica:</b> painel não-digital força <b>2MIN</b> no backend.";
+    boxLoop.appendChild(lblLoop);
+    boxLoop.appendChild(selLoop);
+    boxLoop.appendChild(hintLoop);
+
+    // Cota
+    const boxCota = document.createElement("div");
+    const lblCota = document.createElement("label");
+    lblCota.textContent = "Cota";
+    const inpCota = document.createElement("input");
+    inpCota.name = "itens_cota[]";
+    inpCota.type = "number";
+    inpCota.min = "1";
+    inpCota.step = "1";
+    inpCota.value = "1";
+    boxCota.appendChild(lblCota);
+    boxCota.appendChild(inpCota);
+
+    // Datas
+    const boxDi = document.createElement("div");
+    const lblDi = document.createElement("label");
+    lblDi.textContent = "Data Início";
+    const inpDi = document.createElement("input");
+    inpDi.name = "itens_data_inicio[]";
+    inpDi.type = "date";
+    inpDi.required = true;
+    boxDi.appendChild(lblDi);
+    boxDi.appendChild(inpDi);
+
+    const boxDf = document.createElement("div");
+    const lblDf = document.createElement("label");
+    lblDf.textContent = "Data Fim";
+    const inpDf = document.createElement("input");
+    inpDf.name = "itens_data_fim[]";
+    inpDf.type = "date";
+    inpDf.required = true;
+    boxDf.appendChild(lblDf);
+    boxDf.appendChild(inpDf);
+
+    grid1.appendChild(boxCp);
+    grid1.appendChild(boxCf);
+    grid1.appendChild(boxLoop);
+    grid1.appendChild(boxCota);
+    grid1.appendChild(boxDi);
+    grid1.appendChild(boxDf);
+
+    const divider = document.createElement("div");
+    divider.className = "divider";
+
+    const grid2 = document.createElement("div");
+    grid2.className = "grid";
+
+    // Parcelas
+    const boxParc = document.createElement("div");
+    const lblParc = document.createElement("label");
+    lblParc.textContent = "Quantidade Parcelas (opcional)";
+    const inpParc = document.createElement("input");
+    inpParc.name = "itens_quantidade_parcelas[]";
+    inpParc.type = "number";
+    inpParc.min = "1";
+    inpParc.step = "1";
+    boxParc.appendChild(lblParc);
+    boxParc.appendChild(inpParc);
+
+    // Bruto
+    const boxBr = document.createElement("div");
+    const lblBr = document.createElement("label");
+    lblBr.textContent = "Faturamento Bruto Mensal (opcional)";
+    const inpBr = document.createElement("input");
+    inpBr.name = "itens_faturamento_bruto_mensal[]";
+    inpBr.placeholder = "Ex: 15000.00";
+    boxBr.appendChild(lblBr);
+    boxBr.appendChild(inpBr);
+
+    // Liquido
+    const boxLq = document.createElement("div");
+    const lblLq = document.createElement("label");
+    lblLq.textContent = "Faturamento Líquido Mensal (opcional)";
+    const inpLq = document.createElement("input");
+    inpLq.name = "itens_faturamento_liquido_mensal[]";
+    inpLq.placeholder = "Ex: 12000.00";
+    boxLq.appendChild(lblLq);
+    boxLq.appendChild(inpLq);
+
+    // Permuta
+    const boxPm = document.createElement("div");
+    const lblPm = document.createElement("label");
+    lblPm.textContent = "Permuta";
+    const selPm = document.createElement("select");
+    selPm.name = "itens_permuta[]";
+    const opN = document.createElement("option");
+    opN.value = "0"; opN.textContent = "Não";
+    const opS = document.createElement("option");
+    opS.value = "1"; opS.textContent = "Sim";
+    selPm.appendChild(opN);
+    selPm.appendChild(opS);
+    boxPm.appendChild(lblPm);
+    boxPm.appendChild(selPm);
+
+    // Valor permuta
+    const boxVp = document.createElement("div");
+    boxVp.style.gridColumn = "1 / -1";
+    const lblVp = document.createElement("label");
+    lblVp.textContent = "Valor Permuta (opcional)";
+    const inpVp = document.createElement("input");
+    inpVp.name = "itens_valor_permuta[]";
+    inpVp.placeholder = "Ex: 3000.00";
+    const hintVp = document.createElement("div");
+    hintVp.className = "muted-mini";
+    hintVp.textContent = "Se Permuta = Sim, informe o valor (se existir).";
+    boxVp.appendChild(lblVp);
+    boxVp.appendChild(inpVp);
+    boxVp.appendChild(hintVp);
+
+    grid2.appendChild(boxParc);
+    grid2.appendChild(boxBr);
+    grid2.appendChild(boxLq);
+    grid2.appendChild(boxPm);
+    grid2.appendChild(boxVp);
+
+    body.appendChild(grid1);
+    body.appendChild(divider);
+    body.appendChild(grid2);
+
+    card.appendChild(head);
+    card.appendChild(body);
+
+    // comportamento: ao trocar CodPonto, carregar faces e reiniciar tomselect do CodFace
+    selCp.addEventListener("change", () => {
+      carregarFacesPara(selCf, selCp.value, "");
+      // TomSelect (recriar)
+      if (selCf.tomselect){
+        selCf.tomselect.destroy();
+      }
+      initTomSelect(selCf, "Selecione a face...");
+    });
+
+    // TomSelect nesses selects novos
+    initTomSelect(selCp, "Digite para buscar CodPonto...");
+    initTomSelect(selCf, "Selecione a face...");
+    initTomSelect(selLoop, "Selecione o loop...");
+    initTomSelect(selPm, "Permuta...");
+
+    return card;
+  }
+
+  function renumerarItens(){
+    const cards = itensWrap.querySelectorAll(".item-card");
+    let i = 1;
+    for (const c of cards){
+      const headTitle = c.querySelector(".item-title");
+      if (headTitle){
+        const isBase = c.classList.contains("item-card-base");
+        if (isBase){
+          headTitle.innerHTML = `Item 1 do Contrato <span class="muted" style="font-weight:700;">(CodPonto/CodFace + detalhes)</span>`;
+        } else {
+          headTitle.innerHTML = `Item ${i} do Contrato <span class="muted" style="font-weight:700;">(CodPonto/CodFace + detalhes)</span>`;
+        }
+      }
+      c.dataset.idx = String(i);
+      i += 1;
+    }
+  }
+
+  btnAddItem.addEventListener("click", () => {
+    const idx = proximoIndice();
+    const novo = criarItemExtra(idx);
+    itensWrap.appendChild(novo);
+    renumerarItens();
+  });
+
+  // =========================================================
+  // Reset: limpa TomSelect e volta pro estado inicial
+  // =========================================================
+  document.getElementById("btn_limpar").addEventListener("click", function(){
+    // deixa o browser resetar inputs
+    setTimeout(() => {
+      // reinit faces do item 1
+      carregarFacesPara(elCodFace1, defaultPonto1, defaultFace1);
+      if (tsCodFace1){
+        tsCodFace1.destroy();
+        tsCodFace1 = null;
+      }
+      tsCodFace1 = initTomSelect("#cod_face", "Selecione a face...");
+
+      // remove itens extras
+      const extras = itensWrap.querySelectorAll(".item-card-extra");
+      extras.forEach(x => x.remove());
+      renumerarItens();
+    }, 0);
+  });
+</script>
+{% endblock %}

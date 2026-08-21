@@ -1,0 +1,1088 @@
+{% extends "midia/base_midia.html" %}
+
+{% block title %}Listas de Preços{% endblock %}
+
+{% block content %}
+{% macro dinheiro(valor) -%}
+  {%- if valor is not none -%}
+    R$ {{ "{:,.2f}".format(valor|float).replace(",", "X").replace(".", ",").replace("X", ".") }}
+  {%- else -%}
+    —
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro data_br(valor) -%}
+  {%- if valor -%}
+    {{ valor.strftime("%d/%m/%Y") }}
+  {%- else -%}
+    —
+  {%- endif -%}
+{%- endmacro %}
+
+<style>
+  .pagina-lista-precos {
+    width: 100%;
+    padding: 18px;
+    background: #f4f7fb;
+    min-height: calc(100vh - 80px);
+    box-sizing: border-box;
+    overflow-x: hidden;
+  }
+
+  .bloco-lista-precos {
+    width: 100%;
+    max-width: 100%;
+    background: #ffffff;
+    border: 1px solid #d7dfeb;
+    border-radius: 22px;
+    box-shadow: 0 10px 26px rgba(19, 44, 89, 0.06);
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+
+  .topo-lista-precos {
+    padding: 20px 20px 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+
+  .topo-lista-precos__titulo {
+    margin: 0;
+    font-size: 28px;
+    line-height: 1.1;
+    font-weight: 900;
+    color: #002f87;
+  }
+
+  .topo-lista-precos__subtitulo {
+    display: block;
+    margin-top: 6px;
+    color: #61738d;
+    font-size: 14px;
+    font-weight: 750;
+  }
+
+  .topo-lista-precos__contador {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 16px;
+    border-radius: 14px;
+    border: 1px solid #d9e2ef;
+    background: #ffffff;
+    color: #002f87;
+    font-size: 17px;
+    font-weight: 900;
+    flex: 0 0 auto;
+  }
+
+  .painel-filtros-precos {
+    padding: 0 20px 18px 20px;
+    border-bottom: 1px solid #e3eaf3;
+  }
+
+  .painel-filtros-precos__titulo {
+    display: block;
+    margin-bottom: 8px;
+    color: #4d6385;
+    font-size: 14px;
+    font-weight: 800;
+  }
+
+  .painel-filtros-precos__linha {
+    display: grid;
+    grid-template-columns: minmax(320px, 2.4fr) minmax(170px, 1fr) minmax(210px, 1.2fr) minmax(190px, 1fr) auto auto;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .campo-filtro-precos {
+    min-width: 0;
+  }
+
+  .campo-filtro-precos input,
+  .campo-filtro-precos select {
+    width: 100%;
+    height: 48px;
+    border: 1px solid #d3dce9;
+    border-radius: 15px;
+    background: #ffffff;
+    color: #495e7a;
+    font-size: 15px;
+    padding: 0 16px;
+    outline: none;
+    box-sizing: border-box;
+  }
+
+  .campo-filtro-precos input:focus,
+  .campo-filtro-precos select:focus {
+    border-color: #3d63f2;
+    box-shadow: 0 0 0 3px rgba(61, 99, 242, 0.12);
+  }
+
+  .combo-busca-precos {
+    position: relative;
+    width: 100%;
+  }
+
+  .combo-busca-precos__box {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+  }
+
+  .combo-busca-precos__icone {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #667892;
+    z-index: 2;
+  }
+
+  .combo-busca-precos__input {
+    padding-left: 42px !important;
+  }
+
+  .combo-busca-precos__sugestoes {
+    display: none;
+    position: absolute;
+    z-index: 90;
+    top: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    max-height: 360px;
+    overflow: auto;
+    padding: 10px;
+    background: #ffffff;
+    border: 1px solid #d9e2ef;
+    border-radius: 18px;
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+  }
+
+  .combo-busca-precos.is-open .combo-busca-precos__sugestoes {
+    display: block;
+  }
+
+  .sugestao-preco {
+    width: 100%;
+    border: 1px solid #edf2f7;
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 10px 12px;
+    margin: 0 0 8px 0;
+    text-align: left;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: 0.16s ease;
+  }
+
+  .sugestao-preco:hover {
+    background: #f6f9ff;
+    border-color: #c9dafd;
+  }
+
+  .sugestao-preco__topo {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .sugestao-preco__titulo {
+    color: #102a56;
+    font-size: 14px;
+    font-weight: 950;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sugestao-preco__valor {
+    color: #0f7a43;
+    font-size: 13px;
+    font-weight: 950;
+    white-space: nowrap;
+  }
+
+  .sugestao-preco__meta,
+  .sugestao-preco__desc {
+    margin-top: 5px;
+    color: #607089;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.35;
+  }
+
+  .sugestao-preco__vazio {
+    padding: 12px;
+    color: #607089;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .dd {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .dd-summary {
+    width: 100%;
+    min-height: 48px;
+    border: 1px solid #d3dce9;
+    border-radius: 15px;
+    background: #ffffff;
+    color: #495e7a;
+    font-size: 15px;
+    padding: 0 14px;
+    outline: none;
+    box-sizing: border-box;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    user-select: none;
+  }
+
+  .dd[open] .dd-summary,
+  .dd-summary:focus {
+    border-color: #3d63f2;
+    box-shadow: 0 0 0 3px rgba(61, 99, 242, 0.12);
+  }
+
+  .dd-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 800;
+  }
+
+  .dd-caret {
+    flex: 0 0 auto;
+    color: #002f87;
+    font-weight: 900;
+  }
+
+  .dd-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    z-index: 80;
+    max-height: 320px;
+    overflow: auto;
+    padding: 10px;
+    border: 1px solid #d9e2ef;
+    border-radius: 16px;
+    background: #ffffff;
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+  }
+
+  .dd-search {
+    width: 100%;
+    height: 40px !important;
+    border-radius: 12px !important;
+    padding: 0 12px !important;
+    margin-bottom: 7px;
+  }
+
+  .dd-hint {
+    margin: 0 0 8px 0;
+    color: #697c98;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .dd-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 38px;
+    padding: 8px 9px;
+    margin: 0;
+    border-radius: 12px;
+    color: #233b61;
+    font-size: 14px;
+    font-weight: 850;
+    cursor: pointer;
+  }
+
+  .dd-item:hover {
+    background: #f3f7ff;
+  }
+
+  .dd-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    margin: 0;
+  }
+
+  .dd-item span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .btn-filtrar-precos,
+  .btn-limpar-precos,
+  .btn-paginacao-precos {
+    min-height: 48px;
+    padding: 0 22px;
+    border-radius: 15px;
+    font-size: 15px;
+    font-weight: 900;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    transition: 0.18s ease;
+    cursor: pointer;
+    box-sizing: border-box;
+  }
+
+  .btn-filtrar-precos {
+    border: 0;
+    background: #f7b500;
+    color: #101828;
+    box-shadow: 0 8px 18px rgba(247, 181, 0, 0.20);
+  }
+
+  .btn-limpar-precos {
+    border: 1px solid #f0a1a1;
+    background: #ffffff;
+    color: #a12626;
+  }
+
+  .tabela-precos-wrap {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .tabela-precos {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 1180px;
+  }
+
+  .tabela-precos th {
+    padding: 14px 14px;
+    background: #f7f9fc;
+    border-bottom: 1px solid #dfe7f1;
+    color: #002f87;
+    font-size: 13px;
+    font-weight: 950;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .tabela-precos td {
+    padding: 14px;
+    border-bottom: 1px solid #e7edf5;
+    color: #233b61;
+    font-size: 14px;
+    vertical-align: middle;
+  }
+
+  .tabela-precos tr:hover td {
+    background: #fbfcff;
+  }
+
+  .texto-forte-precos {
+    display: block;
+    color: #172b4d;
+    font-weight: 950;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  .texto-secundario-precos {
+    display: block;
+    margin-top: 3px;
+    color: #667892;
+    font-size: 12px;
+    font-weight: 750;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .pill-precos {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 30px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 950;
+    border: 1px solid #dbe4ef;
+    background: #f5f8fc;
+    color: #39506e;
+    white-space: nowrap;
+  }
+
+  .valor-principal-precos {
+    display: block;
+    color: #0f2f5f;
+    font-size: 15px;
+    font-weight: 950;
+    white-space: nowrap;
+  }
+
+  .form-bit-ativo-precos {
+    margin: 0;
+  }
+
+  .switch-precos {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .switch-precos input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+  }
+
+  .switch-precos__trilho {
+    position: relative;
+    width: 48px;
+    height: 28px;
+    border-radius: 999px;
+    background: #d5dfeb;
+    border: 1px solid #c9d5e5;
+    transition: 0.18s ease;
+    flex: 0 0 auto;
+  }
+
+  .switch-precos__trilho::after {
+    content: "";
+    position: absolute;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    left: 2px;
+    top: 2px;
+    background: #ffffff;
+    box-shadow: 0 2px 5px rgba(15, 23, 42, 0.20);
+    transition: 0.18s ease;
+  }
+
+  .switch-precos input:checked + .switch-precos__trilho {
+    background: #12b76a;
+    border-color: #12b76a;
+  }
+
+  .switch-precos input:checked + .switch-precos__trilho::after {
+    transform: translateX(20px);
+  }
+
+  .switch-precos__texto {
+    color: #3a4f6d;
+    font-size: 13px;
+    font-weight: 900;
+    white-space: nowrap;
+  }
+
+  .estado-vazio-precos {
+    padding: 38px 20px 42px 20px;
+    text-align: center;
+    color: #607089;
+    font-weight: 800;
+  }
+
+  .rodape-paginacao-precos {
+    padding: 16px 20px 22px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    border-top: 1px solid #e7edf5;
+    background: #fbfcff;
+  }
+
+  .rodape-paginacao-precos__resumo {
+    width: 100%;
+    color: #4c617f;
+    font-size: 14px;
+    font-weight: 800;
+    text-align: left;
+  }
+
+  .rodape-paginacao-precos__acoes {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .btn-paginacao-precos {
+    min-width: 44px;
+    min-height: 42px;
+    padding: 0 14px;
+    border-radius: 12px;
+    border: 1px solid #d6e0ec;
+    background: #ffffff;
+    color: #1f365b;
+    font-size: 14px;
+    font-weight: 900;
+  }
+
+  .btn-paginacao-precos--ativa {
+    background: #1f365b;
+    border-color: #1f365b;
+    color: #ffffff;
+  }
+
+  .btn-paginacao-precos--desabilitada {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
+  @media (max-width: 1320px) {
+    .painel-filtros-precos__linha {
+      grid-template-columns: repeat(3, minmax(180px, 1fr));
+    }
+
+    .campo-filtro-precos--busca {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 1120px) {
+    .pagina-lista-precos {
+      padding: 12px;
+    }
+
+    .painel-filtros-precos__linha {
+      grid-template-columns: 1fr;
+    }
+
+    .campo-filtro-precos--busca {
+      grid-column: auto;
+    }
+
+    .topo-lista-precos {
+      align-items: stretch;
+    }
+
+    .topo-lista-precos__contador,
+    .btn-filtrar-precos,
+    .btn-limpar-precos {
+      width: 100%;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .pagina-lista-precos {
+      padding: 8px;
+    }
+
+    .bloco-lista-precos {
+      border-radius: 16px;
+    }
+
+    .topo-lista-precos__titulo {
+      font-size: 24px;
+    }
+
+    .rodape-paginacao-precos__acoes {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      width: 100%;
+    }
+
+    .btn-paginacao-precos {
+      width: 100%;
+    }
+  }
+</style>
+
+<div class="pagina-lista-precos">
+  <div class="bloco-lista-precos">
+    <div class="topo-lista-precos">
+      <div>
+        <h1 class="topo-lista-precos__titulo">Listas de Preços</h1>
+        
+      </div>
+
+      <div class="topo-lista-precos__contador">
+        {{ paginacao.total }} registro{{ '' if paginacao.total == 1 else 's' }}
+      </div>
+    </div>
+
+    <form class="painel-filtros-precos" method="get" action="{{ url_for('admin.lista_precos_midia') }}" data-role="form-lista-precos">
+      <span class="painel-filtros-precos__titulo">Filtros</span>
+
+      <div class="painel-filtros-precos__linha">
+        <div class="campo-filtro-precos campo-filtro-precos--busca">
+          <div id="comboBuscaPrecos" class="combo-busca-precos">
+            <div class="combo-busca-precos__box">
+              <span class="combo-busca-precos__icone">🔎</span>
+              <input
+                id="buscaListaPrecos"
+                class="combo-busca-precos__input"
+                type="search"
+                name="q"
+                value="{{ filtros.q }}"
+                placeholder="Buscar por CodPonto, CodFace, tipo, período, exibições/dia ou preço..."
+                autocomplete="off"
+                spellcheck="false"
+                aria-autocomplete="list"
+                aria-expanded="false"
+                aria-controls="listaBuscaPrecos"
+                data-sugestoes-url="{{ url_for('admin.api_lista_precos_sugestoes') }}"
+              >
+            </div>
+            <div id="listaBuscaPrecos" class="combo-busca-precos__sugestoes"></div>
+          </div>
+        </div>
+
+        <div class="campo-filtro-precos">
+          <select name="ativo">
+            <option value="todos" {% if filtros.ativo == 'todos' %}selected{% endif %}>Todos os status</option>
+            <option value="1" {% if filtros.ativo == '1' %}selected{% endif %}>Somente ativos</option>
+            <option value="0" {% if filtros.ativo == '0' %}selected{% endif %}>Somente inativos</option>
+          </select>
+        </div>
+
+        <div class="campo-filtro-precos">
+          <details class="dd" data-dd="tipo" data-dd-default="Todos os tipos">
+            <summary class="dd-summary">
+              <span class="dd-label" data-dd-label>Todos os tipos</span>
+              <span class="dd-caret">▾</span>
+            </summary>
+            <div class="dd-panel">
+              <input type="text" class="dd-search" placeholder="Pesquisar tipo..." autocomplete="off">
+              <div class="dd-hint">Marque um ou mais tipos</div>
+              <label class="dd-item">
+                <input type="checkbox" value="" data-dd-all="1" {% if not filtros.tipos %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+              {% for item_tipo in tipos %}
+                <label class="dd-item">
+                  <input type="checkbox" name="tipo" value="{{ item_tipo }}" {% if item_tipo in filtros.tipos %}checked{% endif %}>
+                  <span>{{ item_tipo }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </details>
+        </div>
+
+        <div class="campo-filtro-precos">
+          <details class="dd" data-dd="tabela" data-dd-default="Todas as tabelas">
+            <summary class="dd-summary">
+              <span class="dd-label" data-dd-label>Todas as tabelas</span>
+              <span class="dd-caret">▾</span>
+            </summary>
+            <div class="dd-panel">
+              <input type="text" class="dd-search" placeholder="Pesquisar tabela..." autocomplete="off">
+              <div class="dd-hint">Marque uma ou mais tabelas</div>
+              <label class="dd-item">
+                <input type="checkbox" value="" data-dd-all="1" {% if not filtros.tabelas %}checked{% endif %}>
+                <span>(Todas)</span>
+              </label>
+              {% for item_tabela in tabelas %}
+                <label class="dd-item">
+                  <input type="checkbox" name="tabela" value="{{ item_tabela }}" {% if item_tabela in filtros.tabelas %}checked{% endif %}>
+                  <span>{{ item_tabela }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </details>
+        </div>
+
+        <button class="btn-filtrar-precos" type="submit">Filtrar</button>
+        <a class="btn-limpar-precos" href="{{ url_for('admin.lista_precos_midia') }}">Limpar</a>
+      </div>
+    </form>
+
+    {% if itens %}
+      <div class="tabela-precos-wrap">
+        <table class="tabela-precos">
+          <thead>
+            <tr>
+              <th>Ponto / Face</th>
+              <th>Painel</th>
+              <th>Tipo</th>
+              <th>Período</th>
+              <th>Exibições/dia</th>
+              <th>Valor</th>
+              <th>Valor troca</th>
+              <th>Política</th>
+              <th>Tabela</th>
+              <th>Validade</th>
+              <th>Ativo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in itens %}
+              <tr>
+                <td>
+                  <span class="texto-forte-precos">{{ item.CodPonto or '—' }}</span>
+                  <span class="texto-secundario-precos">CodFace: {{ item.CodFace or '—' }} · Face: {{ item.Face or '—' }}</span>
+                </td>
+
+                <td>
+                  <span class="texto-forte-precos">{{ item.ReferenciaPainel or '—' }}</span>
+                  <span class="texto-secundario-precos">{{ item.Cidade or '—' }}/{{ item.UF or '—' }} · {{ item.QuantidadeFaces or 0 }} face{{ '' if item.QuantidadeFaces == 1 else 's' }}</span>
+                </td>
+
+                <td>
+                  <span class="pill-precos">{{ item.Tipo or item.TipoFace or '—' }}</span>
+                </td>
+
+                <td>
+                  <span class="texto-forte-precos">{{ item.PeriodoExibicao or '—' }}</span>
+                </td>
+
+                <td>
+                  <span class="texto-forte-precos">{{ item.ExibicoesDia if item.ExibicoesDia is not none else '—' }}</span>
+                </td>
+
+                <td>
+                  <span class="valor-principal-precos">{{ dinheiro(item.Valor) }}</span>
+                </td>
+
+                <td>
+                  <span class="valor-principal-precos">{{ dinheiro(item.ValorTroca) }}</span>
+                </td>
+
+                <td>
+                  <span class="texto-forte-precos">{{ item.PoliticaTrocas or '—' }}</span>
+                </td>
+
+                <td>
+                  <span class="texto-forte-precos">{{ item.Tabela or '—' }}</span>
+                  <span class="texto-secundario-precos">Atualizado: {{ data_br(item.DataAtualizacao) }}</span>
+                </td>
+
+                <td>
+                  <span class="texto-forte-precos">{{ data_br(item.DataPublicacao) }}</span>
+                  <span class="texto-secundario-precos">até {{ data_br(item.DataValidade) }}</span>
+                </td>
+
+                <td>
+                  <form
+                    class="form-bit-ativo-precos"
+                    method="post"
+                    action="{{ url_for('admin.lista_precos_midia_alterar_bitativo', id_preco=item.IDDimTabelaPrecosMidia) }}"
+                  >
+                    {% if csrf_token is defined %}
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    {% endif %}
+                    <input type="hidden" name="page" value="{{ paginacao.page }}">
+                    <input type="hidden" name="q" value="{{ filtros.q }}">
+                    <input type="hidden" name="ativo" value="{{ filtros.ativo }}">
+                    {% for valor_tipo in filtros.tipos %}
+                      <input type="hidden" name="tipo" value="{{ valor_tipo }}">
+                    {% endfor %}
+                    {% for valor_tabela in filtros.tabelas %}
+                      <input type="hidden" name="tabela" value="{{ valor_tabela }}">
+                    {% endfor %}
+                    <input type="hidden" name="bit_ativo" value="{{ 1 if item.BitAtivo else 0 }}" data-role="bit-ativo-value">
+
+                    <label class="switch-precos" title="Clique para ativar ou desativar este preço">
+                      <input
+                        type="checkbox"
+                        data-role="bit-ativo-check"
+                        {% if item.BitAtivo %}checked{% endif %}
+                      >
+                      <span class="switch-precos__trilho" aria-hidden="true"></span>
+                      <span class="switch-precos__texto">{{ 'Ativo' if item.BitAtivo else 'Inativo' }}</span>
+                    </label>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="estado-vazio-precos">
+        Nenhum preço encontrado com os filtros informados.
+      </div>
+    {% endif %}
+
+    <div class="rodape-paginacao-precos">
+      <div class="rodape-paginacao-precos__resumo">
+        Exibindo {{ paginacao.inicio }} até {{ paginacao.fim }} de {{ paginacao.total }} registros — 10 por página.
+      </div>
+
+      <div class="rodape-paginacao-precos__acoes">
+        <a
+          class="btn-paginacao-precos {% if paginacao.page <= 1 %}btn-paginacao-precos--desabilitada{% endif %}"
+          href="{{ url_for('admin.lista_precos_midia') }}?page={{ paginacao.page - 1 }}{% if paginacao.query_string_sem_page %}&{{ paginacao.query_string_sem_page }}{% endif %}"
+        >Anterior</a>
+
+        {% for numero_pagina in paginacao.paginas_visiveis %}
+          <a
+            class="btn-paginacao-precos {% if numero_pagina == paginacao.page %}btn-paginacao-precos--ativa{% endif %}"
+            href="{{ url_for('admin.lista_precos_midia') }}?page={{ numero_pagina }}{% if paginacao.query_string_sem_page %}&{{ paginacao.query_string_sem_page }}{% endif %}"
+          >{{ numero_pagina }}</a>
+        {% endfor %}
+
+        <a
+          class="btn-paginacao-precos {% if paginacao.page >= paginacao.total_pages %}btn-paginacao-precos--desabilitada{% endif %}"
+          href="{{ url_for('admin.lista_precos_midia') }}?page={{ paginacao.page + 1 }}{% if paginacao.query_string_sem_page %}&{{ paginacao.query_string_sem_page }}{% endif %}"
+        >Próxima</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(".form-bit-ativo-precos").forEach(function (formulario) {
+      var checkbox = formulario.querySelector('[data-role="bit-ativo-check"]');
+      var campoValor = formulario.querySelector('[data-role="bit-ativo-value"]');
+      var texto = formulario.querySelector(".switch-precos__texto");
+
+      if (!checkbox || !campoValor) {
+        return;
+      }
+
+      checkbox.addEventListener("change", function () {
+        campoValor.value = checkbox.checked ? "1" : "0";
+        if (texto) {
+          texto.textContent = checkbox.checked ? "Ativo" : "Inativo";
+        }
+        formulario.submit();
+      });
+    });
+
+    document.querySelectorAll(".dd").forEach(function (dd) {
+      var rotulo = dd.querySelector("[data-dd-label]");
+      var textoPadrao = dd.getAttribute("data-dd-default") || "Todos";
+      var busca = dd.querySelector(".dd-search");
+      var todos = dd.querySelector('input[type="checkbox"][data-dd-all="1"]');
+      var checks = Array.prototype.slice.call(dd.querySelectorAll('input[type="checkbox"]'));
+      var checksValores = checks.filter(function (input) { return !input.hasAttribute("data-dd-all"); });
+
+      function atualizarRotulo() {
+        var selecionados = checksValores.filter(function (input) { return input.checked; });
+
+        if (selecionados.length === 0) {
+          if (todos) {
+            todos.checked = true;
+          }
+          rotulo.textContent = textoPadrao;
+          return;
+        }
+
+        if (todos) {
+          todos.checked = false;
+        }
+
+        if (selecionados.length === 1) {
+          rotulo.textContent = selecionados[0].value;
+          return;
+        }
+
+        rotulo.textContent = selecionados.length + " selecionados";
+      }
+
+      checks.forEach(function (input) {
+        input.addEventListener("change", function () {
+          if (input.hasAttribute("data-dd-all")) {
+            if (input.checked) {
+              checksValores.forEach(function (item) { item.checked = false; });
+            }
+          } else if (input.checked && todos) {
+            todos.checked = false;
+          }
+
+          var temSelecionado = checksValores.some(function (item) { return item.checked; });
+          if (!temSelecionado && todos) {
+            todos.checked = true;
+          }
+
+          atualizarRotulo();
+        });
+      });
+
+      if (busca) {
+        busca.addEventListener("input", function () {
+          var termo = (busca.value || "").trim().toLowerCase();
+          dd.querySelectorAll(".dd-item").forEach(function (label) {
+            var texto = (label.textContent || "").trim().toLowerCase();
+            label.style.display = texto.indexOf(termo) >= 0 ? "flex" : "none";
+          });
+        });
+      }
+
+      atualizarRotulo();
+    });
+
+    document.addEventListener("click", function (event) {
+      document.querySelectorAll(".dd[open]").forEach(function (dd) {
+        if (!dd.contains(event.target)) {
+          dd.removeAttribute("open");
+        }
+      });
+    });
+
+    var combo = document.getElementById("comboBuscaPrecos");
+    var inputBusca = document.getElementById("buscaListaPrecos");
+    var listaSugestoes = document.getElementById("listaBuscaPrecos");
+    var formularioBusca = document.querySelector('[data-role="form-lista-precos"]');
+    var timerBusca = null;
+    var controllerBusca = null;
+
+    function escaparHtml(valor) {
+      return String(valor == null ? "" : valor)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function fecharSugestoes() {
+      if (combo) {
+        combo.classList.remove("is-open");
+      }
+      if (inputBusca) {
+        inputBusca.setAttribute("aria-expanded", "false");
+      }
+    }
+
+    function abrirSugestoes() {
+      if (combo) {
+        combo.classList.add("is-open");
+      }
+      if (inputBusca) {
+        inputBusca.setAttribute("aria-expanded", "true");
+      }
+    }
+
+    function renderizarSugestoes(itens) {
+      if (!listaSugestoes) {
+        return;
+      }
+
+      if (!itens || itens.length === 0) {
+        listaSugestoes.innerHTML = '<div class="sugestao-preco__vazio">Nenhuma sugestão encontrada.</div>';
+        abrirSugestoes();
+        return;
+      }
+
+      listaSugestoes.innerHTML = itens.map(function (item) {
+        var titulo = (item.CodFace || "—") + " • Ponto " + (item.CodPonto || "—");
+        var meta = [
+          item.Tipo || "Tipo não informado",
+          item.PeriodoExibicao || "Período não informado",
+          item.ExibicoesDia != null ? item.ExibicoesDia + " exibições/dia" : "Exibições não informadas",
+          item.Tabela ? "Tabela " + item.Tabela : "Tabela não informada"
+        ].join(" • ");
+        var desc = [
+          item.Cidade && item.UF ? item.Cidade + "/" + item.UF : "Cidade não informada",
+          item.ReferenciaPainel || "Referência não informada",
+          "Valor troca: " + (item.ValorTrocaFormatado || "—")
+        ].join(" • ");
+
+        return '' +
+          '<button type="button" class="sugestao-preco" data-termo="' + escaparHtml(item.TermoBusca || item.CodFace || item.CodPonto || "") + '">' +
+            '<div class="sugestao-preco__topo">' +
+              '<div class="sugestao-preco__titulo" title="' + escaparHtml(titulo) + '">' + escaparHtml(titulo) + '</div>' +
+              '<div class="sugestao-preco__valor">' + escaparHtml(item.ValorFormatado || "—") + '</div>' +
+            '</div>' +
+            '<div class="sugestao-preco__meta">' + escaparHtml(meta) + '</div>' +
+            '<div class="sugestao-preco__desc">' + escaparHtml(desc) + '</div>' +
+          '</button>';
+      }).join("");
+
+      abrirSugestoes();
+    }
+
+    function buscarSugestoes() {
+      if (!inputBusca || !listaSugestoes) {
+        return;
+      }
+
+      var termo = (inputBusca.value || "").trim();
+      var url = inputBusca.getAttribute("data-sugestoes-url");
+
+      if (!url || termo.length < 1) {
+        listaSugestoes.innerHTML = "";
+        fecharSugestoes();
+        return;
+      }
+
+      if (controllerBusca) {
+        controllerBusca.abort();
+      }
+
+      controllerBusca = new AbortController();
+      fetch(url + "?q=" + encodeURIComponent(termo), {
+        method: "GET",
+        headers: {"Accept": "application/json"},
+        signal: controllerBusca.signal
+      })
+        .then(function (resposta) { return resposta.json(); })
+        .then(function (dados) {
+          renderizarSugestoes(dados && dados.itens ? dados.itens : []);
+        })
+        .catch(function (erro) {
+          if (erro && erro.name === "AbortError") {
+            return;
+          }
+          listaSugestoes.innerHTML = '<div class="sugestao-preco__vazio">Erro ao carregar sugestões.</div>';
+          abrirSugestoes();
+        });
+    }
+
+    if (inputBusca && listaSugestoes) {
+      inputBusca.addEventListener("input", function () {
+        clearTimeout(timerBusca);
+        timerBusca = setTimeout(buscarSugestoes, 220);
+      });
+
+      inputBusca.addEventListener("focus", function () {
+        if ((inputBusca.value || "").trim().length > 0 && listaSugestoes.innerHTML.trim() !== "") {
+          abrirSugestoes();
+        }
+      });
+
+      listaSugestoes.addEventListener("click", function (event) {
+        var botao = event.target.closest(".sugestao-preco");
+        if (!botao) {
+          return;
+        }
+
+        inputBusca.value = botao.getAttribute("data-termo") || "";
+        fecharSugestoes();
+
+        if (formularioBusca) {
+          formularioBusca.submit();
+        }
+      });
+
+      document.addEventListener("click", function (event) {
+        if (combo && !combo.contains(event.target)) {
+          fecharSugestoes();
+        }
+      });
+    }
+  });
+</script>
+{% endblock %}

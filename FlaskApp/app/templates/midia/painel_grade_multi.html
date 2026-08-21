@@ -1,0 +1,2998 @@
+{% extends "midia/base_midia.html" %}
+
+{% block title %}Grade Multi Painéis | Euromídia{% endblock %}
+
+{% block content %}
+
+{% set return_to_paineis_safe = (return_to_paineis if return_to_paineis is defined and return_to_paineis else url_for('Paineis.lista_paineis')) %}
+
+{% set total_paineis = (paineis_grade|length if paineis_grade is defined and paineis_grade else 0) %}
+{% set filtros_safe = (filtros if filtros is defined and filtros else {}) %}
+{% set codfaces_request = (codfaces_selecionadas if codfaces_selecionadas is defined and codfaces_selecionadas else request.args.getlist('codface')) %}
+{% set vendedores_request = (filtros_safe.vendedores if filtros_safe.vendedores is defined and filtros_safe.vendedores else request.args.getlist('vendedor')) %}
+{% set segmentos_request = (filtros_safe.segmentos if filtros_safe.segmentos is defined and filtros_safe.segmentos else request.args.getlist('segmento')) %}
+{% set codpontos_request = (filtros_safe.codpontos if filtros_safe.codpontos is defined and filtros_safe.codpontos else request.args.getlist('codponto')) %}
+
+{% set modo_atual = (filtros_safe.modo if filtros_safe.modo is defined and filtros_safe.modo else request.args.get('modo','')) %}
+{% set data_ref_atual = (filtros_safe.data_ref if filtros_safe.data_ref is defined and filtros_safe.data_ref else request.args.get('data_ref','')) %}
+{% set mes_de_atual = (filtros_safe.mes_de if filtros_safe.mes_de is defined and filtros_safe.mes_de else request.args.get('mes_de','')) %}
+{% set mes_ate_atual = (filtros_safe.mes_ate if filtros_safe.mes_ate is defined and filtros_safe.mes_ate else request.args.get('mes_ate','')) %}
+{% set bi_semana_atual = (filtros_safe.bi_semana if filtros_safe.bi_semana is defined and filtros_safe.bi_semana else request.args.get('bi_semana','')) %}
+{% set usuario_logado_eh_perfil_vendedor = (usuario_logado_eh_perfil_vendedor if usuario_logado_eh_perfil_vendedor is defined else false) %}
+{% set id_vendedor_logado = (id_vendedor_logado if id_vendedor_logado is defined else none) %}
+{% set nome_vendedor_logado = (nome_vendedor_logado if nome_vendedor_logado is defined else '') %}
+
+{% macro moeda(valor) -%}
+  {% if valor is not none %}
+    R$ {{ "{:,.2f}".format(valor).replace(",", "X").replace(".", ",").replace("X", ".") }}
+  {% else %}
+    --
+  {% endif %}
+{%- endmacro %}
+
+{% macro render_grade_painel(p, idx, mes_ref, mes_ref_prev, mes_ref_next) %}
+  {% set eh_digital_p = (p.eh_digital if p.eh_digital is defined else ((p.tipo_prod or "")|trim|upper == "PAINEL DIGITAL")) %}
+  {% set total_dias_p = (p.total_dias if p.total_dias is defined and p.total_dias else p.ultimo_dia) %}
+  {% set tipo_painel_info_p = (p.tipo_painel_info if p.tipo_painel_info is defined and p.tipo_painel_info else p.tipo_prod) %}
+  {% set cidade_painel_p = (p.cidade_painel if p.cidade_painel is defined and p.cidade_painel else "") %}
+  {% set uf_painel_p = (p.uf_painel if p.uf_painel is defined and p.uf_painel else "") %}
+  {% set bairro_painel_p = (p.bairro_painel if p.bairro_painel is defined and p.bairro_painel else "") %}
+  {% set logradouro_painel_p = (p.logradouro_painel if p.logradouro_painel is defined and p.logradouro_painel else "") %}
+
+  {% set ocupacao_pct_p = (p.ocupacao_pct if p.ocupacao_pct is defined and p.ocupacao_pct is not none else none) %}
+  {% set slots_ocupados_p = (p.slots_ocupados if p.slots_ocupados is defined and p.slots_ocupados is not none else none) %}
+  {% set slots_total_p = (p.slots_total if p.slots_total is defined and p.slots_total is not none else none) %}
+
+  {% set margem_pct_p = (p.margem_pct if p.margem_pct is defined and p.margem_pct is not none else none) %}
+  {% set rentabilidade_valor_p = (p.rentabilidade_valor if p.rentabilidade_valor is defined and p.rentabilidade_valor is not none else none) %}
+  {% set custo_total_p = (p.custo_total if p.custo_total is defined and p.custo_total is not none else none) %}
+  {% set receita_total_p = (p.receita_total if p.receita_total is defined and p.receita_total is not none else none) %}
+  {% set qtd_contratos_p = (p.qtd_contratos if p.qtd_contratos is defined and p.qtd_contratos is not none else none) %}
+  {% set ticket_medio_p = (p.ticket_medio if p.ticket_medio is defined and p.ticket_medio is not none else none) %}
+
+  {# Indicadores do próprio painel com fallback global #}
+  {% set cdi_info_p = (
+    p.cdi_info if p.cdi_info is defined and p.cdi_info
+    else (cdi_info if cdi_info is defined and cdi_info else {})
+  ) %}
+  {% set ooh_info_p = (
+    p.ooh_info if p.ooh_info is defined and p.ooh_info
+    else (
+      p.indice_ooh_info if p.indice_ooh_info is defined and p.indice_ooh_info
+      else (
+        ooh_info if ooh_info is defined and ooh_info
+        else (
+          indice_ooh_info if indice_ooh_info is defined and indice_ooh_info else {}
+        )
+      )
+    )
+  ) %}
+  {% set ooh_global_info_p = (
+    p.ooh_global_info if p.ooh_global_info is defined and p.ooh_global_info
+    else (
+      p.indice_ooh_global_info if p.indice_ooh_global_info is defined and p.indice_ooh_global_info
+      else (
+        ooh_global_info if ooh_global_info is defined and ooh_global_info
+        else (
+          indice_ooh_global_info if indice_ooh_global_info is defined and indice_ooh_global_info else {}
+        )
+      )
+    )
+  ) %}
+
+  {% set url_grade_isolada = (
+    p.url_grade if p.url_grade is defined and p.url_grade
+    else (
+      p.href if p.href is defined and p.href
+      else url_for('Paineis.grade_painel', codponto=p.codponto, mes_ref=mes_ref)
+    )
+  ) %}
+
+  <div class="bloco-multi-grade">
+    <div class="bloco-multi-topo">
+      <div class="bloco-multi-topo-left">
+        <h2 class="bloco-multi-titulo">
+          Painel {{ p.codponto }}
+        </h2>
+
+        <div class="bloco-multi-sub">
+          CodPonto:
+          <span class="dado-forte">{{ p.codponto }}</span>
+
+          {% if p.tipo_prod %}
+            • Tipo:
+            <span class="dado-forte">{{ p.tipo_prod }}</span>
+          {% endif %}
+
+          {% if p.exibidora %}
+            • Exibidora:
+            <span class="dado-forte">{{ p.exibidora }}</span>
+          {% endif %}
+
+          {% if p.num_faces %}
+            • Nº Faces:
+            <span class="dado-forte">{{ p.num_faces }}</span>
+          {% endif %}
+        </div>
+
+        {% if logradouro_painel_p or cidade_painel_p or uf_painel_p %}
+          <div class="painel-endereco-bloco">
+            <div class="painel-endereco-chip">
+              <span class="painel-endereco-icon">📍</span>
+              <div class="painel-endereco-texto">
+                <div class="painel-endereco-linha1">
+                  {% if logradouro_painel_p %}
+                    {{ logradouro_painel_p }}
+                  {% else %}
+                    Endereço não informado
+                  {% endif %}
+                </div>
+                <div class="painel-endereco-linha2">
+                  {% if cidade_painel_p or uf_painel_p %}
+                    {{ cidade_painel_p }}{% if cidade_painel_p and uf_painel_p %} - {% endif %}{{ uf_painel_p }}
+                  {% else %}
+                    --
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endif %}
+
+        {% if eh_digital_p %}
+          {% if p.slots_conflito and p.slots_conflito|length > 0 %}
+            <div style="margin-top:10px;">
+              <span class="alerta-conflito">
+                ⚠ Conflitos detectados em {{ p.slots_conflito|length }} slot(s)
+              </span>
+            </div>
+          {% endif %}
+        {% else %}
+          {% if p.faces_conflito and p.faces_conflito|length > 0 %}
+            <div style="margin-top:10px;">
+              <span class="alerta-conflito">
+                ⚠ Conflitos detectados em {{ p.faces_conflito|length }} face(s)
+              </span>
+            </div>
+          {% endif %}
+        {% endif %}
+      </div>
+
+      <div class="bloco-multi-topo-right">
+        <a class="btn btn-secondary"
+           style="text-decoration:none;"
+           href="{{ url_grade_isolada }}">
+          Abrir grade isolada
+        </a>
+      </div>
+    </div>
+
+    <div class="kpi-wrap">
+      <div class="kpi-grid">
+
+        <div class="kpi-card kpi--occ">
+          <img class="kpi-ico-img"
+               src="{{ url_for('static', filename='imagens/percentual_ocupacao.png') }}"
+               alt="Percentual de ocupação">
+
+          <div class="kpi-body">
+            <div class="kpi-title">Percentual de ocupação</div>
+            <div class="kpi-value">
+              {% if ocupacao_pct_p is not none %}
+                {{ ocupacao_pct_p|round(1) }}%
+              {% else %}
+                --
+              {% endif %}
+            </div>
+            <div class="kpi-sub">
+              {% if slots_ocupados_p is not none and slots_total_p is not none %}
+                {{ slots_ocupados_p }}/{{ slots_total_p }} espaços ocupados
+              {% else %}
+                --
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-card kpi--rev">
+          <img class="kpi-ico-img"
+               src="{{ url_for('static', filename='imagens/receita.png') }}"
+               alt="Receita">
+
+          <div class="kpi-body">
+            <div class="kpi-title">Receita</div>
+
+            <div class="kpi-value">
+              {{ moeda(receita_total_p) }}
+            </div>
+
+            <div class="kpi-sub" style="display:flex;flex-direction:column;gap:2px;">
+              <div class="kpi-sub-money" style="opacity:.85;">
+                Receita do período
+              </div>
+
+              {% if qtd_contratos_p is not none %}
+                <div class="kpi-sub-indice">
+                  {{ qtd_contratos_p }} contrato(s)
+                </div>
+              {% endif %}
+
+              {% if ticket_medio_p is not none %}
+                <div class="kpi-sub-indice">
+                  Ticket médio: {{ moeda(ticket_medio_p) }}
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-card kpi--marg">
+          <img class="kpi-ico-img"
+               src="{{ url_for('static', filename='imagens/margem.png') }}"
+               alt="Margem e rentabilidade">
+
+          <div class="kpi-body">
+            <div class="kpi-title">Margem e rentabilidade</div>
+            <div class="kpi-value">
+              {% if margem_pct_p is not none %}
+                {{ margem_pct_p|round(1) }}%
+              {% else %}
+                --
+              {% endif %}
+            </div>
+
+            <div class="kpi-sub" style="display:flex;flex-direction:column;gap:2px;">
+              <div class="kpi-sub-money">
+                {{ moeda(rentabilidade_valor_p) }}
+              </div>
+
+              <div class="kpi-sub-indice">
+                {% if cdi_info_p and cdi_info_p.CdiPercentPeriodo is not none %}
+                  CDI: {{ cdi_info_p.CdiPercentPeriodo|round(2) }}%
+                {% else %}
+                  CDI: --
+                {% endif %}
+              </div>
+
+              <div class="kpi-sub-indice">
+                {% if ooh_info_p and ooh_info_p.RetornoPercentPeriodo is not none %}
+                  OOH: {{ ooh_info_p.RetornoPercentPeriodo|round(2) }}%
+                {% else %}
+                  OOH: --
+                {% endif %}
+              </div>
+
+              <div class="kpi-sub-indice">
+                {% if ooh_global_info_p and ooh_global_info_p.RetornoPercentPeriodo is not none %}
+                  OOH Global: {{ ooh_global_info_p.RetornoPercentPeriodo|round(2) }}%
+                {% else %}
+                  OOH Global: --
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-card kpi--cost">
+          <img class="kpi-ico-img"
+               src="{{ url_for('static', filename='imagens/custo.png') }}"
+               alt="Custo">
+
+          <div class="kpi-body">
+            <div class="kpi-title">Custo</div>
+            <div class="kpi-value">
+              {{ moeda(custo_total_p) }}
+            </div>
+            <div class="kpi-sub">Custos do período</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="grade-shell js-grade-shell" data-grade-idx="{{ idx }}">
+      <div class="hscroll-top js-hscroll-top" aria-label="Rolagem horizontal superior da grade">
+        <div class="hscroll-inner js-hscroll-inner"></div>
+      </div>
+
+      <div class="grade-wrap js-grade-wrap">
+        <div class="grade js-grade-inner"
+             style="
+               --total-dias-grade: {{ total_dias_p }};
+               min-width: calc({{ 180 + (90 if eh_digital_p else 0) }}px + ({{ total_dias_p }} * var(--dia-col-w)));
+             ">
+
+          <div class="grade-head">
+            <div class="col-face-head">Face</div>
+
+            {% if eh_digital_p %}
+              <div class="col-loop-head">Faces</div>
+            {% endif %}
+
+            {% for d in p.dias %}
+              {% set _lbl = (d.label if d.label is defined and d.label else d.dia) %}
+              {% set _ano_lbl = (d.data.strftime('%Y') if d.data is defined and d.data else (mes_ref[:4] if mes_ref is defined and mes_ref and mes_ref|length >= 4 else '')) %}
+              <div class="dia-head {% if d.is_fds %}fds{% endif %}"
+                   data-dia="{{ _lbl }}"
+                   data-ano="{{ _ano_lbl }}">
+                <div class="dia-dow">---</div>
+                <div class="dia-date">{{ _lbl }}</div>
+              </div>
+            {% endfor %}
+          </div>
+
+          {% if eh_digital_p %}
+
+            {% for face in p.faces %}
+              {% for lp in p.loops_permitidos %}
+
+                {% set lp_num = (lp|string)|replace('SPAN','')|int %}
+                {% set chave_slot = (face, lp) %}
+                {% set itens_raw = p.ocupacoes_por_slot.get(chave_slot, []) %}
+                {% set tem_conflito = (chave_slot in p.slots_conflito) %}
+
+                {% set ns_linha = namespace(tem_span_inicio=False) %}
+                {% for it_tmp in itens_raw %}
+                  {% set _alt_tmp = ((it_tmp.SpanAltura if it_tmp.SpanAltura is defined and it_tmp.SpanAltura is not none else 1) | int) %}
+                  {% set _off_tmp = ((it_tmp.SpanOffset if it_tmp.SpanOffset is defined and it_tmp.SpanOffset is not none else 0) | int) %}
+                  {% if _alt_tmp > 1 and _off_tmp == 0 %}
+                    {% set ns_linha.tem_span_inicio = True %}
+                  {% endif %}
+                {% endfor %}
+
+                <div class="linha
+                            {% if tem_conflito %}linha-conflito{% endif %}
+                            {% if ns_linha.tem_span_inicio %}linha-span{% endif %}">
+
+                  {% if loop.index0 == 0 %}
+                    <div class="face-col com-info">
+                      <div class="face">{{ face }}</div>
+                      <div class="meta">
+                        {% if face in p.faces_conflito %}
+                          <span style="color:#b91c1c;font-weight:900;">⚠ Conflito</span>
+                        {% else %}
+                          <span>OK</span>
+                        {% endif %}
+                        • {{ (p.ocupacoes_por_face.get(face, [])|length) }} item(ns)
+                      </div>
+                      <div class="painel-extra">
+                        <div class="painel-extra-linha">{{ tipo_painel_info_p or p.tipo_prod or "--" }}</div>
+                        <div class="painel-extra-linha">
+                          {% if cidade_painel_p or uf_painel_p %}
+                            {{ cidade_painel_p }}{% if cidade_painel_p and uf_painel_p %} - {% endif %}{{ uf_painel_p }}
+                          {% else %}
+                            --
+                          {% endif %}
+                        </div>
+                        <div class="painel-extra-linha">{{ bairro_painel_p or "--" }}</div>
+                      </div>
+                    </div>
+                  {% else %}
+                    <div class="face-col spacer"></div>
+                  {% endif %}
+
+                  <div class="loop-col">
+                    <div class="loop-badge">Face{{ "%02d"|format(lp_num) }}</div>
+                  </div>
+
+                  <div class="trilho" data-face="{{ face }}" data-loop="{{ lp }}">
+                    {% for d in p.dias %}
+                      <div class="cel {% if d.is_fds %}fds{% endif %}"></div>
+                    {% endfor %}
+
+                    {% set ns = namespace(agrupados={}) %}
+
+                    {% for it in itens_raw %}
+                      {% set _off_item = ((it.SpanOffset if it.SpanOffset is defined and it.SpanOffset is not none else 0) | int) %}
+                      {% set _alt_item = ((it.SpanAltura if it.SpanAltura is defined and it.SpanAltura is not none else 1) | int) %}
+
+                      {% if not (_alt_item > 1 and _off_item > 0) %}
+                        {% set eh_reserva_item = (it.EhReserva if it.EhReserva is defined else False) %}
+
+                        {% set contrato_txt = '' %}
+                        {% if it.NumeroContratoAutorizacao is defined and it.NumeroContratoAutorizacao %}
+                          {% set contrato_txt = it.NumeroContratoAutorizacao %}
+                        {% elif it.NumeroContrato is defined and it.NumeroContrato %}
+                          {% set contrato_txt = it.NumeroContrato %}
+                        {% elif it.Contrato is defined and it.Contrato %}
+                          {% set contrato_txt = it.Contrato %}
+                        {% elif it.IDContrato is defined and it.IDContrato %}
+                          {% set contrato_txt = it.IDContrato %}
+                        {% elif it.IDFatoControleContratos is not none %}
+                          {% set contrato_txt = it.IDFatoControleContratos %}
+                        {% else %}
+                          {% set contrato_txt = '' %}
+                        {% endif %}
+
+                        {% set previa_txt = '' %}
+                        {% if it.NumeroPrevia is defined and it.NumeroPrevia %}
+                          {% set previa_txt = it.NumeroPrevia %}
+                        {% elif it.Previa is defined and it.Previa %}
+                          {% set previa_txt = it.Previa %}
+                        {% else %}
+                          {% set previa_txt = '' %}
+                        {% endif %}
+
+                        {% set dia_ini = it.DiaInicio if it.DiaInicio is not none else 1 %}
+                        {% set dia_fim = it.DiaFim if it.DiaFim is not none else dia_ini %}
+
+                        {% set span_altura = (it.SpanAltura if it.SpanAltura is not none else 1) %}
+                        {% if span_altura < 1 %}{% set span_altura = 1 %}{% endif %}
+
+                        {% set _cota_str = (it.Cota|string)|upper if it.Cota is defined and it.Cota is not none else '' %}
+                        {% if _cota_str == '1080' and span_altura < 2 %}
+                          {% set span_altura = 2 %}
+                        {% endif %}
+
+                        {% set chave = (it.IDFatoControleContratos if it.IDFatoControleContratos is not none else None) %}
+                        {% if not chave %}
+                          {% set chave = ((it.MarcaExibida or it.BarraTexto or 'SEM_TEXTO') ~ '|' ~ (it.Loop|string) ~ '|' ~ (dia_ini|string) ~ '|' ~ (dia_fim|string)) %}
+                        {% endif %}
+
+                        {% if chave in ns.agrupados %}
+                          {% set atual = ns.agrupados[chave] %}
+
+                          {% set novo_ini = atual.DiaInicio %}
+                          {% if dia_ini < atual.DiaInicio %}{% set novo_ini = dia_ini %}{% endif %}
+
+                          {% set novo_fim = atual.DiaFim %}
+                          {% if dia_fim > atual.DiaFim %}{% set novo_fim = dia_fim %}{% endif %}
+
+                          {% set novo_span_alt = atual.SpanAltura %}
+                          {% if span_altura > atual.SpanAltura %}{% set novo_span_alt = span_altura %}{% endif %}
+
+                          {% set novo_conflito = atual.BitConflito %}
+                          {% if it.BitConflito %}{% set novo_conflito = True %}{% endif %}
+
+                          {% set novo_eh_reserva = (atual.EhReserva if atual.EhReserva is defined else False) %}
+                          {% if eh_reserva_item %}{% set novo_eh_reserva = True %}{% endif %}
+
+                          {% set nova_cota = (atual.Cota if atual.Cota is defined and atual.Cota is not none and atual.Cota != '' else (it.Cota if it.Cota is defined else '')) %}
+
+                          {% set _ = ns.agrupados.update({
+                            chave: {
+                              'ID': (atual.ID if atual.ID is defined else (it.ID if it.ID is defined else '')),
+                              'DiaInicio': novo_ini,
+                              'DiaFim': novo_fim,
+                              'SpanAltura': novo_span_alt,
+                              'BitConflito': novo_conflito,
+                              'EhReserva': novo_eh_reserva,
+                              'Cota': nova_cota,
+                              'IDFatoControleContratos': (atual.IDFatoControleContratos if atual.IDFatoControleContratos is not none else (it.IDFatoControleContratos if it.IDFatoControleContratos is not none else '')),
+                              'BarraTexto': (atual.BarraTexto if atual.BarraTexto else (it.BarraTexto if it.BarraTexto is defined else '')),
+                              'MarcaExibida': (atual.MarcaExibida if atual.MarcaExibida else (it.MarcaExibida if it.MarcaExibida is defined else '')),
+                              'Vendedor': (atual.Vendedor if atual.Vendedor else (it.Vendedor if it.Vendedor is defined else '')),
+                              'Loop': (atual.Loop if atual.Loop else (it.Loop if it.Loop is defined else '')),
+                              'DataInicio': (atual.DataInicio if atual.DataInicio else (it.DataInicio if it.DataInicio is defined else None)),
+                              'DataFim': (atual.DataFim if atual.DataFim else (it.DataFim if it.DataFim is defined else None)),
+                              'TextoOriginal': (atual.TextoOriginal if atual.TextoOriginal else (it.TextoOriginal if it.TextoOriginal is defined else '')),
+                              'Status': (atual.Status if atual.Status is defined else ''),
+                              'Origem': (atual.Origem if atual.Origem is defined else ''),
+                              'OrigemItem': (atual.OrigemItem if atual.OrigemItem is defined else (it.OrigemItem if it.OrigemItem is defined else ''))
+                            }
+                          }) %}
+
+                        {% else %}
+                          {% set _ = ns.agrupados.update({
+                            chave: {
+                              'ID': (it.ID if it.ID is defined else ''),
+                              'DiaInicio': dia_ini,
+                              'DiaFim': dia_fim,
+                              'SpanAltura': span_altura,
+                              'BitConflito': (True if it.BitConflito else False),
+                              'EhReserva': eh_reserva_item,
+                              'Cota': (it.Cota if it.Cota is defined else ''),
+                              'IDFatoControleContratos': (it.IDFatoControleContratos if it.IDFatoControleContratos is not none else ''),
+                              'BarraTexto': (it.BarraTexto if it.BarraTexto is defined else ''),
+                              'MarcaExibida': (it.MarcaExibida if it.MarcaExibida is defined else ''),
+                              'Vendedor': (it.Vendedor if it.Vendedor is defined else ''),
+                              'Loop': (it.Loop if it.Loop is defined else ''),
+                              'DataInicio': (it.DataInicio if it.DataInicio is defined else None),
+                              'DataFim': (it.DataFim if it.DataFim is defined else None),
+                              'TextoOriginal': (it.TextoOriginal if it.TextoOriginal is defined else ''),
+                              'Status': (it.Status if it.Status is defined else ''),
+                              'Origem': (it.Origem if it.Origem is defined else ''),
+                              'OrigemItem': (it.OrigemItem if it.OrigemItem is defined else '')
+                            }
+                          }) %}
+                        {% endif %}
+                      {% endif %}
+                    {% endfor %}
+
+                    {% for it in ns.agrupados.values()|sort(attribute='DiaInicio') %}
+                      {% set dia_ini = it.DiaInicio if it.DiaInicio is not none else 1 %}
+                      {% set dia_fim = it.DiaFim if it.DiaFim is not none else dia_ini %}
+                      {% set span_altura = (it.SpanAltura if it.SpanAltura is not none else 1) %}
+                      {% if span_altura < 1 %}{% set span_altura = 1 %}{% endif %}
+
+                      {% if span_altura > 1 %}
+                        {% set barra_h = 'var(--barra-h-2)' %}
+                        {% set barra_top = 'var(--barra-top-2)' %}
+                        {% set barra_font = 'var(--barra-font-2)' %}
+                      {% else %}
+                        {% set barra_h = 'var(--barra-h-1)' %}
+                        {% set barra_top = 'var(--barra-top-1)' %}
+                        {% set barra_font = 'var(--barra-font-1)' %}
+                      {% endif %}
+
+                      {% set eh_reserva = (it.EhReserva if it.EhReserva is defined else False) %}
+
+                      {% if eh_reserva %}
+                        {% set cota_val = (it.Cota if it.Cota is defined else '') %}
+                        {% set vend_txt = (it.Vendedor if it.Vendedor is defined and it.Vendedor else '') %}
+                        {% set chip_txt = ('Cota ' ~ (cota_val|string)) if cota_val not in (None,'') else 'Cota' %}
+                        {% set resto_txt = 'RESERVADO' ~ (' - ' ~ vend_txt if vend_txt else '') %}
+                        {% set barra_txt = chip_txt ~ ' - ' ~ resto_txt %}
+                      {% else %}
+                        {% set barra_txt = (it.MarcaExibida or it.BarraTexto or '') %}
+                        {% set chip_txt = '' %}
+                        {% set resto_txt = barra_txt %}
+                        {% if barra_txt and ('Cota ' in barra_txt or 'cota ' in barra_txt) %}
+                          {% set partes = barra_txt.split(' ', 2) %}
+                          {% if partes|length >= 2 and (partes[0]|lower == 'cota') %}
+                            {% set chip_txt = (partes[0] ~ ' ' ~ partes[1]) %}
+                            {% if partes|length == 3 %}
+                              {% set resto_txt = partes[2] %}
+                            {% else %}
+                              {% set resto_txt = '' %}
+                            {% endif %}
+                          {% endif %}
+                        {% endif %}
+                      {% endif %}
+
+                      {% set classes_barra = 'barra' %}
+                      {% if eh_reserva %}{% set classes_barra = classes_barra ~ ' reservado' %}{% endif %}
+                      {% if it.BitConflito %}{% set classes_barra = classes_barra ~ ' conflito' %}{% endif %}
+                      {% if span_altura > 1 %}{% set classes_barra = classes_barra ~ ' multi-span' %}{% endif %}
+
+                      <div class="{{ classes_barra }}"
+                           style="
+                             left: calc({{ dia_ini - 1 }} * var(--dia-col-w));
+                             width: calc({{ dia_fim - dia_ini + 1 }} * var(--dia-col-w));
+                             --barra-h: {{ barra_h }};
+                             --barra-top: {{ barra_top }};
+                             --barra-font: {{ barra_font }};
+                           "
+                           data-contrato-id="{{ it.IDFatoControleContratos if it.IDFatoControleContratos is not none else '' }}"
+                           data-vendedor-id="{{ it.IDVendedor if it.IDVendedor is defined and it.IDVendedor is not none else '' }}"
+                           data-origem="{{ it.OrigemItem if it.OrigemItem is defined else '' }}"
+                           data-eh-reserva="{{ 1 if eh_reserva else 0 }}"
+                           data-item-id="{{ it.ID if it.ID is defined else '' }}"
+                           title="Duplo clique para abrir o contrato"
+                           data-tooltip-title="{{ barra_txt|e }}"
+                           data-tooltip-loop="{{ it.Loop|e }}"
+                           data-tooltip-vendedor="{{ it.Vendedor|e }}"
+                           data-tooltip-di="{{ it.DataInicio.strftime('%d/%m/%Y') if it.DataInicio else '' }}"
+                           data-tooltip-df="{{ it.DataFim.strftime('%d/%m/%Y') if it.DataFim else '' }}"
+                           data-tooltip-txt="{{ it.TextoOriginal|e }}">
+
+                        {% if chip_txt %}
+                          <span class="chip">{{ chip_txt }}</span>
+                        {% endif %}
+
+                        <span class="txt">{{ resto_txt if resto_txt else barra_txt }}</span>
+
+                        {% if (not eh_reserva) and it.Vendedor %}
+                          <span class="vend">{{ it.Vendedor }}</span>
+                        {% endif %}
+                      </div>
+                    {% endfor %}
+                  </div>
+                </div>
+
+              {% endfor %}
+            {% endfor %}
+
+          {% else %}
+
+            {% for face in p.faces %}
+              {% set itens = p.ocupacoes_por_face.get(face, []) %}
+              {% set tem_conflito = face in p.faces_conflito %}
+              {% set qtd_linhas_face = (itens|length if itens and itens|length > 0 else 1) %}
+
+              <div class="linha linha-analog {% if tem_conflito %}linha-conflito{% endif %}"
+                   style="--linhas-itens-analog: {{ qtd_linhas_face }};">
+                <div class="face-col com-info">
+                  <div class="face">{{ face }}</div>
+                  <div class="meta">
+                    {% if tem_conflito %}
+                      <span style="color:#b91c1c;font-weight:900;">⚠ Conflito</span>
+                    {% else %}
+                      <span>OK</span>
+                    {% endif %}
+                    • {{ itens|length }} item(ns)
+                  </div>
+                  <div class="painel-extra">
+                    <div class="painel-extra-linha">{{ tipo_painel_info_p or p.tipo_prod or "--" }}</div>
+                    <div class="painel-extra-linha">
+                      {% if cidade_painel_p or uf_painel_p %}
+                        {{ cidade_painel_p }}{% if cidade_painel_p and uf_painel_p %} - {% endif %}{{ uf_painel_p }}
+                      {% else %}
+                        --
+                      {% endif %}
+                    </div>
+                    <div class="painel-extra-linha">{{ bairro_painel_p or "--" }}</div>
+                  </div>
+                </div>
+
+                <div class="trilho trilho-analog" data-face="{{ face }}">
+                  {% for d in p.dias %}
+                    <div class="cel {% if d.is_fds %}fds{% endif %}"></div>
+                  {% endfor %}
+
+                  {% for it in itens %}
+                    {% set dia_ini = it.DiaInicio if it.DiaInicio is not none else 1 %}
+                    {% set dia_fim = it.DiaFim if it.DiaFim is not none else dia_ini %}
+                    {% set eh_reserva2 = (it.EhReserva if it.EhReserva is defined else False) %}
+                    {% set cota2 = (it.Cota if it.Cota is defined else '') %}
+                    {% set vend2 = (it.Vendedor if it.Vendedor is defined and it.Vendedor else '') %}
+
+                    {% if eh_reserva2 %}
+                      {% set chip2 = ('Cota ' ~ (cota2|string)) if cota2 not in (None,'') else 'Cota' %}
+                      {% set txt2 = 'RESERVADO' ~ (' - ' ~ vend2 if vend2 else '') %}
+                      {% set barra_txt = chip2 ~ ' - ' ~ txt2 %}
+                    {% else %}
+                      {% set barra_txt = (it.BarraTexto or (it.MarcaExibida ~ ' - ' ~ it.Vendedor)) %}
+                    {% endif %}
+
+                    {% set classes_barra2 = 'barra barra-analog' %}
+                    {% if it.BitConflito %}{% set classes_barra2 = classes_barra2 ~ ' conflito' %}{% endif %}
+                    {% if eh_reserva2 %}{% set classes_barra2 = classes_barra2 ~ ' reservado' %}{% endif %}
+
+                    <div class="{{ classes_barra2 }}"
+                         style="
+                           left: calc({{ dia_ini - 1 }} * var(--dia-col-w));
+                           width: calc({{ dia_fim - dia_ini + 1 }} * var(--dia-col-w));
+                           top: calc(({{ loop.index0 }} * var(--trilho-h)) + var(--pad-y));
+                           height: calc(var(--trilho-h) - (var(--pad-y) * 2));
+                         "
+                         data-contrato-id="{{ it.IDFatoControleContratos if it.IDFatoControleContratos is not none else '' }}"
+                         data-vendedor-id="{{ it.IDVendedor if it.IDVendedor is defined and it.IDVendedor is not none else '' }}"
+                         data-origem="{{ it.OrigemItem if it.OrigemItem is defined else '' }}"
+                         data-eh-reserva="{{ 1 if eh_reserva2 else 0 }}"
+                         data-item-id="{{ it.ID if it.ID is defined else '' }}"
+                         title="Duplo clique para abrir o contrato"
+                         data-tooltip-title="{{ barra_txt|e }}"
+                         data-tooltip-loop="{{ it.Loop|e }}"
+                         data-tooltip-vendedor="{{ it.Vendedor|e }}"
+                         data-tooltip-di="{{ it.DataInicio.strftime('%d/%m/%Y') if it.DataInicio else '' }}"
+                         data-tooltip-df="{{ it.DataFim.strftime('%d/%m/%Y') if it.DataFim else '' }}"
+                         data-tooltip-txt="{{ it.TextoOriginal|e }}">
+                      <span class="txt">{{ barra_txt }}</span>
+                    </div>
+                  {% endfor %}
+                </div>
+              </div>
+            {% endfor %}
+
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+{% endmacro %}
+
+<div class="card grade-card-no-clip">
+
+  <style>
+    .grade-card-no-clip{
+      overflow: visible !important;
+      position: relative;
+      z-index: 1;
+    }
+
+    .pagina-multi-wrap{
+      display:flex;
+      flex-direction:column;
+      gap:18px;
+    }
+
+    .grade-topo{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+      flex-wrap:wrap;
+    }
+
+    .grade-topo-left{
+      flex: 1 1 340px;
+      min-width: min(340px, 100%);
+    }
+
+    .grade-topo-right{
+      flex: 2 1 720px;
+      min-width: 320px;
+      min-width: 0;
+      display:flex;
+      align-items:flex-end;
+      justify-content:flex-end;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .grade-nav{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:flex-end;
+    }
+
+    .grade-filtros{
+      margin-left:auto;
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:flex-end;
+      justify-content:flex-end;
+      margin-top:0;
+      margin-bottom:0;
+    }
+
+    .campo-filtro{
+      flex: 1 1 220px;
+      min-width: 180px;
+    }
+
+    .campo-filtro input{
+      width:100%;
+      box-sizing:border-box;
+    }
+
+    .campo-filtro-dd{
+      flex: 1 1 260px;
+      min-width: 240px;
+    }
+
+    .campo-filtro-dd details{
+      width: 100%;
+    }
+
+    .dd{
+      position: relative;
+      width: 100%;
+    }
+
+    .dd-summary{
+      list-style: none;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      min-height: 38px;
+      padding: 0 12px;
+      border:1px solid rgba(15,23,42,.14);
+      border-radius: 10px;
+      background:#fff;
+      cursor:pointer;
+      box-sizing:border-box;
+      user-select:none;
+    }
+
+    .dd-summary::-webkit-details-marker{
+      display:none;
+    }
+
+    .dd[open] .dd-summary{
+      border-color: rgba(37,99,235,.34);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.10);
+    }
+
+    .dd-label{
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      font-weight:800;
+      color: rgba(15,23,42,.86);
+    }
+
+    .dd-caret{
+      flex: 0 0 auto;
+      font-weight:900;
+      color: rgba(15,23,42,.72);
+      transition: transform .12s ease;
+    }
+
+    .dd[open] .dd-caret{
+      transform: rotate(180deg);
+    }
+
+    .dd-panel{
+      position:absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      width: 100%;
+      min-width: 280px;
+      max-height: 360px;
+      overflow:auto;
+      background:#fff;
+      border:1px solid rgba(15,23,42,.14);
+      border-radius: 14px;
+      box-shadow: 0 24px 44px rgba(2,6,23,.14);
+      padding: 10px;
+      box-sizing:border-box;
+      z-index: 1200;
+    }
+
+    .dd-search{
+      width:100%;
+      height:36px;
+      border:1px solid rgba(15,23,42,.14);
+      border-radius: 10px;
+      padding: 0 10px;
+      box-sizing:border-box;
+      background:#fff;
+      color: rgba(15,23,42,.92);
+      font-weight:700;
+    }
+
+    .dd-search:focus{
+      outline:none;
+      border-color: rgba(37,99,235,.45);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.14);
+    }
+
+    .dd-hint{
+      padding: 8px 2px 10px 2px;
+      color: rgba(15,23,42,.72);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .dd-item{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding: 10px 6px;
+      border-radius: 10px;
+      cursor:pointer;
+    }
+
+    .dd-item:hover{
+      background: rgba(37,99,235,.06);
+    }
+
+    .dd-item input[type="checkbox"]{
+      width:18px;
+      height:18px;
+      accent-color: #1d4ed8;
+      flex: 0 0 auto;
+    }
+
+    .dd-item span{
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      font-weight:800;
+      color: rgba(15,23,42,.88);
+    }
+
+    .dd-item.dd-hidden{
+      display:none !important;
+    }
+
+    .painel-endereco-bloco{
+      margin-top:10px;
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+    }
+
+    .painel-endereco-chip{
+      display:inline-flex;
+      align-items:flex-start;
+      gap:8px;
+      width:fit-content;
+      max-width:100%;
+      padding:8px 12px;
+      border-radius:12px;
+      border:1px solid rgba(15,23,42,.10);
+      background: rgba(2,132,199,.05);
+      color: rgba(15,23,42,.88);
+      box-shadow: 0 2px 8px rgba(15,23,42,.04);
+    }
+
+    .painel-endereco-icon{
+      flex:0 0 auto;
+      font-size:14px;
+      line-height:1.2;
+      margin-top:1px;
+    }
+
+    .painel-endereco-texto{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
+
+    .painel-endereco-linha1{
+      font-weight:900;
+      color: var(--text);
+      line-height:1.2;
+      word-break:break-word;
+    }
+
+    .painel-endereco-linha2{
+      font-weight:800;
+      color: rgba(15,23,42,.70);
+      line-height:1.2;
+      word-break:break-word;
+    }
+
+    .resumo-multi{
+      margin-top:10px;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+
+    .resumo-chip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 12px;
+      border-radius:999px;
+      background:#fff;
+      border:1px solid rgba(15,23,42,.10);
+      font-weight:900;
+      color:rgba(15,23,42,.88);
+      box-shadow: 0 2px 8px rgba(15,23,42,.05);
+    }
+
+    .bloco-multi-grade{
+      border:1px solid rgba(15,23,42,.10);
+      border-radius:16px;
+      background:#fff;
+      padding:16px;
+      box-shadow: 0 6px 20px rgba(2,6,23,.04);
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    .bloco-multi-topo{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+      flex-wrap:wrap;
+    }
+
+    .bloco-multi-topo-left{
+      flex:1 1 420px;
+      min-width:min(420px, 100%);
+    }
+
+    .bloco-multi-topo-right{
+      flex:0 0 auto;
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .bloco-multi-titulo{
+      margin:0;
+      font-size:22px;
+      line-height:1.1;
+      color:var(--euro-blue);
+      font-weight:950;
+    }
+
+    .bloco-multi-sub{
+      margin-top:6px;
+      font-weight:800;
+      color:rgba(15,23,42,.74);
+      line-height:1.3;
+    }
+
+    .dado-forte{
+      color:var(--text);
+      font-weight:950;
+    }
+
+    .alerta-conflito{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(220,38,38,.22);
+      background: rgba(220,38,38,.06);
+      color:#b91c1c;
+      font-weight:900;
+    }
+
+    .kpi-wrap{
+      display:flex;
+      justify-content:center;
+      width:100%;
+      padding: 6px 0 10px 0;
+    }
+
+    .kpi-grid{
+      display:grid;
+      grid-template-columns: repeat(4, minmax(260px, 1fr));
+      gap: 22px;
+      align-items: stretch;
+      width: min(1680px, 100%);
+      padding: 0 6px;
+      box-sizing: border-box;
+    }
+
+    @media (max-width: 1500px){
+      .kpi-grid{ grid-template-columns: repeat(3, minmax(260px, 1fr)); }
+    }
+    @media (max-width: 1120px){
+      .kpi-grid{ grid-template-columns: repeat(2, minmax(260px, 1fr)); }
+    }
+    @media (max-width: 820px){
+      .kpi-grid{ grid-template-columns: 1fr; }
+    }
+
+    .kpi-card, .kpi-card *{
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+
+    .kpi-card{
+      --kpi-ink: rgba(2,6,23,.96);
+      --kpi-muted: rgba(15,23,42,.70);
+      --kpi-soft: rgba(148,163,184,.20);
+      --kpi-accent: rgba(37,99,235,.95);
+      --kpi-accent-soft: rgba(37,99,235,.10);
+
+      background:
+        linear-gradient(180deg, #ffffff 0%, rgba(2,6,23,.02) 100%);
+      border: 1px solid rgba(15,23,42,.22);
+      outline: 1px solid rgba(2,6,23,.07);
+      border-radius: 18px;
+      padding: 18px 20px;
+      min-height: 112px;
+      box-sizing: border-box;
+      display:flex;
+      gap: 14px;
+      align-items:center;
+      position: relative;
+      overflow: hidden;
+      box-shadow:
+        0 18px 34px rgba(2,6,23,.12),
+        0 4px 12px rgba(2,6,23,.08);
+      transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+      min-width: 0;
+      width: 100%;
+    }
+
+    .kpi-card::before{
+      content:"";
+      position:absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 6px;
+      background: linear-gradient(180deg, var(--kpi-accent) 0%, rgba(2,6,23,.10) 140%);
+      opacity: .85;
+    }
+
+    .kpi-card:hover{
+      transform: translateY(-2px);
+      border-color: rgba(37,99,235,.32);
+      box-shadow:
+        0 24px 44px rgba(2,6,23,.14),
+        0 6px 16px rgba(2,6,23,.10);
+    }
+
+    .kpi-body{
+      display:flex;
+      flex-direction:column;
+      gap: 6px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    .kpi-title{
+      font-weight: 800;
+      color: var(--kpi-muted);
+      font-size: 13px;
+      letter-spacing: .2px;
+      line-height: 1.15;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .kpi-value{
+      font-weight: 900;
+      font-size: 30px;
+      color: var(--kpi-ink);
+      line-height: 1.02;
+      letter-spacing: -0.4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .kpi-sub{
+      font-weight: 700;
+      color: rgba(15,23,42,.62);
+      font-size: 13px;
+      line-height: 1.15;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .kpi-sub-money{
+      font-weight: 850;
+      color: rgba(2,6,23,.88);
+      font-size: 16px;
+      line-height: 1.15;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .kpi-sub-indice{
+      font-weight: 700;
+      color: rgba(15,23,42,.62);
+      font-size: 13px;
+      line-height: 1.15;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .kpi-ico-img{
+      width: 62px;
+      height: 62px;
+      border-radius: 16px;
+      border: 1px solid rgba(15,23,42,.18);
+      background:
+        radial-gradient(80% 80% at 30% 25%, rgba(255,255,255,.85) 0%, rgba(255,255,255,.10) 60%),
+        linear-gradient(180deg, var(--kpi-accent-soft) 0%, rgba(2,6,23,.02) 100%);
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.75),
+        0 10px 18px rgba(2,6,23,.10);
+      object-fit: contain;
+      padding: 10px;
+      box-sizing: border-box;
+      flex: 0 0 auto;
+      display:block;
+    }
+
+    .kpi--occ{
+      --kpi-accent: rgba(37,99,235,.95);
+      --kpi-accent-soft: rgba(37,99,235,.12);
+    }
+    .kpi--occ .kpi-value{ color: rgba(29,78,216,.98); }
+
+    .kpi--rev{
+      --kpi-accent: rgba(2,132,199,.95);
+      --kpi-accent-soft: rgba(2,132,199,.14);
+    }
+    .kpi--rev .kpi-value{ color: rgba(3,105,161,.98); }
+
+    .kpi--marg{
+      --kpi-accent: rgba(16,185,129,.95);
+      --kpi-accent-soft: rgba(16,185,129,.14);
+    }
+    .kpi--marg .kpi-value{ color: rgba(5,150,105,.98); }
+
+    .kpi--cost{
+      --kpi-accent: rgba(245,158,11,.95);
+      --kpi-accent-soft: rgba(245,158,11,.16);
+    }
+    .kpi--cost .kpi-value{ color: rgba(180,83,9,.98); }
+
+    #legenda{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      position: sticky;
+      top: 64px;
+      z-index: 20;
+      background: var(--bg);
+      padding: 10px 0;
+    }
+
+    .grade-shell{
+      border: 1px solid rgba(15,23,42,.10);
+      border-radius: 14px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .grade-wrap{
+      width: 100%;
+      overflow: auto;
+      max-height: 72vh;
+      overscroll-behavior: contain;
+      background: #fff;
+    }
+
+    .grade{
+      padding: 0;
+    }
+
+    .hscroll-top{
+      display:none;
+      width: 100%;
+      height: 14px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      background: #fff;
+      border-bottom: 1px solid rgba(15,23,42,.10);
+    }
+
+    .hscroll-inner{ height: 1px; }
+    .hscroll-top::-webkit-scrollbar{ height: 12px; }
+
+    :root{
+      --dia-col-w: clamp(38px, 4.2vw, 54px);
+      --dia-font: 12px;
+      --dia-pad-y: 10px;
+
+      --dias-bg-1: rgba(2, 132, 199, .08);
+      --dias-bg-2: rgba(2, 132, 199, .03);
+      --dias-borda: rgba(2, 6, 23, .10);
+      --dias-sep: rgba(15, 23, 42, .10);
+      --dias-text: rgba(15,23,42,.86);
+
+      --barra-bg: rgba(37, 99, 235, .12);
+      --barra-bd: rgba(37, 99, 235, .22);
+      --barra-tx: rgba(15, 23, 42, .92);
+      --barra-shadow: rgba(2, 6, 23, .06);
+
+      --trilho-h: 56px;
+      --pad-y: 10px;
+
+      --linha-gap: 0px;
+
+      --barra-h-1: calc(var(--trilho-h) - (var(--pad-y) * 2));
+      --barra-top-1: var(--pad-y);
+
+      --barra-h-2: calc((var(--trilho-h) * 2) - (var(--pad-y) * 2));
+      --barra-top-2: var(--pad-y);
+
+      --barra-font-1: 12px;
+      --barra-font-2: 13px;
+
+      --grid-line: rgba(15,23,42,.08);
+      --grid-soft: rgba(148,163,184,.12);
+      --fds-bg: rgba(100,116,139,.08);
+    }
+
+    .grade-head{
+      display:grid;
+      gap:0;
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(255,255,255,1) 42%, rgba(2,132,199,.04) 100%);
+      border-bottom: 1px solid var(--dias-borda);
+      box-shadow: 0 10px 22px rgba(2,6,23,.06);
+    }
+
+    .grade-head:has(.col-loop-head){
+      grid-template-columns: 180px 90px repeat(var(--total-dias-grade, 31), var(--dia-col-w));
+    }
+
+    .grade-head:not(:has(.col-loop-head)){
+      grid-template-columns: 180px repeat(var(--total-dias-grade, 31), var(--dia-col-w));
+    }
+
+    .col-face-head{
+      position: sticky;
+      left: 0;
+      z-index: 40;
+      background:#fff;
+      border-right:1px solid rgba(15,23,42,.10);
+      padding: 10px 12px;
+      font-weight: 900;
+      color: var(--euro-blue);
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+
+    .col-loop-head{
+      position: sticky;
+      left: 180px;
+      z-index: 39;
+      background:#fff;
+      border-right:1px solid rgba(15,23,42,.10);
+      padding: 10px 12px;
+      font-weight: 900;
+      color: var(--euro-blue);
+      display:flex;
+      align-items:center;
+      justify-content:flex-start;
+      gap:10px;
+    }
+
+    .dia-head{
+      display:flex;
+      flex-direction: column;
+      align-items:center;
+      justify-content:center;
+      font-weight:950;
+      color: var(--dias-text);
+      border-right:1px solid var(--dias-sep);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(2,132,199,.06) 100%);
+      padding: 6px 0;
+      font-size: var(--dia-font);
+      white-space: nowrap;
+      letter-spacing: .2px;
+      gap: 2px;
+      box-shadow: inset 0 -1px 0 rgba(2,6,23,.06);
+      min-width: var(--dia-col-w);
+    }
+
+    .dia-head.fds{ background: var(--fds-bg); }
+
+    .dia-head:hover{
+      background: linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(2,132,199,.12) 100%);
+    }
+
+    .dia-head .dia-dow{
+      font-size: 11px;
+      font-weight: 900;
+      opacity: .85;
+      line-height: 1;
+    }
+
+    .dia-head .dia-date{
+      font-size: 12px;
+      font-weight: 950;
+      line-height: 1;
+    }
+
+    .linha{
+      display:grid;
+      margin-bottom: var(--linha-gap);
+      background: #fff;
+      border-bottom: 1px solid rgba(15,23,42,.08);
+      position: relative;
+      height: var(--trilho-h);
+      box-sizing: border-box;
+      overflow: visible;
+    }
+
+    .linha:has(.loop-col){
+      grid-template-columns: 180px 90px 1fr;
+    }
+
+    .linha:not(:has(.loop-col)){
+      grid-template-columns: 180px 1fr;
+    }
+
+    .linha.linha-alta{
+      height: calc(var(--trilho-h) * 2);
+    }
+
+    .face-col{
+      position: sticky;
+      left: 0;
+      z-index: 20;
+      background:#fff;
+      border-right:1px solid rgba(15,23,42,.10);
+      height: var(--trilho-h);
+      box-sizing: border-box;
+      padding: 8px 12px;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      gap: 4px;
+      overflow: hidden;
+    }
+
+    .linha.linha-alta .face-col{
+      height: calc(var(--trilho-h) * 2);
+    }
+
+    .face-col .face{
+      font-weight: 900;
+      color: var(--euro-blue);
+      font-size: 15px;
+      line-height: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .face-col .meta{
+      color: var(--muted);
+      font-weight: 800;
+      font-size: 12px;
+      line-height: 1.1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .face-col.com-info{
+      justify-content:flex-start;
+      align-items:flex-start;
+      gap: 3px;
+      overflow: visible;
+      height: auto;
+      min-height: calc(var(--trilho-h) + 44px);
+    }
+
+    .linha.linha-alta .face-col.com-info{
+      min-height: calc((var(--trilho-h) * 2) + 44px);
+    }
+
+    .face-col.com-info .meta{
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+    }
+
+    .face-col .painel-extra{
+      margin-top: 2px;
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+      color: rgba(15,23,42,.72);
+      font-weight: 700;
+      font-size: 11px;
+      line-height: 1.15;
+    }
+
+    .face-col .painel-extra .painel-extra-linha{
+      white-space: normal;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .face-col.spacer{ color: transparent; }
+    .face-col.spacer .face,
+    .face-col.spacer .meta,
+    .face-col.spacer .painel-extra{ display:none; }
+
+    .loop-col{
+      position: sticky;
+      left: 180px;
+      z-index: 19;
+      background:#fff;
+      border-right:1px solid rgba(15,23,42,.10);
+      height: var(--trilho-h);
+      box-sizing: border-box;
+      padding: 0 12px;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      align-items:flex-start;
+      gap:6px;
+      overflow:hidden;
+    }
+
+    .linha.linha-alta .loop-col{
+      height: calc(var(--trilho-h) * 2);
+    }
+
+    .loop-col .loop-badge{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding: 4px 8px;
+      border-radius: 10px;
+      border: 1px solid rgba(15,23,42,.12);
+      background: rgba(2,6,23,.03);
+      font-weight: 900;
+      font-size: 12px;
+      width: fit-content;
+      color: rgba(15,23,42,.86);
+      white-space: nowrap;
+    }
+
+    .trilho{
+      position: relative;
+      height: var(--trilho-h);
+      display:grid;
+      grid-template-columns: repeat(var(--total-dias-grade, 31), var(--dia-col-w));
+      align-items: stretch;
+      overflow: visible;
+      background: #fff;
+    }
+
+    .linha.linha-alta .trilho{
+      height: calc(var(--trilho-h) * 2);
+    }
+
+    .cel{
+      border-right: 1px solid rgba(15,23,42,.08);
+      background:#fff;
+    }
+
+    .cel.fds{ background: var(--fds-bg); }
+
+    .barra{
+      position: absolute;
+      top: var(--barra-top, var(--barra-top-1));
+      height: var(--barra-h, var(--barra-h-1));
+      border-radius: 10px;
+      padding: clamp(4px, .8vw, 6px) clamp(6px, 1.2vw, 10px);
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      overflow:hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      font-weight: 900;
+      font-size: clamp(11px, 1.1vw, var(--barra-font, var(--barra-font-1)));
+      border: 1px solid var(--barra-bd);
+      box-shadow: 0 6px 14px var(--barra-shadow);
+      cursor: pointer;
+      z-index: 60;
+      background: var(--barra-bg);
+      color: var(--barra-tx);
+      user-select: none;
+      box-sizing: border-box;
+    }
+
+    .barra.reservado{
+      background: rgba(245,158,11,.18) !important;
+      border-color: rgba(245,158,11,.42) !important;
+      color: #92400e !important;
+    }
+
+    .barra.reservado .chip{
+      background: #92400e !important;
+      color: #fff !important;
+    }
+
+    .barra.reservado .vend{
+      color: rgba(146,64,14,.85) !important;
+    }
+
+    .barra .chip{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(37,99,235,.55);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 950;
+      flex: 0 0 auto;
+    }
+
+    .barra .txt{
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .barra .vend{
+      font-weight: 850;
+      font-size: 12px;
+      color: rgba(15,23,42,.62);
+      overflow:hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .barra.conflito{ border: 2px solid rgba(220,38,38,.85); }
+
+    .barra.multi-span{
+      border-radius: 12px;
+    }
+
+    .barra.multi-span::after{
+      content:"";
+      position:absolute;
+      left: 0;
+      right: 0;
+      top: calc(50% - 0.5px);
+      height: 1px;
+      background: rgba(15, 23, 42, .18);
+      pointer-events: none;
+    }
+
+    .linha-conflito .face-col{ border-left: 3px solid rgba(220,38,38,.85); }
+    .linha-conflito .loop-col{ border-left: 3px solid rgba(220,38,38,.85); }
+
+    .linha.linha-analog{
+      height: calc(var(--trilho-h) * var(--linhas-itens-analog, 1));
+    }
+
+    .linha.linha-analog .face-col{
+      height: calc(var(--trilho-h) * var(--linhas-itens-analog, 1));
+    }
+
+    .linha.linha-analog .face-col.com-info{
+      min-height: calc((var(--trilho-h) * var(--linhas-itens-analog, 1)) + 44px);
+    }
+
+    .linha.linha-analog .trilho{
+      height: calc(var(--trilho-h) * var(--linhas-itens-analog, 1));
+    }
+
+    .linha.linha-analog .trilho::after{
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        repeating-linear-gradient(
+          to bottom,
+          transparent 0,
+          transparent calc(var(--trilho-h) - 1px),
+          rgba(15,23,42,.08) calc(var(--trilho-h) - 1px),
+          rgba(15,23,42,.08) var(--trilho-h)
+        );
+    }
+
+    .barra.barra-analog{
+      z-index: 60;
+    }
+
+    .barra.barra-analog .txt{
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .tooltip{
+      position: fixed;
+      display:none;
+      z-index: 9999;
+      min-width: 280px;
+      max-width: 420px;
+      background:#fff;
+      border:1px solid rgba(15,23,42,.12);
+      border-radius: 14px;
+      box-shadow: 0 16px 40px rgba(0,0,0,.16);
+      padding: 10px 12px;
+      color: var(--text);
+      pointer-events: none;
+    }
+
+    .tooltip .t-title{
+      font-weight: 900;
+      color: var(--euro-blue);
+      margin-bottom: 6px;
+    }
+
+    .tooltip .t-row{
+      font-weight: 800;
+      color: var(--text);
+      margin: 2px 0;
+    }
+
+    .tooltip .t-muted{
+      color: var(--muted);
+      font-weight: 800;
+      margin-top: 6px;
+      font-size: 12px;
+    }
+
+    .periodo-shell{
+      position: relative;
+      flex: 1 1 420px;
+      min-width: min(360px, 100%);
+      max-width: 520px;
+    }
+
+    .periodo-topbar{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:8px;
+      border:1px solid rgba(15,23,42,.14);
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 10px 22px rgba(2,6,23,.06);
+    }
+
+    .periodo-chip{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      height: 30px;
+      padding: 0 10px;
+      border-radius: 10px;
+      border:1px solid rgba(15,23,42,.12);
+      background: rgba(2,6,23,.02);
+      font-weight: 500;
+      color: rgba(15,23,42,.86);
+      cursor: pointer;
+      user-select: none;
+      transition: background .12s ease, border-color .12s ease, transform .12s ease;
+      white-space: nowrap;
+    }
+
+    .periodo-chip:hover{
+      background: rgba(37,99,235,.08);
+      border-color: rgba(37,99,235,.22);
+      transform: translateY(-1px);
+    }
+
+    .periodo-chip.ativo{
+      background: rgba(37,99,235,.14);
+      border-color: rgba(37,99,235,.30);
+      color: rgba(29,78,216,.98);
+    }
+
+    .periodo-open{
+      margin-left:auto;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      height: 30px;
+      padding: 0 10px;
+      border-radius: 10px;
+      border:1px solid rgba(15,23,42,.12);
+      background: rgba(2,6,23,.02);
+      font-weight: 500;
+      color: rgba(15,23,42,.90);
+      cursor:pointer;
+      user-select:none;
+    }
+
+    .periodo-open:hover{
+      background: rgba(2,132,199,.08);
+      border-color: rgba(2,132,199,.22);
+    }
+
+    .periodo-panel{
+      position:absolute;
+      right: 0;
+      top: calc(100% + 8px);
+      width: 420px;
+      max-width: 92vw;
+      background: #fff;
+      border:1px solid rgba(15,23,42,.14);
+      border-radius: 14px;
+      box-shadow: 0 24px 44px rgba(2,6,23,.14);
+      padding: 10px;
+      z-index: 999;
+      display:none;
+    }
+
+    .periodo-panel.aberto{ display:block; }
+
+    .periodo-header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding: 4px 6px 10px 6px;
+      border-bottom: 1px solid rgba(15,23,42,.10);
+      margin-bottom: 10px;
+    }
+
+    .periodo-ano{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      font-weight: 950;
+      color: rgba(15,23,42,.92);
+    }
+
+    .periodo-nav{
+      width: 34px;
+      height: 30px;
+      border-radius: 10px;
+      border:1px solid rgba(15,23,42,.12);
+      background: rgba(2,6,23,.02);
+      cursor:pointer;
+      font-weight: 950;
+      color: rgba(15,23,42,.90);
+    }
+
+    .periodo-nav:hover{
+      background: rgba(37,99,235,.10);
+      border-color: rgba(37,99,235,.22);
+    }
+
+    .periodo-meses{
+      display:grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 0 4px 10px 4px;
+    }
+
+    .periodo-mes{
+      height: 34px;
+      border-radius: 10px;
+      border:1px solid rgba(15,23,42,.12);
+      background: #fff;
+      font-weight: 950;
+      color: rgba(15,23,42,.86);
+      cursor:pointer;
+    }
+
+    .periodo-mes:hover{
+      background: rgba(2,132,199,.08);
+      border-color: rgba(2,132,199,.22);
+    }
+
+    .periodo-mes.sel{
+      background: rgba(37,99,235,.14);
+      border-color: rgba(37,99,235,.30);
+      color: rgba(29,78,216,.98);
+    }
+
+    .periodo-range{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      padding: 10px 4px 8px 4px;
+      border-top: 1px solid rgba(15,23,42,.10);
+    }
+
+    .periodo-range label,
+    .periodo-bisemana-solo label{
+      display:block;
+      font-weight: 900;
+      color: rgba(15,23,42,.72);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .periodo-range input,
+    .periodo-bisemana-solo select{
+      width: 100%;
+      height: 36px;
+      border-radius: 10px;
+      border:1px solid rgba(15,23,42,.14);
+      padding: 0 10px;
+      font-weight: 900;
+      color: rgba(15,23,42,.92);
+      box-sizing: border-box;
+      background: #fff;
+    }
+
+    .periodo-bisemana-solo{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      padding: 0 4px 8px 4px;
+    }
+
+    .periodo-actions{
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap: 10px;
+      padding: 8px 4px 2px 4px;
+    }
+
+    .periodo-btn{
+      height: 36px;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(15,23,42,.12);
+      background: rgba(2,6,23,.02);
+      font-weight: 950;
+      cursor:pointer;
+      color: rgba(15,23,42,.90);
+    }
+
+    .periodo-btn:hover{
+      background: rgba(2,132,199,.08);
+      border-color: rgba(2,132,199,.22);
+    }
+
+    .periodo-btn.primary{
+      background: rgba(37,99,235,.92);
+      border-color: rgba(37,99,235,.92);
+      color: #fff;
+    }
+
+    .periodo-btn.primary:hover{
+      background: rgba(29,78,216,.98);
+      border-color: rgba(29,78,216,.98);
+    }
+
+    .periodo-inputs-reais{
+      position:absolute;
+      width:1px;height:1px;
+      overflow:hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+      clip-path: inset(50%);
+      border:0;
+      padding:0;
+      margin:-1px;
+    }
+
+    @media (max-width: 980px){
+      .grade-topo-right{ justify-content:flex-start; }
+      .grade-filtros{
+        margin-left:0;
+        width:100%;
+        justify-content:flex-start;
+      }
+      .bloco-multi-topo-right{
+        width:100%;
+        justify-content:flex-start;
+      }
+    }
+  </style>
+
+  <div class="pagina-multi-wrap">
+
+    <div class="grade-topo">
+      <div class="grade-topo-left">
+        <h1 class="page-title" style="margin:0;">Grade Multi Painéis</h1>
+
+        <div class="muted" style="margin-top:6px;font-weight:800;">
+          Visualização consolidada das faces selecionadas em mais de um painel
+        </div>
+
+        <div class="resumo-multi">
+          <span class="resumo-chip">Painéis: {{ total_paineis }}</span>
+          <span class="resumo-chip">Faces selecionadas: {{ codfaces_request|length if codfaces_request else 0 }}</span>
+          {% if mes_ref %}
+            <span class="resumo-chip">Mês ref: {{ mes_ref }}</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="grade-topo-right">
+        <div class="grade-nav">
+          <a class="btn btn-secondary" style="text-decoration:none;"
+             href="{{ return_to_paineis_safe }}">
+            ← Voltar
+          </a>
+
+          <a class="btn btn-secondary js-preserva-filtros-link"
+             style="text-decoration:none;"
+             data-base-href="{{ url_for(request.endpoint, mes_ref=mes_ref_prev, tipo=filtros_safe.tipo, cliente=filtros_safe.cliente, mes_de=filtros_safe.mes_de, mes_ate=filtros_safe.mes_ate, modo=filtros_safe.modo, data_ref=filtros_safe.data_ref, bi_semana=filtros_safe.bi_semana, return_to=return_to_paineis_safe) }}"
+             href="{{ url_for(request.endpoint, mes_ref=mes_ref_prev, tipo=filtros_safe.tipo, cliente=filtros_safe.cliente, mes_de=filtros_safe.mes_de, mes_ate=filtros_safe.mes_ate, modo=filtros_safe.modo, data_ref=filtros_safe.data_ref, bi_semana=filtros_safe.bi_semana, return_to=return_to_paineis_safe) }}">
+            ‹ Mês anterior
+          </a>
+
+          <a class="btn btn-secondary js-preserva-filtros-link"
+             style="text-decoration:none;"
+             data-base-href="{{ url_for(request.endpoint, mes_ref=mes_ref_next, tipo=filtros_safe.tipo, cliente=filtros_safe.cliente, mes_de=filtros_safe.mes_de, mes_ate=filtros_safe.mes_ate, modo=filtros_safe.modo, data_ref=filtros_safe.data_ref, bi_semana=filtros_safe.bi_semana, return_to=return_to_paineis_safe) }}"
+             href="{{ url_for(request.endpoint, mes_ref=mes_ref_next, tipo=filtros_safe.tipo, cliente=filtros_safe.cliente, mes_de=filtros_safe.mes_de, mes_ate=filtros_safe.mes_ate, modo=filtros_safe.modo, data_ref=filtros_safe.data_ref, bi_semana=filtros_safe.bi_semana, return_to=return_to_paineis_safe) }}">
+            Próximo mês ›
+          </a>
+        </div>
+
+        <form id="formFiltroGradeMulti"
+              method="GET"
+              action="{{ url_for(request.endpoint) }}"
+              class="grade-filtros">
+
+          <input type="hidden" name="tipo" value="{{ filtros_safe.tipo if filtros_safe is defined else '' }}">
+          <input type="hidden" name="return_to" value="{{ return_to_paineis_safe }}">
+          <input type="hidden" id="inpModo" name="modo" value="{{ modo_atual }}">
+          <input type="hidden" id="inpDataRef" name="data_ref" value="{{ data_ref_atual }}">
+
+          {% if codpontos_request %}
+            {% for cp in codpontos_request %}
+              <input type="hidden" name="codponto" value="{{ cp }}">
+            {% endfor %}
+          {% endif %}
+
+          <div class="periodo-shell" id="periodoShell">
+            <div class="periodo-topbar">
+              <span class="periodo-chip {% if modo_atual == 'dia' %}ativo{% endif %}" data-modo="dia">Dia</span>
+              <span class="periodo-chip {% if modo_atual == 'semana' %}ativo{% endif %}" data-modo="semana">Semana</span>
+              <span class="periodo-chip {% if modo_atual == 'mes' or not modo_atual %}ativo{% endif %}" data-modo="mes">Mês</span>
+              <span class="periodo-chip {% if modo_atual == 'ano' %}ativo{% endif %}" data-modo="ano">Ano</span>
+              <span class="periodo-chip" id="btnHoje">Hoje</span>
+
+              <span class="periodo-open" id="btnAbrirPeriodo" title="Abrir seletor de período">
+                <span id="lblPeriodoTopo">Janeiro de 2026</span>
+                <span style="font-weight:950;opacity:.85;">▾</span>
+              </span>
+            </div>
+
+            <div class="periodo-panel" id="periodoPanel">
+              <div class="periodo-header">
+                <button type="button" class="periodo-nav" id="anoPrev">‹</button>
+                <div class="periodo-ano">
+                  <span id="lblAno">2026</span>
+                </div>
+                <button type="button" class="periodo-nav" id="anoNext">›</button>
+              </div>
+
+              <div class="periodo-meses" id="gridMeses">
+                <button type="button" class="periodo-mes" data-mes="01">JANEIRO</button>
+                <button type="button" class="periodo-mes" data-mes="02">FEVEREIRO</button>
+                <button type="button" class="periodo-mes" data-mes="03">MARÇO</button>
+                <button type="button" class="periodo-mes" data-mes="04">ABRIL</button>
+                <button type="button" class="periodo-mes" data-mes="05">MAIO</button>
+                <button type="button" class="periodo-mes" data-mes="06">JUNHO</button>
+                <button type="button" class="periodo-mes" data-mes="07">JULHO</button>
+                <button type="button" class="periodo-mes" data-mes="08">AGOSTO</button>
+                <button type="button" class="periodo-mes" data-mes="09">SETEMBRO</button>
+                <button type="button" class="periodo-mes" data-mes="10">OUTUBRO</button>
+                <button type="button" class="periodo-mes" data-mes="11">NOVEMBRO</button>
+                <button type="button" class="periodo-mes" data-mes="12">DEZEMBRO</button>
+              </div>
+
+              <div class="periodo-range">
+                <div>
+                  <label>De</label>
+                  <input type="date" id="pickerDe" value="">
+                </div>
+                <div>
+                  <label>Até</label>
+                  <input type="date" id="pickerAte" value="">
+                </div>
+              </div>
+
+              <div class="periodo-bisemana-solo">
+                <div>
+                  <label>Bi-Semana</label>
+                  <select id="selBiSemana" name="bi_semana" aria-label="Selecionar bi-semana">
+                    <option value="">Selecione...</option>
+                    {% set _bi_sel = bi_semana_atual %}
+                    {% if bisemanas_select is defined and bisemanas_select %}
+                      {% for op in bisemanas_select %}
+                        {% if op is mapping %}
+                          <option
+                            value="{{ op.value }}"
+                            data-inicio="{{ op.inicio }}"
+                            data-fim="{{ op.fim }}"
+                            {% if _bi_sel == op.value %}selected{% endif %}
+                          >{{ op.label }}</option>
+                        {% else %}
+                          <option value="{{ op }}" {% if _bi_sel == op %}selected{% endif %}>{{ op }}</option>
+                        {% endif %}
+                      {% endfor %}
+                    {% endif %}
+                  </select>
+                </div>
+              </div>
+
+              <div class="periodo-actions">
+                <button type="button" class="periodo-btn" id="btnFecharPeriodo">Fechar</button>
+                <button type="button" class="periodo-btn primary" id="btnAplicarPeriodo">Filtrar</button>
+              </div>
+            </div>
+
+            <div class="periodo-inputs-reais">
+              <input id="inpMesDeReal" name="mes_de" type="month" value="{{ mes_de_atual if mes_de_atual else mes_ref }}">
+              <input id="inpMesAteReal" name="mes_ate" type="date" value="{{ mes_ate_atual if mes_ate_atual else '' }}">
+            </div>
+          </div>
+
+          <div class="campo-filtro">
+            <label>Marca Exibida</label>
+            <input name="cliente" type="text" value="{{ filtros_safe.cliente if filtros_safe is defined else '' }}" placeholder="Filtrar MarcaExibida...">
+          </div>
+
+          <div class="campo-filtro campo-filtro-dd">
+            <label>Vendedor</label>
+
+            <details class="dd" data-dd="vendedor">
+              <summary class="dd-summary">
+                <span class="dd-label">Todos os vendedores</span>
+                <span class="dd-caret">▾</span>
+              </summary>
+
+              <div class="dd-panel">
+                <input type="text" class="dd-search" placeholder="Pesquisar..." autocomplete="off">
+                <div class="dd-hint">Digite para filtrar a lista</div>
+
+                <label class="dd-item">
+                  <input type="checkbox" data-dd-all="1" {% if not vendedores_request %}checked{% endif %}>
+                  <span>(Todos)</span>
+                </label>
+
+                {% if vendedores_select is defined and vendedores_select %}
+                  {% for vend in vendedores_select %}
+                    {% set nome_vendedor = (vend.NomeVendedor or '')|trim %}
+                    {% if nome_vendedor %}
+                      <label class="dd-item">
+                        <input
+                          type="checkbox"
+                          name="vendedor"
+                          value="{{ nome_vendedor }}"
+                          {% if nome_vendedor in vendedores_request %}checked{% endif %}>
+                        <span>{{ nome_vendedor }}</span>
+                      </label>
+                    {% endif %}
+                  {% endfor %}
+                {% else %}
+                  <div class="dd-hint" style="padding-top:2px;">Nenhum vendedor disponível.</div>
+                {% endif %}
+              </div>
+            </details>
+          </div>
+
+          <div class="campo-filtro campo-filtro-dd">
+            <label>Segmento</label>
+
+            <details class="dd" data-dd="segmento">
+              <summary class="dd-summary">
+                <span class="dd-label">Todos os segmentos</span>
+                <span class="dd-caret">▾</span>
+              </summary>
+
+              <div class="dd-panel">
+                <input type="text" class="dd-search" placeholder="Pesquisar..." autocomplete="off">
+                <div class="dd-hint">Digite para filtrar a lista</div>
+
+                <label class="dd-item">
+                  <input type="checkbox" data-dd-all="1" {% if not segmentos_request %}checked{% endif %}>
+                  <span>(Todos)</span>
+                </label>
+
+                {% if segmentos_select is defined and segmentos_select %}
+                  {% for seg in segmentos_select %}
+                    {% set nome_segmento = (seg or '')|trim %}
+                    {% if nome_segmento %}
+                      <label class="dd-item">
+                        <input
+                          type="checkbox"
+                          name="segmento"
+                          value="{{ nome_segmento }}"
+                          {% if nome_segmento in segmentos_request %}checked{% endif %}>
+                        <span>{{ nome_segmento }}</span>
+                      </label>
+                    {% endif %}
+                  {% endfor %}
+                {% else %}
+                  <div class="dd-hint" style="padding-top:2px;">Nenhum segmento disponível.</div>
+                {% endif %}
+              </div>
+            </details>
+          </div>
+
+          <div class="campo-filtro campo-filtro-dd">
+            <label>CodFace</label>
+
+            <details class="dd" data-dd="codface">
+              <summary class="dd-summary">
+                <span class="dd-label">Todas as faces</span>
+                <span class="dd-caret">▾</span>
+              </summary>
+
+              <div class="dd-panel">
+                <input type="text" class="dd-search" placeholder="Pesquisar CodFace..." autocomplete="off">
+                <div class="dd-hint">Digite para filtrar a lista</div>
+
+                <label class="dd-item">
+                  <input type="checkbox" data-dd-all="1" {% if not codfaces_request %}checked{% endif %}>
+                  <span>(Todas)</span>
+                </label>
+
+                {% if codfaces_select is defined and codfaces_select %}
+                  {% for codface in codfaces_select %}
+                    {% set codface_txt = (codface or '')|trim %}
+                    {% if codface_txt %}
+                      <label class="dd-item">
+                        <input
+                          type="checkbox"
+                          name="codface"
+                          value="{{ codface_txt }}"
+                          {% if codface_txt in codfaces_request %}checked{% endif %}>
+                        <span>{{ codface_txt }}</span>
+                      </label>
+                    {% endif %}
+                  {% endfor %}
+                {% else %}
+                  <div class="dd-hint" style="padding-top:2px;">Nenhuma face disponível.</div>
+                {% endif %}
+              </div>
+            </details>
+          </div>
+
+          <button class="btn btn-primary" type="submit">Filtrar</button>
+        </form>
+      </div>
+    </div>
+
+    <div id="legenda">
+      <span style="
+        display:inline-flex;
+        align-items:center;
+        gap:10px;
+        padding:8px 12px;
+        border-radius:999px;
+        border:1px solid var(--border);
+        background:#fff;
+        font-weight:800;
+        color:var(--text);
+        box-shadow: 0 2px 8px rgba(15,23,42,.06);
+      ">
+        <img src="/static/imagens/contrato.png" alt="Contrato" style="width:18px;height:18px;object-fit:contain;">
+        Contrato / Locação
+        <span style="
+          margin-left:6px;
+          display:inline-flex;
+          align-items:center;
+          gap:6px;
+          padding:4px 10px;
+          border-radius:999px;
+          background: rgba(37,99,235,.10);
+          border:1px solid rgba(37,99,235,.20);
+          color: rgba(37,99,235,1);
+          font-weight:900;
+          font-size:12px;
+          line-height:1;
+          white-space:nowrap;
+        ">ATIVO</span>
+      </span>
+
+      <span style="
+        display:inline-flex;
+        align-items:center;
+        gap:10px;
+        padding:8px 12px;
+        border-radius:999px;
+        background: rgba(220,38,38,.06);
+        border:1px solid rgba(220,38,38,.20);
+        font-weight:800;
+        color:#b91c1c;
+        box-shadow: 0 2px 8px rgba(15,23,42,.06);
+      ">
+        <img src="/static/imagens/Alerta.png" alt="Conflito" style="width:18px;height:18px;object-fit:contain;">
+        Conflito
+        <span style="
+          margin-left:6px;
+          display:inline-flex;
+          align-items:center;
+          gap:6px;
+          padding:4px 10px;
+          border-radius:999px;
+          background: rgba(220,38,38,.12);
+          border:1px solid rgba(220,38,38,.25);
+          color:#b91c1c;
+          font-weight:900;
+          font-size:12px;
+          line-height:1;
+          white-space:nowrap;
+        ">ALERTA</span>
+      </span>
+
+      <span style="
+        display:inline-flex;
+        align-items:center;
+        gap:10px;
+        padding:8px 12px;
+        border-radius:999px;
+        background: rgba(245,158,11,.10);
+        border:1px solid rgba(245,158,11,.22);
+        font-weight:800;
+        color:#92400e;
+        box-shadow: 0 2px 8px rgba(15,23,42,.06);
+      ">
+        <img src="/static/imagens/reservado.png" alt="Reservado" style="width:18px;height:18px;object-fit:contain;">
+        Reservado
+        <span style="
+          margin-left:6px;
+          display:inline-flex;
+          align-items:center;
+          gap:6px;
+          padding:4px 10px;
+          border-radius:999px;
+          background: rgba(245,158,11,.18);
+          border:1px solid rgba(245,158,11,.28);
+          color:#92400e;
+          font-weight:900;
+          font-size:12px;
+          line-height:1;
+          white-space:nowrap;
+        ">RESERVA</span>
+      </span>
+    </div>
+
+    {% if paineis_grade is defined and paineis_grade %}
+      {% for p in paineis_grade %}
+        {{ render_grade_painel(p, loop.index0, mes_ref, mes_ref_prev, mes_ref_next) }}
+      {% endfor %}
+    {% else %}
+      <div class="bloco-multi-grade">
+        <div style="font-weight:900;font-size:16px;color:var(--text);">Nenhuma grade encontrada</div>
+        <div class="muted">Não há painéis para os filtros selecionados.</div>
+      </div>
+    {% endif %}
+
+  </div>
+
+  <div id="tooltip" class="tooltip"></div>
+
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+
+  (function(){
+    const mapa = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
+    const heads = document.querySelectorAll(".grade-head .dia-head");
+    if(!heads || !heads.length) return;
+
+    heads.forEach((el)=>{
+      const lbl = String(el.getAttribute("data-dia") || "").trim();
+      const anoAttr = String(el.getAttribute("data-ano") || "").trim();
+      const dowEl = el.querySelector(".dia-dow");
+      if(!dowEl) return;
+
+      const m = lbl.match(/^(\d{2})\/(\d{2})$/);
+      if(!m){
+        dowEl.textContent = "---";
+        return;
+      }
+
+      const dd = parseInt(m[1], 10);
+      const mm = parseInt(m[2], 10);
+
+      let anoBase = parseInt(anoAttr, 10);
+      if (!anoBase || isNaN(anoBase)){
+        const hoje = new Date();
+        anoBase = hoje.getFullYear();
+      }
+
+      const dt = new Date(anoBase, mm - 1, dd);
+      if (isNaN(dt.getTime())){
+        dowEl.textContent = "---";
+        return;
+      }
+
+      dowEl.textContent = mapa[dt.getDay()] || "---";
+    });
+  })();
+
+  const tooltip = document.getElementById("tooltip");
+  const urlBaseContrato = "{{ url_for('Paineis.contrato_detalhe', id_fato_controle_contratos=0) }}";
+  const USUARIO_LOGADO_EH_PERFIL_VENDEDOR = {{ 'true' if usuario_logado_eh_perfil_vendedor else 'false' }};
+  const ID_VENDEDOR_LOGADO = String({{ (id_vendedor_logado if id_vendedor_logado is not none else '')|tojson }}).trim();
+  const NOME_VENDEDOR_LOGADO = String({{ (nome_vendedor_logado or '')|tojson }}).trim();
+
+  function montarUrlContratoPorId(idContrato){
+    const id = String(idContrato || "").trim();
+    if (!id) return "";
+
+    if (urlBaseContrato.endsWith("/0/")) {
+      return urlBaseContrato.slice(0, -3) + "/" + encodeURIComponent(id) + "/";
+    }
+    if (urlBaseContrato.endsWith("/0")) {
+      return urlBaseContrato.slice(0, -2) + "/" + encodeURIComponent(id);
+    }
+
+    return urlBaseContrato.replace(/0\/?$/, encodeURIComponent(id));
+  }
+
+  function isBarra(el){
+    return el && el.classList && el.classList.contains("barra");
+  }
+
+  function isReserva(el){
+    const origem = (el.getAttribute("data-origem") || "").toUpperCase().trim();
+    if (origem === "RESERVA") return true;
+
+    const ehReserva = (el.getAttribute("data-eh-reserva") || "").trim();
+    if (ehReserva === "1" || ehReserva === "true") return true;
+
+    const itemId = (el.getAttribute("data-item-id") || "").trim();
+    if (itemId && /^-/.test(itemId)) return true;
+
+    return false;
+  }
+
+  function normalizarTextoComparacao(valor){
+    return String(valor || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+  }
+
+  function vendedorPodeAbrirContrato(el){
+    if (!USUARIO_LOGADO_EH_PERFIL_VENDEDOR) return true;
+
+    const idVendedorBarra = String(el.getAttribute("data-vendedor-id") || "").trim();
+    if (ID_VENDEDOR_LOGADO && idVendedorBarra) {
+      return idVendedorBarra === ID_VENDEDOR_LOGADO;
+    }
+
+    const nomeLogado = normalizarTextoComparacao(NOME_VENDEDOR_LOGADO);
+    const nomeBarra = normalizarTextoComparacao(el.getAttribute("data-tooltip-vendedor") || "");
+    if (nomeLogado && nomeBarra) {
+      return nomeBarra === nomeLogado;
+    }
+
+    return false;
+  }
+
+  function avisarBloqueioVendedor(){
+    alert("Este contrato pertence a outro vendedor. Seu perfil VENDEDOR só pode abrir contratos vinculados a você.");
+  }
+
+  function showTooltip(e, el){
+    if (!tooltip) return;
+
+    const title = el.getAttribute("data-tooltip-title") || "";
+    const loop = el.getAttribute("data-tooltip-loop") || "";
+    const vendedor = el.getAttribute("data-tooltip-vendedor") || "";
+    const di = el.getAttribute("data-tooltip-di") || "";
+    const df = el.getAttribute("data-tooltip-df") || "";
+    const txt = el.getAttribute("data-tooltip-txt") || "";
+
+    const reserva = isReserva(el);
+    const tipoLinha = reserva ? "RESERVA" : "CONTRATO";
+
+    tooltip.innerHTML = `
+      <div class="t-title">${title}</div>
+      <div class="t-row"><b>Tipo:</b> ${tipoLinha}</div>
+      <div class="t-row"><b>Loop:</b> ${loop}</div>
+      <div class="t-row"><b>Vendedor:</b> ${vendedor}</div>
+      <div class="t-row"><b>Período:</b> ${di} → ${df}</div>
+      <div class="t-muted">${txt}</div>
+    `;
+
+    tooltip.style.display = "block";
+    positionTooltip(e);
+  }
+
+  function hideTooltip(){
+    if (!tooltip) return;
+    tooltip.style.display = "none";
+  }
+
+  function positionTooltip(e){
+    if (!tooltip) return;
+
+    const padding = 14;
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+
+    const rect = tooltip.getBoundingClientRect();
+    const tw = rect.width || 280;
+    const th = rect.height || 120;
+
+    let left = e.clientX + padding;
+    let top  = e.clientY + padding;
+
+    if (left + tw + 10 > vw) left = Math.max(10, e.clientX - tw - padding);
+    if (top + th + 10 > vh)  top  = Math.max(10, e.clientY - th - padding);
+
+    tooltip.style.left = left + "px";
+    tooltip.style.top  = top  + "px";
+  }
+
+  document.addEventListener("mouseover", (e) => {
+    const el = e.target && e.target.closest ? e.target.closest(".barra") : null;
+    if (!isBarra(el)) return;
+    showTooltip(e, el);
+  });
+
+  document.addEventListener("mouseout", (e) => {
+    const el = e.target && e.target.closest ? e.target.closest(".barra") : null;
+    if (!isBarra(el)) return;
+
+    const related = e.relatedTarget;
+    if (related && el.contains && el.contains(related)) return;
+
+    hideTooltip();
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!tooltip) return;
+    if (tooltip.style.display === "block") positionTooltip(e);
+  });
+
+  document.addEventListener("dblclick", (e) => {
+    const el = e.target && e.target.closest ? e.target.closest(".barra") : null;
+    if (!isBarra(el)) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (isReserva(el)) {
+      return;
+    }
+
+    if (!vendedorPodeAbrirContrato(el)) {
+      avisarBloqueioVendedor();
+      return;
+    }
+
+    const idContrato = (el.getAttribute("data-contrato-id") || "").trim();
+    const url = montarUrlContratoPorId(idContrato);
+    if (!url) return;
+
+    if (e.ctrlKey || e.metaKey) {
+      window.open(url, "_blank");
+    } else {
+      window.location.href = url;
+    }
+  }, true);
+
+  (function(){
+    const shells = document.querySelectorAll(".js-grade-shell");
+    if(!shells || !shells.length) return;
+
+    shells.forEach((shell)=>{
+      const wrap = shell.querySelector(".js-grade-wrap");
+      const inner = shell.querySelector(".js-grade-inner");
+      const top = shell.querySelector(".js-hscroll-top");
+      const topInner = shell.querySelector(".js-hscroll-inner");
+
+      if(!wrap || !inner || !top || !topInner) return;
+
+      let syncing = false;
+
+      function refreshTopScroll(){
+        const wInner = inner.scrollWidth || 0;
+        const precisa = (wInner > (wrap.clientWidth + 2));
+
+        topInner.style.width = wInner + "px";
+        top.style.display = precisa ? "block" : "none";
+
+        if (precisa) top.scrollLeft = wrap.scrollLeft;
+      }
+
+      top.addEventListener("scroll", function(){
+        if(syncing) return;
+        syncing = true;
+        wrap.scrollLeft = top.scrollLeft;
+        syncing = false;
+      });
+
+      wrap.addEventListener("scroll", function(){
+        if(syncing) return;
+        syncing = true;
+        top.scrollLeft = wrap.scrollLeft;
+        syncing = false;
+      });
+
+      window.addEventListener("resize", refreshTopScroll);
+
+      refreshTopScroll();
+      setTimeout(refreshTopScroll, 60);
+      setTimeout(refreshTopScroll, 220);
+      setTimeout(refreshTopScroll, 500);
+    });
+  })();
+
+  (function(){
+    const form = document.getElementById("formFiltroGradeMulti");
+    const shell = document.getElementById("periodoShell");
+    const panel = document.getElementById("periodoPanel");
+    const btnAbrir = document.getElementById("btnAbrirPeriodo");
+    const btnFechar = document.getElementById("btnFecharPeriodo");
+    const btnAplicar = document.getElementById("btnAplicarPeriodo");
+    const btnHoje = document.getElementById("btnHoje");
+
+    const lblTopo = document.getElementById("lblPeriodoTopo");
+    const lblAno = document.getElementById("lblAno");
+    const anoPrev = document.getElementById("anoPrev");
+    const anoNext = document.getElementById("anoNext");
+    const gridMeses = document.getElementById("gridMeses");
+
+    const pickerDe = document.getElementById("pickerDe");
+    const pickerAte = document.getElementById("pickerAte");
+
+    const inpMesDeReal = document.getElementById("inpMesDeReal");
+    const inpMesAteReal = document.getElementById("inpMesAteReal");
+
+    const selBiSemana = document.getElementById("selBiSemana");
+
+    const inpModo = document.getElementById("inpModo");
+    const inpDataRef = document.getElementById("inpDataRef");
+
+    if(!form || !shell || !panel || !btnAbrir || !btnFechar || !btnAplicar || !btnHoje ||
+       !lblTopo || !lblAno || !anoPrev || !anoNext || !gridMeses ||
+       !pickerDe || !pickerAte || !inpMesDeReal || !inpMesAteReal){
+      return;
+    }
+
+    const nomesMes = {
+      "01":"Janeiro","02":"Fevereiro","03":"Março","04":"Abril","05":"Maio","06":"Junho",
+      "07":"Julho","08":"Agosto","09":"Setembro","10":"Outubro","11":"Novembro","12":"Dezembro"
+    };
+
+    function pad2(n){ return String(n).padStart(2,"0"); }
+
+    function hojeYMD(){
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = pad2(d.getMonth() + 1);
+      const day = pad2(d.getDate());
+      return `${y}-${m}-${day}`;
+    }
+
+    function dataRefAtual(){
+      const di = String(pickerDe && pickerDe.value ? pickerDe.value : "").trim();
+      if (di && di.length >= 10) return di.slice(0,10);
+
+      const dr = String(inpDataRef && inpDataRef.value ? inpDataRef.value : "").trim();
+      if (dr && dr.length >= 10) return dr.slice(0,10);
+
+      return hojeYMD();
+    }
+
+    function ultimoDiaDoMes(ano, mes){
+      const a = Number(ano);
+      const m = Number(mes);
+      const d = new Date(a, m, 0);
+      return pad2(d.getDate());
+    }
+
+    function fmtYMD(ano, mes, dia){
+      return `${ano}-${pad2(mes)}-${pad2(dia)}`;
+    }
+
+    function mesRefDoInputMonth(v){
+      const s = String(v || "").trim();
+      if(!s || s.length !== 7 || s.indexOf("-") !== 4) return null;
+      return { ano: s.slice(0,4), mes: s.slice(5,7) };
+    }
+
+    function setTopo(ano, mes){
+      const nome = nomesMes[mes] || "Mês";
+      lblTopo.textContent = `${nome} de ${ano}`;
+      lblAno.textContent = `${ano}`;
+
+      gridMeses.querySelectorAll(".periodo-mes").forEach(b=>{
+        b.classList.toggle("sel", b.getAttribute("data-mes") === mes);
+      });
+    }
+
+    function abrir(){ panel.classList.add("aberto"); }
+    function fechar(){ panel.classList.remove("aberto"); }
+
+    function setPeriodoPorMes(ano, mes){
+      const di = fmtYMD(ano, mes, "01");
+      const uf = ultimoDiaDoMes(ano, mes);
+      const df = fmtYMD(ano, mes, uf);
+
+      pickerDe.value = di;
+      pickerAte.value = df;
+
+      inpMesDeReal.value = `${ano}-${mes}`;
+      inpMesAteReal.value = df;
+
+      setTopo(ano, mes);
+
+      if (selBiSemana){
+        selBiSemana.value = "";
+      }
+    }
+
+    function marcarModoAtivo(modo){
+      shell.querySelectorAll(".periodo-chip[data-modo]").forEach(x=>{
+        x.classList.toggle("ativo", (x.getAttribute("data-modo") || "").trim().toLowerCase() === modo);
+      });
+    }
+
+    function initDeInputsAtuais(){
+      const base = mesRefDoInputMonth(inpMesDeReal.value) || (function(){
+        const hj = new Date();
+        return { ano: String(hj.getFullYear()), mes: pad2(hj.getMonth()+1) };
+      })();
+
+      let ano = base.ano;
+      let mes = base.mes;
+
+      setTopo(ano, mes);
+
+      if(!inpMesAteReal.value){
+        setPeriodoPorMes(ano, mes);
+      }else{
+        const df = String(inpMesAteReal.value || "").trim();
+        const di = `${ano}-${mes}-01`;
+        pickerDe.value = di;
+        pickerAte.value = df;
+      }
+
+      const modoInicial = String(inpModo && inpModo.value ? inpModo.value : "mes").trim().toLowerCase() || "mes";
+      marcarModoAtivo(modoInicial);
+    }
+
+    btnAbrir.addEventListener("click", (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      if(panel.classList.contains("aberto")) fechar(); else abrir();
+    });
+
+    btnFechar.addEventListener("click", (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      fechar();
+    });
+
+    document.addEventListener("click", (e)=>{
+      if(!panel.classList.contains("aberto")) return;
+      if(shell.contains(e.target)) return;
+      fechar();
+    });
+
+    anoPrev.addEventListener("click", (e)=>{
+      e.preventDefault();
+      const anoAtual = Number(lblAno.textContent || "0") || (new Date().getFullYear());
+      const novoAno = String(anoAtual - 1);
+      lblAno.textContent = novoAno;
+
+      const sel = gridMeses.querySelector(".periodo-mes.sel");
+      const mes = sel ? sel.getAttribute("data-mes") : "01";
+      setTopo(novoAno, mes);
+    });
+
+    anoNext.addEventListener("click", (e)=>{
+      e.preventDefault();
+      const anoAtual = Number(lblAno.textContent || "0") || (new Date().getFullYear());
+      const novoAno = String(anoAtual + 1);
+      lblAno.textContent = novoAno;
+
+      const sel = gridMeses.querySelector(".periodo-mes.sel");
+      const mes = sel ? sel.getAttribute("data-mes") : "01";
+      setTopo(novoAno, mes);
+    });
+
+    gridMeses.querySelectorAll(".periodo-mes").forEach(btn=>{
+      btn.addEventListener("click", (e)=>{
+        e.preventDefault();
+        const mes = btn.getAttribute("data-mes");
+        const ano = String(lblAno.textContent || "").trim() || String(new Date().getFullYear());
+        setPeriodoPorMes(ano, mes);
+
+        if (inpModo) inpModo.value = "mes";
+        if (inpDataRef) inpDataRef.value = "";
+        marcarModoAtivo("mes");
+      });
+    });
+
+    btnHoje.addEventListener("click", (e)=>{
+      e.preventDefault();
+
+      if (inpModo) inpModo.value = "dia";
+      if (inpDataRef) inpDataRef.value = hojeYMD();
+
+      marcarModoAtivo("dia");
+      form.submit();
+    });
+
+    shell.querySelectorAll(".periodo-chip[data-modo]").forEach(ch=>{
+      ch.addEventListener("click", (e)=>{
+        e.preventDefault();
+
+        const modo = (ch.getAttribute("data-modo") || "").trim().toLowerCase();
+        if(!modo) return;
+
+        marcarModoAtivo(modo);
+
+        if (inpModo) inpModo.value = modo;
+        if (inpDataRef) inpDataRef.value = dataRefAtual();
+
+        form.submit();
+      });
+    });
+
+    btnAplicar.addEventListener("click", (e)=>{
+      e.preventDefault();
+
+      const di = String(pickerDe.value || "").trim();
+      const df = String(pickerAte.value || "").trim();
+
+      if(di && di.length >= 7){
+        inpMesDeReal.value = di.slice(0,7);
+      }
+      if(df){
+        inpMesAteReal.value = df;
+      }
+
+      if (inpModo) inpModo.value = "";
+      if (inpDataRef) inpDataRef.value = "";
+
+      form.submit();
+    });
+
+    if (selBiSemana){
+      selBiSemana.addEventListener("change", ()=>{
+        const opt = selBiSemana.options[selBiSemana.selectedIndex];
+        const di = opt ? String(opt.getAttribute("data-inicio") || "").trim() : "";
+        const df = opt ? String(opt.getAttribute("data-fim") || "").trim() : "";
+
+        if (di) {
+          pickerDe.value = di;
+          inpMesDeReal.value = di.slice(0,7);
+        }
+
+        if (df) {
+          pickerAte.value = df;
+          inpMesAteReal.value = df;
+        }
+
+        if (inpModo) inpModo.value = "";
+        if (inpDataRef) inpDataRef.value = "";
+      });
+    }
+
+    initDeInputsAtuais();
+  })();
+
+  (function(){
+    function inicializarDropdownMultiplo(nomeDd, nomeCampo, textoPadraoTodos, textoPadraoSelecao){
+      const detalhes = document.querySelectorAll(`.dd[data-dd='${nomeDd}']`);
+      if(!detalhes || !detalhes.length) return;
+
+      detalhes.forEach((dd)=>{
+        const summary = dd.querySelector(".dd-summary");
+        const label = dd.querySelector(".dd-label");
+        const search = dd.querySelector(".dd-search");
+        const checkAll = dd.querySelector("input[data-dd-all='1']");
+        const itens = Array.from(dd.querySelectorAll(`input[type='checkbox'][name='${nomeCampo}']`));
+        const linhas = Array.from(dd.querySelectorAll(".dd-item"));
+
+        function itensMarcados(){
+          return itens.filter(x => x.checked);
+        }
+
+        function atualizarLabel(){
+          const marcados = itensMarcados().map(x => String(x.value || "").trim()).filter(Boolean);
+
+          if(!label) return;
+
+          if(marcados.length === 0){
+            label.textContent = textoPadraoTodos;
+            if(checkAll) checkAll.checked = true;
+            return;
+          }
+
+          if(checkAll) checkAll.checked = false;
+
+          if(marcados.length === 1){
+            label.textContent = marcados[0];
+            return;
+          }
+
+          if(marcados.length === 2){
+            label.textContent = marcados[0] + ", " + marcados[1];
+            return;
+          }
+
+          label.textContent = marcados.length + " " + textoPadraoSelecao;
+        }
+
+        function aplicarFiltroBusca(){
+          const termo = String(search && search.value ? search.value : "").trim().toLowerCase();
+
+          linhas.forEach((linha)=>{
+            const input = linha.querySelector("input[type='checkbox']");
+            const span = linha.querySelector("span");
+
+            if(!input || !span) return;
+
+            if(input.hasAttribute("data-dd-all")){
+              linha.classList.remove("dd-hidden");
+              return;
+            }
+
+            const txt = String(span.textContent || "").trim().toLowerCase();
+            const visivel = !termo || txt.includes(termo);
+            linha.classList.toggle("dd-hidden", !visivel);
+          });
+        }
+
+        if(checkAll){
+          checkAll.addEventListener("change", ()=>{
+            if(checkAll.checked){
+              itens.forEach(x => { x.checked = false; });
+            }
+            atualizarLabel();
+            atualizarLinksComFiltros();
+          });
+        }
+
+        itens.forEach((ck)=>{
+          ck.addEventListener("change", ()=>{
+            if(ck.checked && checkAll){
+              checkAll.checked = false;
+            }
+
+            const algumMarcado = itensMarcados().length > 0;
+            if(!algumMarcado && checkAll){
+              checkAll.checked = true;
+            }
+
+            atualizarLabel();
+            atualizarLinksComFiltros();
+          });
+        });
+
+        if(search){
+          search.addEventListener("input", aplicarFiltroBusca);
+          search.addEventListener("keydown", (e)=>{
+            if(e.key === "Enter"){
+              e.preventDefault();
+            }
+          });
+        }
+
+        if(summary){
+          summary.addEventListener("click", ()=>{
+            setTimeout(()=>{
+              if(dd.hasAttribute("open") && search){
+                search.focus();
+                search.select();
+              }
+            }, 0);
+          });
+        }
+
+        atualizarLabel();
+        aplicarFiltroBusca();
+      });
+    }
+
+    function valoresSelecionadosNoForm(nomeCampo){
+      const form = document.getElementById("formFiltroGradeMulti");
+      if(!form) return [];
+
+      return Array.from(form.querySelectorAll(`input[type='checkbox'][name='${nomeCampo}']:checked`))
+        .map(x => String(x.value || "").trim())
+        .filter(Boolean);
+    }
+
+    function valoresHiddenNoForm(nomeCampo){
+      const form = document.getElementById("formFiltroGradeMulti");
+      if(!form) return [];
+
+      return Array.from(form.querySelectorAll(`input[type='hidden'][name='${nomeCampo}']`))
+        .map(x => String(x.value || "").trim())
+        .filter(Boolean);
+    }
+
+    function atualizarLinksComFiltros(){
+      const links = document.querySelectorAll(".js-preserva-filtros-link");
+      const vendedores = valoresSelecionadosNoForm("vendedor");
+      const segmentos = valoresSelecionadosNoForm("segmento");
+      const codfaces = valoresSelecionadosNoForm("codface");
+      const codpontos = valoresHiddenNoForm("codponto");
+
+      links.forEach((link)=>{
+        const baseHref = String(link.getAttribute("data-base-href") || link.getAttribute("href") || "").trim();
+        if(!baseHref) return;
+
+        let url;
+        try{
+          url = new URL(baseHref, window.location.origin);
+        }catch{
+          return;
+        }
+
+        url.searchParams.delete("vendedor");
+        url.searchParams.delete("segmento");
+        url.searchParams.delete("codface");
+        url.searchParams.delete("codponto");
+
+        vendedores.forEach((v)=> url.searchParams.append("vendedor", v));
+        segmentos.forEach((s)=> url.searchParams.append("segmento", s));
+        codfaces.forEach((c)=> url.searchParams.append("codface", c));
+        codpontos.forEach((cp)=> url.searchParams.append("codponto", cp));
+
+        link.setAttribute("href", url.pathname + url.search);
+      });
+    }
+
+    inicializarDropdownMultiplo("vendedor", "vendedor", "Todos os vendedores", "vendedores selecionados");
+    inicializarDropdownMultiplo("segmento", "segmento", "Todos os segmentos", "segmentos selecionados");
+    inicializarDropdownMultiplo("codface", "codface", "Todas as faces", "faces selecionadas");
+
+    document.addEventListener("click", (e)=>{
+      document.querySelectorAll(".dd[data-dd]").forEach((dd)=>{
+        if(!dd.contains(e.target)){
+          dd.removeAttribute("open");
+        }
+      });
+    });
+
+    atualizarLinksComFiltros();
+  })();
+
+});
+</script>
+
+{% endblock %}

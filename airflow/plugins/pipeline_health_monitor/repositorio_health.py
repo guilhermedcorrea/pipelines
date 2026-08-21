@@ -28,7 +28,7 @@ class RepositorioHealth:
     def buscar_pipelines(self) -> list[dict[str, Any]]:
         return [
             {
-                "dag_id": "etl_ctr_controle_contratos_euromidia",
+                "dag_id": "etl_ctr_controle_contratos_midia",
                 "nome": "CTR Controle Contratos Euromídia",
                 "last_run": "2026-03-20T09:00:00-03:00",
                 "duracao_atual_min": 12,

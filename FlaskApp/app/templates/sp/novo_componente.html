@@ -1,0 +1,675 @@
+{% extends "midia/base_midia.html" %}
+
+{% block title %}Cadastrar Produto{% endblock %}
+
+{% block content %}
+<style>
+  .container:has(> .produto-cadastro-pagina) {
+    width: 100% !important;
+    max-width: none !important;
+    margin: 18px 0 !important;
+    padding: 0 clamp(12px, 1.25vw, 24px) !important;
+  }
+
+  .produto-cadastro-pagina {
+    --cad-azul: #002884;
+    --cad-azul-claro: #0340a7;
+    --cad-amarelo: #ffb300;
+    --cad-texto: #0f172a;
+    --cad-texto-suave: #64748b;
+    --cad-borda: #dfe5ee;
+    --cad-fundo-suave: #f6f8fc;
+    width: 100%;
+    max-width: none;
+    padding-bottom: 28px;
+  }
+
+  .produto-cadastro-pagina *,
+  .produto-cadastro-pagina *::before,
+  .produto-cadastro-pagina *::after {
+    box-sizing: border-box;
+  }
+
+  .cad-cabecalho {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 18px;
+  }
+
+  .cad-cabecalho h1 {
+    margin: 0;
+    color: var(--cad-azul);
+    font-size: clamp(25px, 2vw, 34px);
+    line-height: 1.12;
+    letter-spacing: -.03em;
+  }
+
+  .cad-cabecalho p {
+    max-width: 780px;
+    margin: 7px 0 0;
+    color: var(--cad-texto-suave);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  .cad-botao {
+    min-height: 42px;
+    padding: 9px 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px solid rgba(0, 40, 132, .20);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--cad-azul);
+    text-decoration: none;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: background .16s ease, border-color .16s ease, transform .16s ease;
+  }
+
+  .cad-botao:hover {
+    border-color: rgba(0, 40, 132, .38);
+    background: #eef3ff;
+    color: var(--cad-azul);
+  }
+
+  .cad-botao:focus-visible {
+    outline: 3px solid rgba(3, 64, 167, .20);
+    outline-offset: 2px;
+  }
+
+  .cad-botao-principal {
+    border-color: var(--cad-amarelo);
+    background: var(--cad-amarelo);
+    color: #14213d;
+  }
+
+  .cad-botao-principal:hover {
+    border-color: #f2aa00;
+    background: #f2aa00;
+    color: #14213d;
+  }
+
+  .cad-botao-remover {
+    border-color: #fecaca;
+    color: #b91c1c;
+  }
+
+  .cad-botao-remover:hover {
+    border-color: #fca5a5;
+    background: #fef2f2;
+    color: #991b1b;
+  }
+
+  .cad-botao svg {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 auto;
+  }
+
+  .cad-cartao {
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid var(--cad-borda);
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 8px 28px rgba(15, 23, 42, .065);
+  }
+
+  .cad-secao {
+    padding: 19px;
+    border-bottom: 1px solid var(--cad-borda);
+  }
+
+  .cad-secao-cabecalho {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 15px;
+  }
+
+  .cad-secao-cabecalho h2 {
+    margin: 0;
+    color: var(--cad-texto);
+    font-size: 17px;
+  }
+
+  .cad-secao-cabecalho p {
+    margin: 5px 0 0;
+    color: var(--cad-texto-suave);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .cad-grade {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 13px;
+  }
+
+  .cad-campo {
+    grid-column: span 4;
+    min-width: 0;
+  }
+
+  .cad-campo-meio {
+    grid-column: span 6;
+  }
+
+  .cad-campo-total {
+    grid-column: 1 / -1;
+  }
+
+  .cad-campo label {
+    display: block;
+    margin: 0 0 6px;
+    color: #52637a;
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .cad-obrigatorio {
+    color: #dc2626;
+  }
+
+  .cad-campo input,
+  .cad-campo select,
+  .cad-campo textarea {
+    width: 100%;
+    min-height: 43px;
+    margin: 0;
+    padding: 9px 11px;
+    border: 1px solid var(--cad-borda);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--cad-texto);
+    font: inherit;
+    font-size: 13px;
+  }
+
+  .cad-campo input:focus,
+  .cad-campo select:focus,
+  .cad-campo textarea:focus {
+    border-color: var(--cad-azul-claro);
+    outline: 0;
+    box-shadow: 0 0 0 3px rgba(3, 64, 167, .11);
+  }
+
+  .cad-ajuda {
+    margin: 5px 0 0;
+    color: var(--cad-texto-suave);
+    font-size: 10px;
+    line-height: 1.4;
+  }
+
+  .cad-opcoes {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 15px;
+  }
+
+  .cad-opcao {
+    min-height: 62px;
+    padding: 12px 13px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    border: 1px solid var(--cad-borda);
+    border-radius: 11px;
+    background: var(--cad-fundo-suave);
+    cursor: pointer;
+  }
+
+  .cad-opcao input {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+    accent-color: var(--cad-azul-claro);
+  }
+
+  .cad-opcao strong {
+    display: block;
+    color: var(--cad-texto);
+    font-size: 12px;
+  }
+
+  .cad-opcao small {
+    display: block;
+    margin-top: 2px;
+    color: var(--cad-texto-suave);
+    font-size: 10px;
+  }
+
+  .cad-lista-dinamica {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .cad-lista-vazia {
+    margin: 0;
+    padding: 14px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 11px;
+    background: #fbfcff;
+    color: var(--cad-texto-suave);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .cad-linha-dinamica {
+    padding: 11px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 9px;
+    align-items: end;
+    border: 1px solid var(--cad-borda);
+    border-radius: 11px;
+    background: var(--cad-fundo-suave);
+  }
+
+  .cad-linha-dinamica.cad-caracteristica {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .cad-rodape {
+    padding: 16px 19px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-top: 1px solid var(--cad-borda);
+    background: #fbfcff;
+  }
+
+  .cad-rodape p {
+    margin: 0;
+    color: var(--cad-texto-suave);
+    font-size: 11px;
+  }
+
+  @media (max-width: 900px) {
+    .cad-campo,
+    .cad-campo-meio {
+      grid-column: span 6;
+    }
+
+    .cad-opcoes {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 650px) {
+    .container:has(> .produto-cadastro-pagina) {
+      margin: 12px 0 !important;
+      padding: 0 12px !important;
+    }
+
+    .cad-cabecalho,
+    .cad-secao-cabecalho,
+    .cad-rodape {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .cad-cabecalho .cad-botao,
+    .cad-secao-cabecalho .cad-botao,
+    .cad-rodape .cad-botao {
+      width: 100%;
+    }
+
+    .cad-secao {
+      padding: 15px;
+    }
+
+    .cad-grade {
+      grid-template-columns: 1fr;
+    }
+
+    .cad-campo,
+    .cad-campo-meio,
+    .cad-campo-total {
+      grid-column: 1;
+    }
+
+    .cad-linha-dinamica,
+    .cad-linha-dinamica.cad-caracteristica {
+      grid-template-columns: 1fr;
+    }
+
+    .cad-linha-dinamica .cad-botao {
+      width: 100%;
+    }
+  }
+</style>
+
+<div class="produto-cadastro-pagina">
+  <header class="cad-cabecalho">
+    <div>
+      <h1>Cadastrar Produto</h1>
+      <p>Cadastre os dados principais, a classificação, o saldo inicial, as compatibilidades e as características do produto.</p>
+    </div>
+
+    <a href="{{ url_for('euro.lista_produtos') }}" class="cad-botao">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M19 12H5M11 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+      Voltar ao catálogo
+    </a>
+  </header>
+
+  <form method="POST" action="{{ url_for('euro.criar_componente') }}" class="cad-cartao" id="formCadastroProduto">
+    {% if csrf_token is defined %}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% endif %}
+
+    <section class="cad-secao">
+      <div class="cad-secao-cabecalho">
+        <div>
+          <h2>Dados principais</h2>
+          <p>Os campos marcados com asterisco são necessários para criar o cadastro.</p>
+        </div>
+      </div>
+
+      <div class="cad-grade">
+        <div class="cad-campo cad-campo-meio">
+          <label for="nome_produto">Nome do produto <span class="cad-obrigatorio">*</span></label>
+          <input type="text" id="nome_produto" name="nome_produto" maxlength="200" required autocomplete="off">
+        </div>
+
+        <div class="cad-campo cad-campo-meio">
+          <label for="referencia_externa">Referência externa <span class="cad-obrigatorio">*</span></label>
+          <input type="text" id="referencia_externa" name="referencia_externa" maxlength="200" required autocomplete="off">
+          <p class="cad-ajuda">A referência não pode estar cadastrada em outro produto.</p>
+        </div>
+
+        <div class="cad-campo">
+          <label for="id_departamento">Departamento <span class="cad-obrigatorio">*</span></label>
+          <select id="id_departamento" name="id_departamento" required>
+            <option value="">Selecione</option>
+            {% for dept in departamentos %}
+              <option value="{{ dept.IDDepartamento }}">{{ dept.NomeDepartamento }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="cad-campo">
+          <label for="familia_id">Família <span class="cad-obrigatorio">*</span></label>
+          <select id="familia_id" name="familia_id" required>
+            <option value="">Selecione</option>
+            {% for fam in familias %}
+              <option value="{{ fam.FamiliaID }}">{{ fam.NomeFamilia }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="cad-campo">
+          <label for="id_categoria">Categoria <span class="cad-obrigatorio">*</span></label>
+          <select id="id_categoria" name="id_categoria" required>
+            <option value="">Selecione</option>
+            {% for cat in categorias %}
+              <option value="{{ cat.IDCategoria }}">{{ cat.NomeCategoria }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section class="cad-secao">
+      <div class="cad-secao-cabecalho">
+        <div>
+          <h2>Classificação</h2>
+          <p>Defina como o produto será utilizado no sistema.</p>
+        </div>
+      </div>
+
+      <div class="cad-opcoes">
+        <label class="cad-opcao">
+          <input type="checkbox" name="bit_ativo" value="1" checked>
+          <span>
+            <strong>Produto ativo</strong>
+            <small>Disponível para utilização no catálogo.</small>
+          </span>
+        </label>
+
+        <label class="cad-opcao">
+          <input type="checkbox" name="classifica_ativo" value="1">
+          <span>
+            <strong>Classificar como ativo</strong>
+            <small>Permite associação ao controle de ativos.</small>
+          </span>
+        </label>
+
+        <label class="cad-opcao">
+          <input type="checkbox" name="bit_pmv" value="1">
+          <span>
+            <strong>Produto é um PMV</strong>
+            <small>Marca o item como produto principal PMV.</small>
+          </span>
+        </label>
+      </div>
+
+      <div class="cad-grade">
+        <div class="cad-campo cad-campo-meio">
+          <label for="chassi">Chassi</label>
+          <input type="text" id="chassi" name="chassi" maxlength="100" autocomplete="off">
+        </div>
+
+        <div class="cad-campo cad-campo-meio">
+          <label for="renavam">Renavam</label>
+          <input type="text" id="renavam" name="renavam" maxlength="100" autocomplete="off">
+        </div>
+      </div>
+    </section>
+
+    <section class="cad-secao">
+      <div class="cad-secao-cabecalho">
+        <div>
+          <h2>Saldo inicial</h2>
+          <p>O estoque Matriz será criado automaticamente com o resultado da entrada menos a saída.</p>
+        </div>
+      </div>
+
+      <div class="cad-grade">
+        <div class="cad-campo cad-campo-meio">
+          <label for="saldo_entrada">Entrada inicial</label>
+          <input type="number" id="saldo_entrada" name="saldo_entrada" min="0" step="1" value="0" inputmode="numeric">
+        </div>
+
+        <div class="cad-campo cad-campo-meio">
+          <label for="saldo_saida">Saída inicial</label>
+          <input type="number" id="saldo_saida" name="saldo_saida" min="0" step="1" value="0" inputmode="numeric">
+          <p class="cad-ajuda">A saída não pode ser maior que a entrada.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="cad-secao">
+      <div class="cad-secao-cabecalho">
+        <div>
+          <h2>Compatibilidade com PMV</h2>
+          <p>Informe um ou mais modelos compatíveis. O preenchimento é opcional.</p>
+        </div>
+
+        <button type="button" class="cad-botao" data-acao="adicionar-pmv">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+          </svg>
+          Adicionar PMV
+        </button>
+      </div>
+
+      <div class="cad-lista-dinamica" id="listaCompatibilidade">
+        <p class="cad-lista-vazia">Nenhum PMV informado.</p>
+      </div>
+    </section>
+
+    <section class="cad-secao">
+      <div class="cad-secao-cabecalho">
+        <div>
+          <h2>Características</h2>
+          <p>Adicione pares de característica e valor ao produto. O preenchimento é opcional.</p>
+        </div>
+
+        <button type="button" class="cad-botao" data-acao="adicionar-caracteristica">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+          </svg>
+          Adicionar característica
+        </button>
+      </div>
+
+      <div class="cad-lista-dinamica" id="listaCaracteristicas">
+        <p class="cad-lista-vazia">Nenhuma característica informada.</p>
+      </div>
+    </section>
+
+    <footer class="cad-rodape">
+      <p><span class="cad-obrigatorio">*</span> Campos obrigatórios.</p>
+      <button type="submit" class="cad-botao cad-botao-principal">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M5 12l4 4L19 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+        Cadastrar produto
+      </button>
+    </footer>
+  </form>
+</div>
+
+<template id="modeloCompatibilidade">
+  <div class="cad-linha-dinamica">
+    <div class="cad-campo cad-campo-total">
+      <label>PMV compatível</label>
+      <select name="pmv_compat">
+        <option value="">Selecione um PMV</option>
+        {% for pmv in pmvs %}
+          <option value="{{ pmv.PmvID }}">{{ pmv.NomePMV }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="button" class="cad-botao cad-botao-remover" data-acao="remover-linha">Remover</button>
+  </div>
+</template>
+
+<template id="modeloCaracteristica">
+  <div class="cad-linha-dinamica cad-caracteristica">
+    <div class="cad-campo cad-campo-total">
+      <label>Característica</label>
+      <input type="text" name="nova_caracteristica" maxlength="30" placeholder="Ex.: Voltagem">
+    </div>
+    <div class="cad-campo cad-campo-total">
+      <label>Valor</label>
+      <input type="text" name="novo_valor" maxlength="500" placeholder="Ex.: 12 V">
+    </div>
+    <button type="button" class="cad-botao cad-botao-remover" data-acao="remover-linha">Remover</button>
+  </div>
+</template>
+
+<script>
+  (function () {
+    "use strict";
+
+    const formulario = document.getElementById("formCadastroProduto");
+    const listaCompatibilidade = document.getElementById("listaCompatibilidade");
+    const listaCaracteristicas = document.getElementById("listaCaracteristicas");
+    const modeloCompatibilidade = document.getElementById("modeloCompatibilidade");
+    const modeloCaracteristica = document.getElementById("modeloCaracteristica");
+
+    function atualizarMensagemVazia(lista, mensagem) {
+      const linhas = lista.querySelectorAll(".cad-linha-dinamica");
+      let aviso = lista.querySelector(".cad-lista-vazia");
+
+      if (linhas.length === 0 && !aviso) {
+        aviso = document.createElement("p");
+        aviso.className = "cad-lista-vazia";
+        aviso.textContent = mensagem;
+        lista.appendChild(aviso);
+      } else if (linhas.length > 0 && aviso) {
+        aviso.remove();
+      }
+    }
+
+    function adicionarModelo(lista, modelo, mensagemVazia) {
+      const aviso = lista.querySelector(".cad-lista-vazia");
+      if (aviso) {
+        aviso.remove();
+      }
+
+      lista.appendChild(modelo.content.cloneNode(true));
+      atualizarMensagemVazia(lista, mensagemVazia);
+    }
+
+    document.querySelector('[data-acao="adicionar-pmv"]').addEventListener("click", function () {
+      adicionarModelo(listaCompatibilidade, modeloCompatibilidade, "Nenhum PMV informado.");
+    });
+
+    document.querySelector('[data-acao="adicionar-caracteristica"]').addEventListener("click", function () {
+      adicionarModelo(listaCaracteristicas, modeloCaracteristica, "Nenhuma característica informada.");
+    });
+
+    document.querySelectorAll(".cad-lista-dinamica").forEach(function (lista) {
+      lista.addEventListener("click", function (evento) {
+        const botao = evento.target.closest('[data-acao="remover-linha"]');
+        if (!botao) {
+          return;
+        }
+
+        botao.closest(".cad-linha-dinamica").remove();
+        atualizarMensagemVazia(
+          lista,
+          lista === listaCompatibilidade
+            ? "Nenhum PMV informado."
+            : "Nenhuma característica informada."
+        );
+      });
+    });
+
+    formulario.addEventListener("submit", function (evento) {
+      const entrada = Number(document.getElementById("saldo_entrada").value || 0);
+      const saida = Number(document.getElementById("saldo_saida").value || 0);
+      const campoSaida = document.getElementById("saldo_saida");
+      campoSaida.setCustomValidity("");
+
+      if (saida > entrada) {
+        evento.preventDefault();
+        campoSaida.setCustomValidity("A saída inicial não pode ser maior que a entrada inicial.");
+        campoSaida.reportValidity();
+        campoSaida.addEventListener("input", function limparErro() {
+          campoSaida.setCustomValidity("");
+          campoSaida.removeEventListener("input", limparErro);
+        });
+        return;
+      }
+
+      const linhas = listaCaracteristicas.querySelectorAll(".cad-linha-dinamica");
+      for (const linha of linhas) {
+        const caracteristica = linha.querySelector('[name="nova_caracteristica"]');
+        const valor = linha.querySelector('[name="novo_valor"]');
+        caracteristica.setCustomValidity("");
+        valor.setCustomValidity("");
+        const somenteUmPreenchido = Boolean(caracteristica.value.trim()) !== Boolean(valor.value.trim());
+
+        if (somenteUmPreenchido) {
+          evento.preventDefault();
+          const campoIncompleto = caracteristica.value.trim() ? valor : caracteristica;
+          campoIncompleto.setCustomValidity("Preencha a característica e o valor, ou remova esta linha.");
+          campoIncompleto.reportValidity();
+          campoIncompleto.addEventListener("input", function limparErro() {
+            campoIncompleto.setCustomValidity("");
+            campoIncompleto.removeEventListener("input", limparErro);
+          });
+          return;
+        }
+      }
+    });
+  })();
+</script>
+{% endblock content %}

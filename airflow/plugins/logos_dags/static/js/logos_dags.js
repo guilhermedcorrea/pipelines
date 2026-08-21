@@ -70,8 +70,8 @@
     const temTagsDeLogo = (tags) => {
         const conjunto = new Set(tags.map(normalizar));
         return (
-            conjunto.has("euromidia") ||
-            conjunto.has("shempo") ||
+            conjunto.has("midia") ||
+            conjunto.has("sp") ||
             conjunto.has("sinamovel") ||
             conjunto.has("omie") ||
             conjunto.has("granatum") ||
@@ -141,8 +141,8 @@
         const bloco = document.createElement("div");
         bloco.className = CLASSE_BLOCO;
 
-        const temEuromidia = tags.includes("euromidia");
-        const temShempo = tags.includes("shempo");
+        const temMidia = tags.includes("midia");
+        const temSp = tags.includes("sp");
         const temSinamovel = tags.includes("sinamovel");
         const temOmie = tags.includes("omie");
         const temGranatum = tags.includes("granatum");
@@ -154,11 +154,11 @@
         let quantidade = 0;
         let temEmpresa = false;
 
-        if (temEuromidia) {
+        if (temMidia) {
             bloco.appendChild(
                 criarLogo(
-                    "/logos-dags-static/imagens/LogoEmpresaProprietaria/euromidia.png",
-                    "Euromidia",
+                    "/logos-dags-static/imagens/LogoEmpresaProprietaria/midia.png",
+                    "Midia",
                     "logo-empresa"
                 )
             );
@@ -166,11 +166,11 @@
             temEmpresa = true;
         }
 
-        if (temShempo) {
+        if (temSp) {
             bloco.appendChild(
                 criarLogo(
-                    "/logos-dags-static/imagens/LogoEmpresaProprietaria/Shempo.jpg",
-                    "Shempo",
+                    "/logos-dags-static/imagens/LogoEmpresaProprietaria/Sp.jpg",
+                    "Sp",
                     "logo-empresa"
                 )
             );

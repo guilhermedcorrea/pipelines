@@ -1,0 +1,1597 @@
+{% extends "midia/base_midia.html" %}
+
+{% block title %}Lista de Contratos | Euromídia{% endblock %}
+
+{% block content %}
+  <div class="card">
+
+    <style>
+      .card{
+        --contratos-grid-colunas: 72px 104px 104px 102px 158px 140px 176px minmax(210px, 1.05fr) minmax(190px, 1fr) 144px;
+        --contratos-grid-min-width: 1460px;
+      }
+
+      .hdr{
+        display:flex;
+        align-items:center;
+        gap:12px;
+        justify-content:space-between;
+        flex-wrap:wrap;
+      }
+
+      .hdr-left{
+        display:flex;
+        align-items:center;
+        gap:12px;
+        flex-wrap:wrap;
+      }
+
+      .count-pill{
+        display:inline-flex;
+        align-items:center;
+        gap:8px;
+        padding:6px 10px;
+        border:1px solid var(--border);
+        border-radius:10px;
+        background:#fff;
+        font-weight:800;
+        color: var(--euro-blue);
+        user-select:none;
+        white-space:nowrap;
+      }
+
+      .filters{
+        margin-top:14px;
+        display:grid;
+        grid-template-columns:minmax(230px, .8fr) minmax(260px, .95fr) minmax(260px, .95fr) minmax(190px, .65fr) max-content max-content;
+        gap:12px;
+        align-items:end;
+      }
+
+      .filters .field{
+        min-width:0;
+        flex:initial;
+      }
+
+      .filters label{
+        display:block;
+        font-weight:900;
+        color:var(--text);
+        font-size:12px;
+        margin-bottom:6px;
+      }
+
+      .field-status{
+        grid-column:1 / 2;
+        grid-row:1;
+      }
+
+      .field-cidade{
+        grid-column:2 / 3;
+        grid-row:1;
+      }
+
+      .field-segmento{
+        grid-column:3 / 4;
+        grid-row:1;
+      }
+
+      .field-ativo{
+        grid-column:4 / 5;
+        grid-row:1;
+      }
+
+      .field-busca{
+        grid-column:1 / 5;
+        grid-row:2;
+        min-width:0;
+      }
+
+      .filters > .btn,
+      .filters > .btn-pill{
+        height:50px !important;
+        border-radius:14px !important;
+        white-space:nowrap;
+        align-self:end;
+      }
+
+      .filters > .btn.btn-primary{
+        grid-column:5 / 6;
+        grid-row:2;
+      }
+
+      .filters > .btn-pill.danger{
+        grid-column:6 / 7;
+        grid-row:2;
+      }
+
+      .btn-pill{
+        height:40px;
+        padding:0 14px;
+        border-radius:12px;
+        border:1px solid var(--border);
+        background:#fff;
+        font-weight:900;
+        color:#0b1a3a;
+        display:inline-flex;
+        align-items:center;
+        gap:8px;
+        text-decoration:none;
+        cursor:pointer;
+        user-select:none;
+        box-shadow: 0 8px 18px rgba(2,6,23,.06);
+        transition: .12s ease;
+      }
+
+      .btn-pill:hover{
+        transform: translateY(-1px);
+      }
+
+      .btn-pill:active{
+        transform: translateY(0px);
+      }
+
+      .btn-pill.danger{
+        border-color: rgba(239,68,68,.35);
+        background: rgba(239,68,68,.08);
+        color:#991b1b;
+      }
+
+      .kb-search-combobox{
+        position:relative;
+      }
+
+      .kb-search-box{
+        height:50px;
+        display:flex;
+        align-items:center;
+        gap:8px;
+        border:1px solid var(--border);
+        background:#fff;
+        border-radius:14px;
+        padding:0 12px;
+        box-shadow:0 8px 18px rgba(2,6,23,.05);
+      }
+
+      .kb-search-icon{
+        opacity:.78;
+        user-select:none;
+      }
+
+      .kb-search-input{
+        width:100%;
+        height:44px;
+        border:0 !important;
+        outline:none !important;
+        box-shadow:none !important;
+        background:transparent;
+        font-weight:850;
+        color:var(--text);
+      }
+
+      .kb-search-sugestoes{
+        position:absolute;
+        z-index:90;
+        left:0;
+        right:0;
+        top:calc(100% + 8px);
+        border:1px solid var(--border);
+        border-radius:16px;
+        background:#fff;
+        box-shadow:0 20px 54px rgba(2,6,23,.18);
+        padding:8px;
+        max-height:430px;
+        overflow:auto;
+      }
+
+      .kb-search-sugestao-card{
+        width:100%;
+        border:0;
+        background:#fff;
+        text-align:left;
+        padding:10px;
+        border-radius:12px;
+        cursor:pointer;
+        display:block;
+      }
+
+      .kb-search-sugestao-card:hover,
+      .kb-search-sugestao-card.is-active{
+        background:rgba(0,40,132,.06);
+      }
+
+      .kb-search-sugestao-topo{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+      }
+
+      .kb-search-sugestao-titulo{
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        font-weight:950;
+        color:#0f172a;
+      }
+
+      .kb-search-sugestao-id{
+        font-weight:950;
+        color:var(--euro-blue);
+        white-space:nowrap;
+      }
+
+      .kb-search-sugestao-meta,
+      .kb-search-sugestao-desc{
+        margin-top:4px;
+        color:#475569;
+        font-size:12px;
+        font-weight:800;
+      }
+
+      .kb-search-sugestao-badges{
+        margin-top:8px;
+        display:flex;
+        align-items:center;
+        gap:6px;
+        flex-wrap:wrap;
+      }
+
+      .kb-search-sugestao-vazio{
+        padding:10px;
+        color:var(--muted);
+        font-weight:800;
+      }
+
+      .multi-dd{
+        position:relative;
+        width:100%;
+      }
+
+      .multi-dd[open]{
+        z-index:80;
+      }
+
+      .dd-summary{
+        list-style:none;
+        min-height:50px;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        padding:0 12px;
+        border:1px solid var(--border);
+        border-radius:14px;
+        background:#fff;
+        cursor:pointer;
+        user-select:none;
+        box-shadow: 0 8px 18px rgba(2,6,23,.04);
+      }
+
+      .dd-summary::-webkit-details-marker{
+        display:none;
+      }
+
+      .dd-label{
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        font-weight:800;
+        color:#0b1a3a;
+      }
+
+      .dd-caret{
+        color:var(--euro-blue);
+        font-weight:900;
+      }
+
+      .dd-menu{
+        position:absolute;
+        top:calc(100% + 6px);
+        left:0;
+        right:0;
+        border:1px solid var(--border);
+        border-radius:14px;
+        background:#fff;
+        box-shadow: 0 18px 36px rgba(2,6,23,.14);
+        overflow:hidden;
+      }
+
+      .dd-actions{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        padding:10px 12px 6px 12px;
+      }
+
+      .dd-action-btn{
+        border:0;
+        background:transparent;
+        color:var(--euro-blue);
+        font-weight:900;
+        cursor:pointer;
+        padding:0;
+      }
+
+      .dd-search-wrap{
+        padding:0 12px 8px 12px;
+      }
+
+      .dd-search{
+        width:100%;
+        min-height:38px;
+        border:1px solid var(--border);
+        border-radius:10px;
+        padding:8px 10px;
+        outline:none;
+      }
+
+      .dd-options{
+        max-height:260px;
+        overflow:auto;
+        padding:0 8px 8px 8px;
+      }
+
+      .dd-option{
+        display:flex;
+        align-items:center;
+        gap:10px;
+        padding:8px 10px;
+        border-radius:10px;
+        cursor:pointer;
+      }
+
+      .dd-option:hover{
+        background:rgba(0,40,132,.05);
+      }
+
+      .dd-option input{
+        width:16px;
+        height:16px;
+        margin:0;
+      }
+
+      .dd-option span{
+        min-width:0;
+        overflow-wrap:anywhere;
+        word-break:break-word;
+      }
+
+      .dd-color-dot{
+        width:10px;
+        height:10px;
+        border-radius:999px;
+        border:1px solid rgba(15,23,42,.16);
+        flex:0 0 auto;
+      }
+
+      .dd-option[hidden]{
+        display:none !important;
+      }
+
+      .list-wrap{
+        margin-top:14px;
+        border:1px solid var(--border);
+        border-radius:14px;
+        overflow-x:auto;
+        overflow-y:visible;
+        background:#fff;
+        max-width:100%;
+        -webkit-overflow-scrolling:touch;
+      }
+
+      .list-head{
+        display:grid;
+        grid-template-columns: var(--contratos-grid-colunas);
+        min-width: var(--contratos-grid-min-width);
+        gap:0;
+        padding: 12px 14px;
+        border-bottom:1px solid var(--border);
+        background: rgba(0,40,132,.03);
+        font-weight:900;
+        color: var(--euro-blue);
+        align-items:center;
+      }
+
+      .row{
+        display:grid;
+        grid-template-columns: var(--contratos-grid-colunas);
+        min-width: var(--contratos-grid-min-width);
+        gap:0;
+        padding: 14px 14px;
+        border-bottom:1px solid var(--border);
+        align-items:start;
+        background:#fff;
+        cursor:pointer;
+      }
+
+      .row:hover{
+        background: rgba(0,40,132,.04);
+      }
+
+      .row:last-child{
+        border-bottom:0;
+      }
+
+      .logo-box{
+        display:flex;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .logo-empresa{
+        width:44px;
+        height:44px;
+        object-fit:contain;
+        border-radius:10px;
+        border:1px solid var(--border);
+        background:#fff;
+        padding:4px;
+        box-shadow: 0 6px 14px rgba(2,6,23,.05);
+      }
+
+      .logo-fallback{
+        width:44px;
+        height:44px;
+        border-radius:10px;
+        border:1px solid var(--border);
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        background: rgba(0,40,132,.04);
+        color: var(--euro-blue);
+        font-weight:900;
+        font-size:12px;
+        user-select:none;
+      }
+
+      .id-contrato-texto{
+        display:inline-block;
+        font-weight:900;
+        font-size:13px;
+        line-height:1.25;
+        color:var(--text);
+        white-space:normal;
+        overflow-wrap:anywhere;
+        word-break:break-word;
+      }
+
+      .muted-small{
+        color: var(--muted);
+        font-weight:800;
+        font-size:12px;
+      }
+
+      .ellipsis{
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .status-cell{
+        min-width:0;
+        overflow:visible;
+        white-space:normal;
+        display:flex;
+        align-items:flex-start;
+        justify-content:flex-start;
+        padding-right:10px;
+      }
+
+      .texto-quebra{
+        min-width:0;
+        white-space:normal;
+        overflow:visible;
+        text-overflow:clip;
+        overflow-wrap:anywhere;
+        word-break:break-word;
+        line-height:1.25;
+        font-weight:800;
+        color:var(--text);
+        padding-right:12px;
+      }
+
+      .data-col{
+        font-weight:900;
+        color:var(--text);
+      }
+
+      .status-badge,
+      .ativo-badge{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:34px;
+        padding:6px 12px;
+        border-radius:999px;
+        border:1px solid rgba(0,40,132,.15);
+        background: rgba(0,40,132,.06);
+        color: var(--euro-blue);
+        font-weight:900;
+        white-space:nowrap;
+        max-width: 100%;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      }
+
+      .status-badge{
+        min-width:0;
+        padding:6px 9px;
+        border-radius:14px;
+        font-size:12px;
+        line-height:1.12;
+        text-align:center;
+        white-space:normal;
+        overflow:visible;
+        text-overflow:clip;
+        overflow-wrap:anywhere;
+        word-break:normal;
+      }
+
+      .status-cell .status-badge{
+        width:100%;
+        max-width:100%;
+      }
+
+      .status-badge-texto{
+        display:block;
+        min-width:0;
+        max-width:100%;
+        white-space:normal;
+        overflow-wrap:anywhere;
+        word-break:normal;
+        line-height:1.12;
+      }
+
+      .status-badge.status-vazio{
+        border-color: rgba(100,116,139,.18);
+        background: rgba(100,116,139,.08);
+        color: #475569;
+      }
+
+      .ativo-badge.ativo-sim{
+        border-color: rgba(22,163,74,.25);
+        background: rgba(22,163,74,.09);
+        color:#166534;
+      }
+
+      .ativo-badge.ativo-nao{
+        border-color: rgba(239,68,68,.28);
+        background: rgba(239,68,68,.09);
+        color:#991b1b;
+      }
+
+      .preferencia-badge{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:34px;
+        padding:6px 12px;
+        border-radius:999px;
+        border:1px solid rgba(100,116,139,.20);
+        background:rgba(100,116,139,.08);
+        color:#475569;
+        font-weight:950;
+        white-space:nowrap;
+      }
+
+      .preferencia-badge.preferencia-sim{
+        border-color:rgba(22,163,74,.25);
+        background:rgba(22,163,74,.10);
+        color:#166534;
+      }
+
+      .preferencia-badge.preferencia-nao{
+        border-color:rgba(148,163,184,.28);
+        background:rgba(148,163,184,.10);
+        color:#475569;
+      }
+
+      .col-preferencia-reserva{
+        display:flex;
+        align-items:flex-start;
+        justify-content:flex-start;
+        min-width:0;
+        padding-right:10px;
+      }
+
+      .segmento-badge{
+        --segmento-cor: #64748B;
+        display:inline-flex;
+        align-items:flex-start;
+        gap:8px;
+        width:fit-content;
+        max-width:100%;
+        min-height:34px;
+        padding:7px 12px;
+        border-radius:16px;
+        border:1px solid color-mix(in srgb, var(--segmento-cor) 34%, #ffffff);
+        background:
+          linear-gradient(180deg,
+            color-mix(in srgb, var(--segmento-cor) 16%, #ffffff),
+            color-mix(in srgb, var(--segmento-cor) 7%, #ffffff)
+          );
+        color:#0f172a;
+        font-size:12px;
+        font-weight:950;
+        line-height:1.18;
+        white-space:normal;
+        overflow:visible;
+        text-overflow:clip;
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,.80),
+          0 8px 18px color-mix(in srgb, var(--segmento-cor) 16%, transparent);
+      }
+
+      .segmento-badge-dot{
+        width:10px;
+        height:10px;
+        min-width:10px;
+        margin-top:2px;
+        border-radius:999px;
+        background:var(--segmento-cor);
+        box-shadow:
+          0 0 0 3px color-mix(in srgb, var(--segmento-cor) 18%, #ffffff),
+          0 0 0 1px rgba(15,23,42,.05);
+      }
+
+      .segmento-badge-texto{
+        display:block;
+        min-width:0;
+        max-width:100%;
+        white-space:normal;
+        overflow:visible;
+        text-overflow:clip;
+        overflow-wrap:anywhere;
+        word-break:break-word;
+        line-height:1.18;
+      }
+
+      .segmento-badge.segmento-vazio{
+        --segmento-cor:#94A3B8;
+        color:#64748b;
+        background:rgba(148,163,184,.10);
+        border-color:rgba(148,163,184,.24);
+        box-shadow:none;
+      }
+
+      .dd-option.dd-option-segmento{
+        position:relative;
+      }
+
+      .dd-option.dd-option-segmento::before{
+        content:"";
+        width:10px;
+        height:10px;
+        min-width:10px;
+        border-radius:999px;
+        background:var(--segmento-cor, #64748B);
+        box-shadow:
+          0 0 0 3px color-mix(in srgb, var(--segmento-cor, #64748B) 16%, #ffffff),
+          0 0 0 1px rgba(15,23,42,.06);
+      }
+
+      .pager{
+        min-width:var(--contratos-grid-min-width);
+        padding: 12px 14px;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        flex-wrap:wrap;
+      }
+
+      @media (min-width: 1500px){
+        .card{
+          --contratos-grid-min-width: 100%;
+          --contratos-grid-colunas: 76px 112px 116px 110px 170px 148px 186px minmax(220px, 1.15fr) minmax(200px, 1fr) 152px;
+        }
+      }
+
+      @media (max-width: 900px){
+        .card{
+          --contratos-grid-colunas: 62px 96px 96px 92px 150px 132px 160px 210px 190px 140px;
+          --contratos-grid-min-width: 1318px;
+        }
+
+        .filters{
+          grid-template-columns:1fr;
+        }
+
+        .field-status,
+        .field-cidade,
+        .field-segmento,
+        .field-ativo,
+        .field-busca,
+        .filters > .btn.btn-primary,
+        .filters > .btn-pill.danger{
+          grid-column:1 / -1;
+          grid-row:auto;
+        }
+
+        .logo-empresa,
+        .logo-fallback{
+          width:38px;
+          height:38px;
+        }
+
+        .status-cell{
+          padding-right:8px;
+        }
+
+        .status-badge{
+          min-height:32px;
+          padding:5px 8px;
+          font-size:11px;
+          line-height:1.10;
+        }
+      }
+    </style>
+
+    <div class="hdr">
+      <div class="hdr-left">
+        <h1 class="page-title" style="margin:0;">Lista de Contratos</h1>
+        <span class="count-pill">☰ {{ paginacao.total if paginacao.total is not none else paginacao.fim }}</span>
+      </div>
+    </div>
+
+    <form id="formFiltrosContratos" method="GET" action="{{ url_for('Paineis.contratos_lista') }}">
+      <div class="filters">
+        <div class="field field-status">
+          <label>Status</label>
+
+          <details class="multi-dd" id="filtroStatusDetalhes">
+            <summary class="dd-summary">
+              <span id="statusResumoTexto" class="dd-label">
+                {% if filtros.status_nomes and filtros.status_nomes|length > 0 %}
+                  {{ filtros.status_nomes|join(", ") }}
+                {% else %}
+                  Todos os status
+                {% endif %}
+              </span>
+              <span class="dd-caret">▾</span>
+            </summary>
+
+            <div class="dd-menu">
+              <div class="dd-actions">
+                <button type="button" class="dd-action-btn" id="btnMarcarTodosStatus">Marcar todos</button>
+                <button type="button" class="dd-action-btn" id="btnLimparStatus">Limpar</button>
+              </div>
+
+              <div class="dd-search-wrap">
+                <input
+                  id="inputBuscaStatusLocal"
+                  class="dd-search"
+                  type="text"
+                  placeholder="Filtrar status..."
+                  autocomplete="off"
+                >
+              </div>
+
+              <div class="dd-options" id="listaOpcoesStatus">
+                {% for status in status_opcoes %}
+                  {% set cor_status_opcao = status.CorHex if status.CorHex else none %}
+                  <label
+                    class="dd-option"
+                    data-texto-filtro="{{ (status.Status or '')|lower }}"
+                  >
+                    <input
+                      type="checkbox"
+                      name="status"
+                      value="{{ status.IDDimStatusContratos }}"
+                      {% if status.IDDimStatusContratos in filtros.status_ids %}checked{% endif %}
+                    >
+                    {% if cor_status_opcao %}
+                      <span
+                        class="dd-color-dot"
+                        style="background-color: {{ cor_status_opcao }}; border-color: {{ cor_status_opcao }};"
+                      ></span>
+                    {% endif %}
+                    <span>{{ status.Status or "—" }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="field field-cidade">
+          <label>Cidade do Contrato</label>
+
+          <details class="multi-dd" id="filtroCidadeDetalhes">
+            <summary class="dd-summary">
+              <span id="cidadeResumoTexto" class="dd-label">
+                {% if filtros.cidade_nomes and filtros.cidade_nomes|length > 0 %}
+                  {{ filtros.cidade_nomes|join(", ") }}
+                {% else %}
+                  Todas as cidades
+                {% endif %}
+              </span>
+              <span class="dd-caret">▾</span>
+            </summary>
+
+            <div class="dd-menu">
+              <div class="dd-actions">
+                <button type="button" class="dd-action-btn" id="btnMarcarTodasCidades">Marcar todas</button>
+                <button type="button" class="dd-action-btn" id="btnLimparCidades">Limpar</button>
+              </div>
+
+              <div class="dd-search-wrap">
+                <input
+                  id="inputBuscaCidadeLocal"
+                  class="dd-search"
+                  type="text"
+                  placeholder="Filtrar cidade..."
+                  autocomplete="off"
+                >
+              </div>
+
+              <div class="dd-options" id="listaOpcoesCidade">
+                {% for cidade in cidade_opcoes %}
+                  {% set nome_cidade = (cidade.CidadeExibicao or '') %}
+                  <label
+                    class="dd-option"
+                    data-texto-filtro="{{ nome_cidade|lower }}"
+                  >
+                    <input
+                      type="checkbox"
+                      name="cidade"
+                      value="{{ nome_cidade }}"
+                      {% if nome_cidade in filtros.cidades %}checked{% endif %}
+                    >
+                    <span>{{ nome_cidade or "—" }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="field field-segmento">
+          <label>Segmento do Contrato</label>
+
+          <details class="multi-dd" id="filtroSegmentoDetalhes">
+            <summary class="dd-summary">
+              <span id="segmentoResumoTexto" class="dd-label">
+                {% if filtros.segmento_nomes and filtros.segmento_nomes|length > 0 %}
+                  {{ filtros.segmento_nomes|join(", ") }}
+                {% else %}
+                  Todos os segmentos
+                {% endif %}
+              </span>
+              <span class="dd-caret">▾</span>
+            </summary>
+
+            <div class="dd-menu">
+              <div class="dd-actions">
+                <button type="button" class="dd-action-btn" id="btnMarcarTodosSegmentos">Marcar todos</button>
+                <button type="button" class="dd-action-btn" id="btnLimparSegmentos">Limpar</button>
+              </div>
+
+              <div class="dd-search-wrap">
+                <input
+                  id="inputBuscaSegmentoLocal"
+                  class="dd-search"
+                  type="text"
+                  placeholder="Filtrar segmento..."
+                  autocomplete="off"
+                >
+              </div>
+
+              <div class="dd-options" id="listaOpcoesSegmento">
+                {% for segmento in segmento_opcoes %}
+                  {% set nome_segmento = (segmento.Classe or '') %}
+                  {% set cor_segmento = (segmento.Hex or '#64748B') %}
+                  <label
+                    class="dd-option dd-option-segmento"
+                    data-texto-filtro="{{ nome_segmento|lower }}"
+                    style="--segmento-cor: {{ cor_segmento }};"
+                  >
+                    <input
+                      type="checkbox"
+                      name="segmento"
+                      value="{{ nome_segmento }}"
+                      {% if nome_segmento in filtros.segmentos %}checked{% endif %}
+                    >
+                    <span>{{ nome_segmento or "—" }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="field field-ativo">
+          <label>Contrato Ativo</label>
+
+          <details class="multi-dd" id="filtroAtivoDetalhes">
+            <summary class="dd-summary">
+              <span id="ativoResumoTexto" class="dd-label">
+                {% if filtros.contrato_ativo_nome %}
+                  {{ filtros.contrato_ativo_nome }}
+                {% else %}
+                  Todos
+                {% endif %}
+              </span>
+              <span class="dd-caret">▾</span>
+            </summary>
+
+            <div class="dd-menu">
+              <div class="dd-actions">
+                <button type="button" class="dd-action-btn" id="btnLimparAtivo">Limpar</button>
+              </div>
+
+              <div class="dd-options" id="listaOpcoesAtivo">
+                {% for ativo in contrato_ativo_opcoes %}
+                  <label
+                    class="dd-option"
+                    data-texto-filtro="{{ ativo.nome|lower }}"
+                  >
+                    <input
+                      type="checkbox"
+                      name="contrato_ativo"
+                      value="{{ ativo.valor }}"
+                      {% if filtros.contrato_ativo == ativo.valor %}checked{% endif %}
+                    >
+                    <span>{{ ativo.nome }}</span>
+                  </label>
+                {% endfor %}
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="field field-busca">
+          <label>Buscar</label>
+
+          <div id="comboBuscaContratos" class="kb-search-combobox">
+            <input
+              type="hidden"
+              name="q"
+              id="inputBuscaContratosValor"
+              value="{{ filtros.q or '' }}"
+            >
+
+            <input
+              type="hidden"
+              name="id_contrato"
+              id="inputBuscaContratosId"
+              value="{{ filtros.id_contrato or '' }}"
+            >
+
+            <div class="kb-search-box">
+              <span class="kb-search-icon">🔎</span>
+              <input
+                id="inputBuscaContratosTexto"
+                class="kb-search-input"
+                type="search"
+                value="{{ filtros.q_exibicao or filtros.q or '' }}"
+                placeholder="Pesquisar por IDContrato, ativo, status, cidade, razão social, marca, segmento ou preferência reserva..."
+                autocomplete="off"
+                spellcheck="false"
+                aria-autocomplete="list"
+                aria-expanded="false"
+                aria-controls="listaBuscaContratos"
+              >
+            </div>
+
+            <div id="listaBuscaContratos" class="kb-search-sugestoes" hidden></div>
+          </div>
+        </div>
+
+        <input type="hidden" name="per_page" value="{{ filtros.per_page }}">
+        <input type="hidden" name="calcular_total" value="{{ 1 if paginacao.calcular_total else 0 }}">
+
+        <button class="btn btn-primary" type="submit" style="display:inline-flex;align-items:center;gap:8px;">
+          ⛭ Filtrar
+        </button>
+
+        <a class="btn-pill danger"
+           href="{{ url_for('Paineis.contratos_lista', per_page=filtros.per_page, calcular_total=(1 if paginacao.calcular_total else 0), limpar_filtros=1) }}"
+           title="Limpa busca e volta para a lista completa">
+          ⌁ Limpar
+        </a>
+      </div>
+    </form>
+
+    <div class="list-wrap">
+      <div class="list-head">
+        <div>Logo</div>
+        <div>IDContrato</div>
+        <div>Data</div>
+        <div>Ativo</div>
+        <div>Status</div>
+        <div>Cidade</div>
+        <div>Segmento</div>
+        <div>Razão Social</div>
+        <div>Marca</div>
+        <div>Preferência Reserva</div>
+      </div>
+
+      {% if contratos and contratos|length > 0 %}
+        {% for c in contratos %}
+          <div class="row"
+               ondblclick="window.location.href='{{ url_for('Paineis.contratos_detalhe', id_contrato=c.IDFatoControleContratosMidia, return_to=filtros.url_atual) }}'"
+               title="Duplo clique para abrir">
+
+            <div class="logo-box">
+              {% if c.LogoEmpresaProprietariaUrl %}
+                <img
+                  src="{{ c.LogoEmpresaProprietariaUrl }}"
+                  alt="Logo da empresa"
+                  class="logo-empresa"
+                  loading="lazy"
+                >
+              {% else %}
+                <div class="logo-fallback">LOGO</div>
+              {% endif %}
+            </div>
+
+            <div>
+              <span class="id-contrato-texto">
+                {{ c.IDContrato or c.IDFatoControleContratosMidia }}
+              </span>
+            </div>
+
+            <div class="data-col">
+              {% if c.DataLancamento %}
+                {{ c.DataLancamento.strftime("%d/%m/%Y") }}
+              {% else %}
+                —
+              {% endif %}
+            </div>
+
+            <div>
+              {% if c.BitAtivo is not none and c.BitAtivo|int == 1 %}
+                <span class="ativo-badge ativo-sim">Ativo</span>
+              {% elif c.BitAtivo is not none and c.BitAtivo|int == 0 %}
+                <span class="ativo-badge ativo-nao">Inativo</span>
+              {% else %}
+                <span class="ativo-badge">—</span>
+              {% endif %}
+            </div>
+
+            <div class="status-cell">
+              {% set tem_status = c.StatusContrato and c.StatusContrato != '—' %}
+              {% set cor_status = c.CorHexStatusContrato if tem_status else none %}
+              <span
+                class="status-badge {{ 'status-vazio' if not tem_status else '' }}"
+                {% if cor_status %}
+                  style="background-color: {{ cor_status }}; border-color: {{ cor_status }}; color: {{ c.CorTextoStatusContrato or '#FFFFFF' }};"
+                {% endif %}
+              >
+                <span class="status-badge-texto">{{ c.StatusContrato or "—" }}</span>
+              </span>
+            </div>
+
+            <div class="texto-quebra">
+              {{ c.CidadeExibicao or "—" }}
+            </div>
+
+            <div class="texto-quebra">
+              {% if c.SegmentoContrato %}
+                <span
+                  class="segmento-badge"
+                  style="--segmento-cor: {{ c.SegmentoHex or '#64748B' }};"
+                  title="{{ c.SegmentoContrato }}"
+                >
+                  <span class="segmento-badge-dot" aria-hidden="true"></span>
+                  <span class="segmento-badge-texto">{{ c.SegmentoContrato }}</span>
+                </span>
+              {% else %}
+                <span class="segmento-badge segmento-vazio">
+                  <span class="segmento-badge-dot" aria-hidden="true"></span>
+                  <span class="segmento-badge-texto">Sem segmento</span>
+                </span>
+              {% endif %}
+            </div>
+
+            <div class="texto-quebra">
+              {{ c.RazaoSocial or "—" }}
+            </div>
+
+            <div class="texto-quebra">
+              {{ c.MarcaExibida or "—" }}
+            </div>
+
+            <div class="col-preferencia-reserva">
+              {% if c.BitPreferenciaReserva is not none and c.BitPreferenciaReserva|int == 1 %}
+                <span class="preferencia-badge preferencia-sim">Sim</span>
+              {% else %}
+                <span class="preferencia-badge preferencia-nao">Não</span>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div style="padding:14px;" class="muted">
+          Nenhum contrato encontrado.
+        </div>
+      {% endif %}
+
+      <div class="pager">
+        <div class="muted" style="font-weight:800;">
+          Mostrando {{ paginacao.inicio }} até {{ paginacao.fim }} de {{ paginacao.total if paginacao.total is not none else "muitos" }}
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;">
+          {% set p = paginacao.page %}
+          {% set tp = paginacao.total_pages %}
+
+          <a class="btn btn-secondary"
+             style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('Paineis.contratos_lista',
+                              page=1,
+                              per_page=filtros.per_page,
+                              q=filtros.q,
+                              id_contrato=filtros.id_contrato,
+                              status=filtros.status_ids,
+                              cidade=filtros.cidades,
+                              segmento=filtros.segmentos,
+                              contrato_ativo=filtros.contrato_ativo,
+                              calcular_total=(1 if paginacao.calcular_total else 0)) }}">
+            «
+          </a>
+
+          <a class="btn btn-secondary"
+             style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('Paineis.contratos_lista',
+                              page=(p-1 if p>1 else 1),
+                              per_page=filtros.per_page,
+                              q=filtros.q,
+                              id_contrato=filtros.id_contrato,
+                              status=filtros.status_ids,
+                              cidade=filtros.cidades,
+                              segmento=filtros.segmentos,
+                              contrato_ativo=filtros.contrato_ativo,
+                              calcular_total=(1 if paginacao.calcular_total else 0)) }}">
+            ‹
+          </a>
+
+          <span style="font-weight:900;color:var(--text);padding:0 10px;">
+            {{ p }} / {{ tp }}
+          </span>
+
+          <a class="btn btn-secondary"
+             style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('Paineis.contratos_lista',
+                              page=(p+1 if p<tp else tp),
+                              per_page=filtros.per_page,
+                              q=filtros.q,
+                              id_contrato=filtros.id_contrato,
+                              status=filtros.status_ids,
+                              cidade=filtros.cidades,
+                              segmento=filtros.segmentos,
+                              contrato_ativo=filtros.contrato_ativo,
+                              calcular_total=(1 if paginacao.calcular_total else 0)) }}">
+            ›
+          </a>
+
+          <a class="btn btn-secondary"
+             style="text-decoration:none;padding:8px 10px;"
+             href="{{ url_for('Paineis.contratos_lista',
+                              page=tp,
+                              per_page=filtros.per_page,
+                              q=filtros.q,
+                              id_contrato=filtros.id_contrato,
+                              status=filtros.status_ids,
+                              cidade=filtros.cidades,
+                              segmento=filtros.segmentos,
+                              contrato_ativo=filtros.contrato_ativo,
+                              calcular_total=(1 if paginacao.calcular_total else 0)) }}">
+            »
+          </a>
+        </div>
+
+        <div class="muted" style="display:flex;align-items:center;gap:10px;font-weight:900;">
+          <span>{{ filtros.per_page }} por página</span>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        const formFiltros = document.getElementById("formFiltrosContratos");
+
+        const comboBusca = document.getElementById("comboBuscaContratos");
+        const inputBuscaTexto = document.getElementById("inputBuscaContratosTexto");
+        const inputBuscaValor = document.getElementById("inputBuscaContratosValor");
+        const inputBuscaId = document.getElementById("inputBuscaContratosId");
+        const listaBusca = document.getElementById("listaBuscaContratos");
+        const urlSugestoesBusca = "{{ url_for('Paineis.contratos_busca_sugestoes') }}";
+
+        let controladorBusca = null;
+        let temporizadorBusca = null;
+        let itensBusca = [];
+        let indiceBuscaAtivo = -1;
+
+        function fecharListaBusca() {
+          listaBusca.hidden = true;
+          listaBusca.innerHTML = "";
+          inputBuscaTexto.setAttribute("aria-expanded", "false");
+          itensBusca = [];
+          indiceBuscaAtivo = -1;
+        }
+
+        function submeterFormularioFiltros() {
+          if (formFiltros.requestSubmit) {
+            formFiltros.requestSubmit();
+            return;
+          }
+
+          formFiltros.submit();
+        }
+
+        function marcarBuscaComoLivre() {
+          inputBuscaTexto.dataset.selecionado = "0";
+          inputBuscaValor.value = inputBuscaTexto.value.trim();
+          inputBuscaId.value = "";
+        }
+
+        function aplicarSugestaoBusca(item) {
+          inputBuscaTexto.value = item.rotulo || item.valor_busca || "";
+          inputBuscaValor.value = item.valor_busca || "";
+          inputBuscaId.value = item.id || item.valor_busca || "";
+          inputBuscaTexto.dataset.selecionado = "1";
+          fecharListaBusca();
+          submeterFormularioFiltros();
+        }
+
+        function atualizarOpcaoAtivaBusca() {
+          const opcoes = listaBusca.querySelectorAll(".kb-search-sugestao-card");
+          opcoes.forEach((opcao, indice) => {
+            opcao.classList.toggle("is-active", indice === indiceBuscaAtivo);
+          });
+        }
+
+        function escaparHtml(valor) {
+          return String(valor ?? "").replace(/[&<>"]/g, function (c) {
+            return {"&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;"}[c];
+          });
+        }
+
+        function classeAtivoBusca(item) {
+          return String(item.ativo_valor ?? "") === "1" ? "ativo-sim" : "ativo-nao";
+        }
+
+        function classePreferenciaBusca(item) {
+          return String(item.preferencia_reserva_valor ?? "") === "1" ? "preferencia-sim" : "preferencia-nao";
+        }
+
+        function renderizarSugestoesBusca(itens) {
+          itensBusca = Array.isArray(itens) ? itens : [];
+          indiceBuscaAtivo = -1;
+          listaBusca.innerHTML = "";
+
+          if (!itensBusca.length) {
+            listaBusca.innerHTML = '<div class="kb-search-sugestao-vazio">Nenhum contrato encontrado.</div>';
+            listaBusca.hidden = false;
+            inputBuscaTexto.setAttribute("aria-expanded", "true");
+            return;
+          }
+
+          listaBusca.innerHTML = itensBusca.map((item, indice) => {
+            const corStatus = item.status_cor || "#E5E7EB";
+            const corTextoStatus = item.status_cor_texto || "#111827";
+            const corSegmento = item.segmento_cor || "#64748B";
+            const titulo = item.razao_social || item.rotulo || "Contrato";
+            const marca = item.marca || "—";
+            const cidade = item.cidade || "—";
+            const segmento = item.segmento || "—";
+            const ativo = item.ativo || "—";
+            const preferencia = item.preferencia_reserva || "—";
+
+            return `
+              <button type="button" class="kb-search-sugestao-card" data-indice="${indice}">
+                <div class="kb-search-sugestao-topo">
+                  <div class="kb-search-sugestao-titulo" title="${escaparHtml(titulo)}">${escaparHtml(titulo)}</div>
+                  <span class="kb-search-sugestao-id">#${escaparHtml(item.id_contrato || item.id || "")}</span>
+                </div>
+                <div class="kb-search-sugestao-meta">Marca: ${escaparHtml(marca)} • Cidade: ${escaparHtml(cidade)}</div>
+                <div class="kb-search-sugestao-desc">IDContrato, ativo, status, segmento e preferência reserva</div>
+                <div class="kb-search-sugestao-badges">
+                  <span class="ativo-badge ${classeAtivoBusca(item)}" style="min-height:26px;padding:4px 9px;">${escaparHtml(ativo)}</span>
+                  <span class="status-badge" style="min-height:26px;padding:4px 9px;background-color:${escaparHtml(corStatus)};border-color:${escaparHtml(corStatus)};color:${escaparHtml(corTextoStatus)};box-shadow:none;">${escaparHtml(item.status || "—")}</span>
+                  <span class="segmento-badge" style="--segmento-cor:${escaparHtml(corSegmento)};min-height:26px;padding:4px 9px;">${escaparHtml(segmento)}</span>
+                  <span class="preferencia-badge ${classePreferenciaBusca(item)}" style="min-height:26px;padding:4px 9px;">Preferência: ${escaparHtml(preferencia)}</span>
+                </div>
+              </button>
+            `;
+          }).join("");
+
+          listaBusca.querySelectorAll(".kb-search-sugestao-card").forEach((botao) => {
+            botao.addEventListener("click", function () {
+              const indice = Number(botao.dataset.indice || -1);
+              if (itensBusca[indice]) {
+                aplicarSugestaoBusca(itensBusca[indice]);
+              }
+            });
+          });
+
+          listaBusca.hidden = false;
+          inputBuscaTexto.setAttribute("aria-expanded", "true");
+        }
+
+        async function carregarSugestoesBusca(termoForcado = null) {
+          const termo = (termoForcado !== null ? termoForcado : inputBuscaTexto.value).trim();
+
+          if (!termo) {
+            fecharListaBusca();
+            return;
+          }
+
+          if (controladorBusca) {
+            controladorBusca.abort();
+          }
+
+          controladorBusca = new AbortController();
+
+          try {
+            const resposta = await fetch(
+              `${urlSugestoesBusca}?q=${encodeURIComponent(termo)}`,
+              {
+                method: "GET",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                signal: controladorBusca.signal
+              }
+            );
+
+            if (!resposta.ok) {
+              fecharListaBusca();
+              return;
+            }
+
+            const payload = await resposta.json();
+            renderizarSugestoesBusca(payload.itens || []);
+          } catch (erro) {
+            if (erro.name !== "AbortError") {
+              fecharListaBusca();
+            }
+          }
+        }
+
+        inputBuscaTexto.addEventListener("input", function () {
+          marcarBuscaComoLivre();
+
+          clearTimeout(temporizadorBusca);
+
+          temporizadorBusca = setTimeout(function () {
+            carregarSugestoesBusca();
+          }, 220);
+        });
+
+        inputBuscaTexto.addEventListener("focus", function () {
+          carregarSugestoesBusca();
+        });
+
+
+        inputBuscaTexto.addEventListener("keydown", function (evento) {
+          if (listaBusca.hidden || !itensBusca.length) {
+            return;
+          }
+
+          if (evento.key === "ArrowDown") {
+            evento.preventDefault();
+            indiceBuscaAtivo = Math.min(indiceBuscaAtivo + 1, itensBusca.length - 1);
+            atualizarOpcaoAtivaBusca();
+            return;
+          }
+
+          if (evento.key === "ArrowUp") {
+            evento.preventDefault();
+            indiceBuscaAtivo = Math.max(indiceBuscaAtivo - 1, 0);
+            atualizarOpcaoAtivaBusca();
+            return;
+          }
+
+          if (evento.key === "Enter" && indiceBuscaAtivo >= 0 && itensBusca[indiceBuscaAtivo]) {
+            evento.preventDefault();
+            aplicarSugestaoBusca(itensBusca[indiceBuscaAtivo]);
+            return;
+          }
+
+          if (evento.key === "Escape") {
+            fecharListaBusca();
+          }
+        });
+
+        formFiltros.addEventListener("submit", function () {
+          if (inputBuscaTexto.dataset.selecionado !== "1") {
+            inputBuscaValor.value = inputBuscaTexto.value.trim();
+            inputBuscaId.value = "";
+          }
+        });
+
+        document.addEventListener("click", function (evento) {
+          if (!comboBusca.contains(evento.target)) {
+            fecharListaBusca();
+          }
+        });
+
+        function configurarMultiFiltro(config) {
+          const detalhes = document.getElementById(config.idDetalhes);
+          const resumo = document.getElementById(config.idResumo);
+          const busca = document.getElementById(config.idBusca);
+          const botaoMarcarTodos = config.idMarcarTodos ? document.getElementById(config.idMarcarTodos) : null;
+          const botaoLimpar = config.idLimpar ? document.getElementById(config.idLimpar) : null;
+          const checkboxes = Array.from(document.querySelectorAll(config.seletorCheckboxes));
+
+          function nomeCheckbox(checkbox) {
+            const label = checkbox.closest(".dd-option");
+            const spans = label ? Array.from(label.querySelectorAll("span:not(.dd-color-dot)")) : [];
+            const span = spans.length ? spans[spans.length - 1] : null;
+            return (span ? span.textContent : "").trim();
+          }
+
+          function atualizarResumo() {
+            const nomesMarcados = checkboxes
+              .filter((checkbox) => checkbox.checked)
+              .map((checkbox) => nomeCheckbox(checkbox))
+              .filter(Boolean);
+
+            if (!nomesMarcados.length) {
+              resumo.textContent = config.textoPadrao;
+              return;
+            }
+
+            if (nomesMarcados.length <= 2) {
+              resumo.textContent = nomesMarcados.join(", ");
+              return;
+            }
+
+            resumo.textContent = `${nomesMarcados.length} ${config.nomePluralSelecionado}`;
+          }
+
+          checkboxes.forEach((checkbox) => {
+            checkbox.addEventListener("change", atualizarResumo);
+          });
+
+          if (botaoMarcarTodos) {
+            botaoMarcarTodos.addEventListener("click", function () {
+              checkboxes.forEach((checkbox) => {
+                checkbox.checked = true;
+              });
+              atualizarResumo();
+            });
+          }
+
+          if (botaoLimpar) {
+            botaoLimpar.addEventListener("click", function () {
+              checkboxes.forEach((checkbox) => {
+                checkbox.checked = false;
+              });
+              atualizarResumo();
+            });
+          }
+
+          if (busca) {
+            busca.addEventListener("input", function () {
+              const termo = busca.value.trim().toLowerCase();
+
+              checkboxes.forEach((checkbox) => {
+                const opcao = checkbox.closest(".dd-option");
+                const texto = (opcao ? (opcao.dataset.textoFiltro || "") : "").trim().toLowerCase();
+                if (opcao) {
+                  opcao.hidden = termo && !texto.includes(termo);
+                }
+              });
+            });
+          }
+
+          if (detalhes && busca) {
+            detalhes.addEventListener("toggle", function () {
+              if (detalhes.open) {
+                setTimeout(function () {
+                  busca.focus();
+                }, 0);
+              }
+            });
+          }
+
+          atualizarResumo();
+        }
+
+        function configurarFiltroUnico(config) {
+          const detalhes = document.getElementById(config.idDetalhes);
+          const resumo = document.getElementById(config.idResumo);
+          const botaoLimpar = config.idLimpar ? document.getElementById(config.idLimpar) : null;
+          const checkboxes = Array.from(document.querySelectorAll(config.seletorCheckboxes));
+
+          function nomeCheckbox(checkbox) {
+            const label = checkbox.closest(".dd-option");
+            const spans = label ? Array.from(label.querySelectorAll("span:not(.dd-color-dot)")) : [];
+            const span = spans.length ? spans[spans.length - 1] : null;
+            return (span ? span.textContent : "").trim();
+          }
+
+          function atualizarResumo() {
+            const marcado = checkboxes.find((checkbox) => checkbox.checked);
+            resumo.textContent = marcado ? nomeCheckbox(marcado) : config.textoPadrao;
+          }
+
+          checkboxes.forEach((checkbox) => {
+            checkbox.addEventListener("change", function () {
+              if (checkbox.checked) {
+                checkboxes.forEach((outro) => {
+                  if (outro !== checkbox) {
+                    outro.checked = false;
+                  }
+                });
+              }
+              atualizarResumo();
+            });
+          });
+
+          if (botaoLimpar) {
+            botaoLimpar.addEventListener("click", function () {
+              checkboxes.forEach((checkbox) => {
+                checkbox.checked = false;
+              });
+              atualizarResumo();
+            });
+          }
+
+          if (detalhes) {
+            detalhes.addEventListener("toggle", function () {
+              if (detalhes.open) {
+                setTimeout(function () {
+                  const primeiro = detalhes.querySelector('input[type="checkbox"]');
+                  if (primeiro) {
+                    primeiro.focus();
+                  }
+                }, 0);
+              }
+            });
+          }
+
+          atualizarResumo();
+        }
+
+        configurarMultiFiltro({
+          idDetalhes: "filtroStatusDetalhes",
+          idResumo: "statusResumoTexto",
+          idBusca: "inputBuscaStatusLocal",
+          idMarcarTodos: "btnMarcarTodosStatus",
+          idLimpar: "btnLimparStatus",
+          seletorCheckboxes: '#listaOpcoesStatus input[type="checkbox"][name="status"]',
+          textoPadrao: "Todos os status",
+          nomePluralSelecionado: "status selecionados"
+        });
+
+        configurarMultiFiltro({
+          idDetalhes: "filtroCidadeDetalhes",
+          idResumo: "cidadeResumoTexto",
+          idBusca: "inputBuscaCidadeLocal",
+          idMarcarTodos: "btnMarcarTodasCidades",
+          idLimpar: "btnLimparCidades",
+          seletorCheckboxes: '#listaOpcoesCidade input[type="checkbox"][name="cidade"]',
+          textoPadrao: "Todas as cidades",
+          nomePluralSelecionado: "cidades selecionadas"
+        });
+
+        configurarMultiFiltro({
+          idDetalhes: "filtroSegmentoDetalhes",
+          idResumo: "segmentoResumoTexto",
+          idBusca: "inputBuscaSegmentoLocal",
+          idMarcarTodos: "btnMarcarTodosSegmentos",
+          idLimpar: "btnLimparSegmentos",
+          seletorCheckboxes: '#listaOpcoesSegmento input[type="checkbox"][name="segmento"]',
+          textoPadrao: "Todos os segmentos",
+          nomePluralSelecionado: "segmentos selecionados"
+        });
+
+        configurarFiltroUnico({
+          idDetalhes: "filtroAtivoDetalhes",
+          idResumo: "ativoResumoTexto",
+          idLimpar: "btnLimparAtivo",
+          seletorCheckboxes: '#listaOpcoesAtivo input[type="checkbox"][name="contrato_ativo"]',
+          textoPadrao: "Todos"
+        });
+      });
+    </script>
+  </div>
+{% endblock %}

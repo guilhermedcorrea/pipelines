@@ -1,0 +1,2235 @@
+{% extends "midia/base_midia.html" %}
+
+{% block title %}Empresas | Euromídia{% endblock %}
+
+{% block content %}
+{% set filtros_clientes_visiveis = filtros_clientes_visiveis or {} %}
+
+<style>
+  /* =========================
+     CABEÇALHO (título + filtros)
+     ========================= */
+  .emp-header{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+
+  .emp-title{
+    flex: 1 1 320px;
+    min-width: min(320px, 100%);
+  }
+
+  .emp-filtros{
+    flex: 2 1 1040px;
+    min-width: min(1040px, 100%);
+    display:flex;
+    gap:8px;
+    align-items:flex-end;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+  }
+
+  .emp-filtros .campo{
+    width: min(760px, 100%);
+    flex: 1 1 560px;
+  }
+  .emp-filtros .campo-sm{
+    width: 150px;
+  }
+  .emp-filtros .campo-dd{
+    width: 205px;
+  }
+
+  .emp-actions{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    justify-content:flex-end;
+    margin:0;
+    flex-wrap:wrap;
+  }
+
+  /* =========================
+     COMBOBOX BUSCA EMPRESAS
+     ========================= */
+  .kb-combobox{
+    position:relative;
+    width:100%;
+  }
+
+  .kb-combobox-input{
+    width:100%;
+    padding-right:40px;
+  }
+
+  .kb-combobox-toggle{
+    position:absolute;
+    top:50%;
+    right:8px;
+    transform:translateY(-50%);
+    border:none;
+    background:transparent;
+    color:var(--muted);
+    cursor:pointer;
+    font-size:14px;
+    font-weight:1000;
+    line-height:1;
+    padding:4px 6px;
+  }
+
+  .kb-combobox-lista{
+    position:absolute;
+    top:calc(100% + 6px);
+    left:0;
+    right:0;
+    z-index:80;
+    max-height:320px;
+    overflow:auto;
+    border:1px solid rgba(15,23,42,.12);
+    border-radius:14px;
+    background:#fff;
+    box-shadow:0 18px 40px rgba(15,23,42,.16);
+    padding:6px;
+  }
+
+  .kb-combobox-opcao{
+    width:100%;
+    border:none;
+    background:transparent;
+    text-align:left;
+    cursor:pointer;
+    padding:10px 12px;
+    border-radius:12px;
+    display:block;
+  }
+
+  .kb-combobox-opcao:hover,
+  .kb-combobox-opcao.is-active{
+    background:rgba(0,40,132,.06);
+  }
+
+  .kb-combobox-opcao strong{
+    display:block;
+    font-size:12px;
+    font-weight:1000;
+    color:var(--text);
+    line-height:1.25;
+  }
+
+  .kb-combobox-opcao span{
+    display:block;
+    margin-top:4px;
+    font-size:11px;
+    font-weight:900;
+    color:var(--muted);
+    line-height:1.2;
+  }
+
+  .kb-combobox-vazio{
+    padding:10px 12px;
+    font-size:12px;
+    font-weight:900;
+    color:var(--muted);
+  }
+
+  /* =========================
+     DROPDOWN MULTI (details)
+     ========================= */
+  details.dd{
+    position: relative;
+    width: 100%;
+  }
+  .dd-summary{
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background:#fff;
+    font-weight: 900;
+    color: var(--text);
+    min-height: 38px;
+  }
+  details.dd[open] .dd-summary{
+    border-color: rgba(0,40,132,.30);
+    box-shadow: 0 8px 18px rgba(15,23,42,.08);
+  }
+  .dd-summary::-webkit-details-marker{ display:none; }
+
+  .dd-label{
+    font-size: 12px;
+    font-weight: 1000;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow:hidden;
+    text-overflow: ellipsis;
+  }
+  .dd-caret{
+    font-size: 12px;
+    font-weight: 1000;
+    color: rgba(15,23,42,.55);
+  }
+
+  .dd-panel{
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    width: 340px;
+    max-width: min(420px, 92vw);
+    background: #fff;
+    border: 1px solid rgba(15,23,42,.12);
+    border-radius: 14px;
+    box-shadow: 0 18px 40px rgba(15,23,42,.16);
+    padding: 8px;
+    z-index: 50;
+  }
+
+  .dd-search{
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid rgba(15,23,42,.12);
+    border-radius: 12px;
+    outline: none;
+    font-size: 12px;
+    font-weight: 900;
+    background: #fff;
+  }
+  .dd-hint{
+    margin: 7px 2px 6px 2px;
+    font-size: 11px;
+    font-weight: 900;
+    color: rgba(15,23,42,.60);
+  }
+
+  .dd-list{
+    max-height: 300px;
+    overflow: auto;
+    padding-right: 2px;
+  }
+
+  .dd-item{
+    display:flex;
+    align-items:center;
+    gap:9px;
+    padding: 8px 9px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 1000;
+    cursor: pointer;
+    user-select:none;
+  }
+  .dd-item:hover{
+    background: rgba(0,40,132,.06);
+  }
+  .dd-item input[type="checkbox"]{
+    width: 16px;
+    height: 16px;
+    accent-color: var(--euro-blue);
+    cursor: pointer;
+  }
+
+  .legacy-hidden{
+    position:absolute !important;
+    left:-99999px !important;
+    width:1px !important;
+    height:1px !important;
+    opacity:0 !important;
+    pointer-events:none !important;
+  }
+
+  /* =========================
+     TABELA
+     ========================= */
+  .overflow-x{
+    width:100%;
+    overflow-x:auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tbl{
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    background: #fff;
+    table-layout: fixed;
+  }
+
+  .tbl thead th{
+    text-align: left;
+    font-size: 11px;
+    letter-spacing: .1px;
+    color: var(--muted);
+    font-weight: 1000;
+    padding: 8px 8px;
+    border-bottom: 1px solid var(--border);
+    background: #F8FAFC;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    white-space: normal;
+    line-height: 1.15;
+    word-break: break-word;
+  }
+
+  .tbl tbody td{
+    padding: 8px 8px;
+    border-bottom: 1px solid rgba(15,23,42,.06);
+    vertical-align: middle;
+    font-size: 12px;
+    font-weight: 900;
+    color: var(--text);
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+  }
+
+  .tbl tbody tr{
+    cursor: pointer;
+  }
+  .tbl tbody tr:hover{
+    background: rgba(0,40,132,.04);
+  }
+  .tbl tbody tr:active{
+    background: rgba(255,179,0,.12);
+  }
+
+  .col-logo{ width: 66px; }
+  .col-cnpj{ width: 138px; }
+  .col-razao-social{ width: 210px; }
+  .col-mun{ width: 118px; }
+  .col-uf{ width: 46px; }
+  .col-setor{ width: 138px; }
+  .col-score{ width: 72px; text-align:center; }
+  .col-macro{ width: 138px; }
+  .col-grupo-empresa{ width: 126px; }
+  .col-score-perfil{ width: 80px; text-align:center; }
+  .col-classificacao-perfil{ width: 124px; }
+  .col-porte{ width: 100px; }
+
+  .tbl thead th.col-score,
+  .tbl tbody td.td-score,
+  .tbl thead th.col-score-perfil,
+  .tbl tbody td.td-score-perfil{
+    text-align:center;
+  }
+
+  .td-razao-social{
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+  }
+
+  .razao-social-wrap{
+    display:block;
+    white-space: normal;
+    line-height: 1.3;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    max-width: 100%;
+  }
+
+  /* =========================
+     LOGO
+     ========================= */
+  .logo-wrap{
+    width: 46px;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid rgba(15,23,42,.10);
+    background: #fff;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+    box-shadow: 0 1px 6px rgba(0,0,0,.05);
+  }
+  .logo-wrap img{
+    max-width: 92%;
+    max-height: 92%;
+    object-fit: contain;
+    display:block;
+  }
+  .logo-fallback{
+    width:100%;
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size: 10px;
+    font-weight: 1000;
+    color: rgba(0,40,132,.85);
+    background: rgba(0,40,132,.06);
+  }
+
+  .muted-2{
+    color: var(--muted);
+    font-weight: 800;
+    font-size: 10px;
+    line-height: 1.2;
+    margin-top: 3px;
+    word-break: break-word;
+  }
+
+  /* =========================
+     BADGES
+     ========================= */
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding: 5px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(0,40,132,.18);
+    background: rgba(0,40,132,.06);
+    color: var(--euro-blue);
+    font-weight: 1000;
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: normal;
+    text-align:center;
+    max-width: 100%;
+  }
+  .badge.yellow{
+    border-color: rgba(255,179,0,.35);
+    background: rgba(255,179,0,.18);
+    color: #5b3a00;
+  }
+  .badge.gray{
+    border-color: rgba(100,116,139,.25);
+    background: rgba(100,116,139,.10);
+    color: #334155;
+  }
+
+  .badge.green{
+    border-color: rgba(16,185,129,.30);
+    background: rgba(16,185,129,.14);
+    color: #065f46;
+  }
+  .badge.red{
+    border-color: rgba(239,68,68,.30);
+    background: rgba(239,68,68,.14);
+    color: #7f1d1d;
+  }
+  .badge.orange{
+    border-color: rgba(245,158,11,.35);
+    background: rgba(245,158,11,.16);
+    color: #7c2d12;
+  }
+  .badge.blue{
+    border-color: rgba(59,130,246,.30);
+    background: rgba(59,130,246,.14);
+    color: #1e3a8a;
+  }
+  .badge.purple{
+    border-color: rgba(139,92,246,.30);
+    background: rgba(139,92,246,.14);
+    color: #4c1d95;
+  }
+
+  /* =========================
+     BADGE CLUSTER / GRUPO EMPRESA
+     ========================= */
+  .badge-cluster{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding: 5px 8px;
+    border-radius: 999px;
+    font-weight: 1000;
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: normal;
+    text-align:center;
+    border: 1px solid rgba(148,163,184,.30);
+    background: rgba(248,250,252,.95);
+    color:#334155;
+    max-width: 100%;
+  }
+
+  .badge-cluster.nd{
+    border-color: rgba(148,163,184,.30);
+    background: rgba(248,250,252,.95);
+    color:#475569;
+  }
+
+  .badge-cluster.menor{
+    border-color: rgba(239,68,68,.28);
+    background: rgba(239,68,68,.12);
+    color:#991b1b;
+  }
+
+  .badge-cluster.medio{
+    border-color: rgba(59,130,246,.28);
+    background: rgba(59,130,246,.12);
+    color:#1d4ed8;
+  }
+
+  .badge-cluster.alto{
+    border-color: rgba(16,185,129,.30);
+    background: rgba(16,185,129,.14);
+    color:#065f46;
+  }
+
+  /* =========================
+     SCORE / CLASSIFICAÇÃO MACRO
+     ========================= */
+  .score-bolinha{
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    border-radius: 999px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    background:#fff;
+    font-weight: 1000;
+    font-size: 10px;
+    line-height: 1;
+    letter-spacing: -.1px;
+    color:#334155;
+    border: 2px solid rgba(148,163,184,.55);
+    box-shadow:
+      inset 0 0 0 2px rgba(255,255,255,.96),
+      0 2px 5px rgba(15,23,42,.05);
+    white-space: nowrap;
+  }
+
+  .score-bolinha.vazio,
+  .score-bolinha.nd{
+    color:#64748b;
+    border-color: rgba(148,163,184,.38);
+    background: rgba(248,250,252,.95);
+    box-shadow:
+      inset 0 0 0 2px rgba(255,255,255,.96),
+      0 2px 5px rgba(15,23,42,.04);
+  }
+
+  .score-bolinha.mfavor{
+    color:#166534;
+    border-color:#16a34a;
+    box-shadow:
+      inset 0 0 0 2px rgba(220,252,231,.98),
+      0 2px 5px rgba(15,23,42,.05);
+  }
+
+  .score-bolinha.favor{
+    color:#15803d;
+    border-color:#22c55e;
+    box-shadow:
+      inset 0 0 0 2px rgba(240,253,244,.98),
+      0 2px 5px rgba(15,23,42,.05);
+  }
+
+  .score-bolinha.neutro{
+    color:#475569;
+    border-color:#94a3b8;
+    box-shadow:
+      inset 0 0 0 2px rgba(248,250,252,.98),
+      0 2px 5px rgba(15,23,42,.05);
+  }
+
+  .score-bolinha.desfavor{
+    color:#b45309;
+    border-color:#f59e0b;
+    box-shadow:
+      inset 0 0 0 2px rgba(255,247,237,.98),
+      0 2px 5px rgba(15,23,42,.05);
+  }
+
+  .score-bolinha.mdesfavor{
+    color:#b91c1c;
+    border-color:#ef4444;
+    box-shadow:
+      inset 0 0 0 2px rgba(254,242,242,.98),
+      0 2px 5px rgba(15,23,42,.05);
+  }
+
+  /* =========================
+     SCORE / CLASSIFICAÇÃO PERFIL
+     ========================= */
+  .score-bolinha.perfil-muito-baixo{
+    color:#991b1b;
+    border-color:#dc2626;
+    box-shadow:
+      inset 0 0 0 2px rgba(254,226,226,.98),
+      0 2px 5px rgba(15,23,42,.05);
+  }
+
+  .score-bolinha.perfil-baixo{
+    color:#b45309;
+    border-color:#f59e0b;
+    box-shadow:
+      inset 0 0 0 2px rgba(255,247,237,.98),
+      0 2px 5px rgba(15,23,42,.05);
+  }
+
+  .score-bolinha.perfil-medio{
+    color:#92400e;
+    border-color:#fbbf24;
+    box-shadow:
+      inset 0 0 0 2px rgba(254,249,195,.98),
+      0 2px 5px rgba(15,23,42,.05);
+  }
+
+  .score-bolinha.perfil-alto{
+    color:#1d4ed8;
+    border-color:#3b82f6;
+    box-shadow:
+      inset 0 0 0 2px rgba(219,234,254,.98),
+      0 2px 5px rgba(15,23,42,.05);
+  }
+
+  .score-bolinha.perfil-muito-alto{
+    color:#166534;
+    border-color:#16a34a;
+    box-shadow:
+      inset 0 0 0 2px rgba(220,252,231,.98),
+      0 2px 5px rgba(15,23,42,.05);
+  }
+
+  .badge-airflow{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding: 5px 8px;
+    border-radius: 999px;
+    font-weight: 1000;
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: normal;
+    text-align:center;
+    border: 1px solid rgba(148,163,184,.30);
+    background: rgba(248,250,252,.95);
+    color:#334155;
+    max-width: 100%;
+  }
+
+  .badge-airflow.nd{
+    border-color: rgba(148,163,184,.30);
+    background: rgba(248,250,252,.95);
+    color:#475569;
+  }
+
+  .badge-airflow.mfavor{
+    border-color: rgba(22,163,74,.28);
+    background: rgba(22,163,74,.10);
+    color:#166534;
+  }
+
+  .badge-airflow.favor{
+    border-color: rgba(34,197,94,.28);
+    background: rgba(34,197,94,.10);
+    color:#15803d;
+  }
+
+  .badge-airflow.neutro{
+    border-color: rgba(148,163,184,.30);
+    background: rgba(148,163,184,.10);
+    color:#475569;
+  }
+
+  .badge-airflow.desfavor{
+    border-color: rgba(245,158,11,.30);
+    background: rgba(245,158,11,.12);
+    color:#b45309;
+  }
+
+  .badge-airflow.mdesfavor{
+    border-color: rgba(239,68,68,.30);
+    background: rgba(239,68,68,.12);
+    color:#b91c1c;
+  }
+
+  .badge-perfil{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding: 5px 8px;
+    border-radius: 999px;
+    font-weight: 1000;
+    font-size: 11px;
+    line-height: 1.1;
+    white-space: normal;
+    text-align:center;
+    border: 1px solid rgba(148,163,184,.30);
+    background: rgba(248,250,252,.95);
+    color:#334155;
+    max-width: 100%;
+  }
+
+  .badge-perfil.nd{
+    border-color: rgba(148,163,184,.30);
+    background: rgba(248,250,252,.95);
+    color:#475569;
+  }
+
+  .badge-perfil.muito-baixo{
+    border-color: rgba(220,38,38,.30);
+    background: rgba(220,38,38,.12);
+    color:#991b1b;
+  }
+
+  .badge-perfil.baixo{
+    border-color: rgba(245,158,11,.34);
+    background: rgba(245,158,11,.14);
+    color:#9a3412;
+  }
+
+  .badge-perfil.medio{
+    border-color: rgba(251,191,36,.38);
+    background: rgba(251,191,36,.18);
+    color:#854d0e;
+  }
+
+  .badge-perfil.alto{
+    border-color: rgba(59,130,246,.30);
+    background: rgba(59,130,246,.14);
+    color:#1d4ed8;
+  }
+
+  .badge-perfil.muito-alto{
+    border-color: rgba(22,163,74,.30);
+    background: rgba(22,163,74,.14);
+    color:#166534;
+  }
+
+  /* =========================
+     PAGINAÇÃO
+     ========================= */
+  .pager{
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: #fff;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .pager .left{
+    font-size: 12px;
+    font-weight: 1000;
+    color: var(--muted);
+  }
+
+  .pager .center{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex-wrap:wrap;
+  }
+
+  .pager .right{
+    font-size: 12px;
+    font-weight: 1000;
+    color: var(--muted);
+  }
+
+  @media (max-width: 1600px){
+    .emp-filtros{ justify-content:flex-start; }
+    .emp-filtros .campo{ flex: 1 1 500px; width: min(700px, 100%); }
+    .emp-filtros .campo-dd{ width: 200px; }
+  }
+
+  @media (max-width: 1280px){
+    .tbl{
+      min-width: 1040px;
+    }
+  }
+
+  @media (max-width: 1100px){
+    .emp-filtros{ justify-content:flex-start; }
+    .emp-filtros .campo{ flex: 1 1 100%; width: 100%; }
+    .emp-filtros .campo-dd{ width: min(300px, 100%); }
+  }
+
+  @media (max-width: 900px){
+    .hide-md{ display:none; }
+    .emp-filtros .campo-sm{ width: min(210px, 100%); }
+  }
+
+  @media (max-width: 720px){
+    .hide-sm{ display:none; }
+    .dd-panel{ width: min(420px, 92vw); }
+    .tbl{
+      min-width: 960px;
+    }
+  }
+</style>
+
+<div class="card" style="padding: 14px;">
+
+  <div class="emp-header">
+    <div class="emp-title">
+      <h1 class="page-title" style="margin:0;">Lista de Empresas</h1>
+      <div class="muted" style="font-weight:900;margin-top:6px;">
+        {% if paginacao and paginacao.total is defined %}
+          Total: {{ paginacao.total }}
+        {% endif %}
+      </div>
+    </div>
+
+    <form method="GET" action="{{ url_for('Paineis.clientes_lista') }}" class="emp-filtros">
+
+      <div class="campo">
+        <label for="q">Buscar</label>
+
+        <div id="comboBuscaClientes" class="kb-combobox">
+          <input
+            id="q"
+            name="q"
+            class="kb-input kb-combobox-input"
+            type="text"
+            value="{{ filtros.q }}"
+            placeholder="Digite IDEmpresa, Razão Social, CNPJ ou Classe..."
+            autocomplete="off"
+            spellcheck="false"
+          >
+
+          <button
+            id="btnToggleBuscaClientes"
+            class="kb-combobox-toggle"
+            type="button"
+            aria-label="Abrir sugestões de empresas"
+            tabindex="0"
+          >▾</button>
+
+          <div id="listaBuscaClientes" class="kb-combobox-lista" hidden></div>
+        </div>
+      </div>
+
+      <div class="campo-dd">
+        <label>Município</label>
+        <details class="dd" data-dd="municipio" data-single="1">
+          <summary class="dd-summary">
+            <span class="dd-label">
+              {% if filtros.municipio %}
+                {{ filtros.municipio }}
+              {% else %}
+                Município
+              {% endif %}
+            </span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="municipio" value="" data-dd-all="1"
+                  {% if not filtros.municipio %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for m in (municipios or []) %}
+                <label class="dd-item" data-dd-text="{{ m|lower }}">
+                  <input type="checkbox" name="municipio" value="{{ m }}"
+                    {% if filtros.municipio == m %}checked{% endif %}>
+                  <span>{{ m }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select id="municipio" name="municipio__single" class="legacy-hidden" disabled>
+          <option value="">Todos</option>
+          {% for m in municipios %}
+            <option value="{{ m }}" {% if filtros.municipio == m %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="campo-dd">
+        <label>Porte</label>
+        <details class="dd" data-dd="porte" data-single="1">
+          <summary class="dd-summary">
+            <span class="dd-label">
+              {% if filtros.porte %}
+                {{ filtros.porte }}
+              {% else %}
+                Porte
+              {% endif %}
+            </span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="porte" value="" data-dd-all="1"
+                  {% if not filtros.porte %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for p in (portes or []) %}
+                <label class="dd-item" data-dd-text="{{ p|lower }}">
+                  <input type="checkbox" name="porte" value="{{ p }}"
+                    {% if filtros.porte == p %}checked{% endif %}>
+                  <span>{{ p }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select id="porte" name="porte__single" class="legacy-hidden" disabled>
+          <option value="">Todos</option>
+          {% for p in portes %}
+            <option value="{{ p }}" {% if filtros.porte == p %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% if filtros_clientes_visiveis.get('classe') %}
+      <div class="campo-dd">
+        <label>Classe</label>
+        <details class="dd" data-dd="classe">
+          <summary class="dd-summary">
+            <span class="dd-label">Classe</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="classe" value="" data-dd-all="1"
+                  {% if (filtros.classe or [])|length == 0 %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for v in (classes or []) %}
+                <label class="dd-item" data-dd-text="{{ v|lower }}">
+                  <input type="checkbox" name="classe" value="{{ v }}"
+                    {% if v in (filtros.classe or []) %}checked{% endif %}>
+                  <span>{{ v }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select name="classe__single" class="legacy-hidden" disabled>
+          <option value="">Classe</option>
+          {% for v in (classes or []) %}
+            <option value="{{ v }}"
+              {% if (filtros.classe or [])|length and (v in (filtros.classe or [])) %}selected{% endif %}>
+              {{ v }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('setor') %}
+      <div class="campo-dd">
+        <label>Setor</label>
+        <details class="dd" data-dd="setor">
+          <summary class="dd-summary">
+            <span class="dd-label">Setor</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="setor" value="" data-dd-all="1"
+                  {% if (filtros.setor or [])|length == 0 %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for v in (setores or []) %}
+                <label class="dd-item" data-dd-text="{{ v|lower }}">
+                  <input type="checkbox" name="setor" value="{{ v }}"
+                    {% if v in (filtros.setor or []) %}checked{% endif %}>
+                  <span>{{ v }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select name="setor__single" class="legacy-hidden" disabled>
+          <option value="">Setor</option>
+          {% for v in (setores or []) %}
+            <option value="{{ v }}"
+              {% if (filtros.setor or [])|length and (v in (filtros.setor or [])) %}selected{% endif %}>
+              {{ v }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('classificacao_macro') %}
+      <div class="campo-dd">
+        <label>Classificação Score Macro</label>
+        <details class="dd" data-dd="classificacao_macro">
+          <summary class="dd-summary">
+            <span class="dd-label">Classificação Score Macro</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="classificacao_macro" value="" data-dd-all="1"
+                  {% if (filtros.classificacao_macro or [])|length == 0 %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for v in (classificacoes_macro or []) %}
+                <label class="dd-item" data-dd-text="{{ v|lower }}">
+                  <input type="checkbox" name="classificacao_macro" value="{{ v }}"
+                    {% if v in (filtros.classificacao_macro or []) %}checked{% endif %}>
+                  <span>{{ v }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select name="classificacao_macro__single" class="legacy-hidden" disabled>
+          <option value="">Classificação Score Macro</option>
+          {% for v in (classificacoes_macro or []) %}
+            <option value="{{ v }}"
+              {% if (filtros.classificacao_macro or [])|length and (v in (filtros.classificacao_macro or [])) %}selected{% endif %}>
+              {{ v }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('subclasse') %}
+      <div class="campo-dd">
+        <label>SubClasse</label>
+        <details class="dd" data-dd="subclasse">
+          <summary class="dd-summary">
+            <span class="dd-label">SubClasse</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="subclasse" value="" data-dd-all="1"
+                  {% if (filtros.subclasse or [])|length == 0 %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for v in (subclasses or []) %}
+                <label class="dd-item" data-dd-text="{{ v|lower }}">
+                  <input type="checkbox" name="subclasse" value="{{ v }}"
+                    {% if v in (filtros.subclasse or []) %}checked{% endif %}>
+                  <span>{{ v }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select name="subclasse__single" class="legacy-hidden" disabled>
+          <option value="">SubClasse</option>
+          {% for v in (subclasses or []) %}
+            <option value="{{ v }}"
+              {% if (filtros.subclasse or [])|length and (v in (filtros.subclasse or [])) %}selected{% endif %}>
+              {{ v }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('classe_valor') %}
+      <div class="campo-dd">
+        <label>Classe Valor</label>
+        <details class="dd" data-dd="classe_valor">
+          <summary class="dd-summary">
+            <span class="dd-label">Classe Valor</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="classe_valor" value="" data-dd-all="1"
+                  {% if (filtros.classe_valor or [])|length == 0 %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for v in (classes_valor or []) %}
+                <label class="dd-item" data-dd-text="{{ v|lower }}">
+                  <input type="checkbox" name="classe_valor" value="{{ v }}"
+                    {% if v in (filtros.classe_valor or []) %}checked{% endif %}>
+                  <span>{{ v }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select name="classe_valor__single" class="legacy-hidden" disabled>
+          <option value="">Classe Valor</option>
+          {% for v in (classes_valor or []) %}
+            <option value="{{ v }}"
+              {% if (filtros.classe_valor or [])|length and (v in (filtros.classe_valor or [])) %}selected{% endif %}>
+              {{ v }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('tipo_escala_operacional') %}
+      <div class="campo-dd">
+        <label>Escala Operacional</label>
+        <details class="dd" data-dd="tipo_escala_operacional">
+          <summary class="dd-summary">
+            <span class="dd-label">Escala Operacional</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="tipo_escala_operacional" value="" data-dd-all="1"
+                  {% if (filtros.tipo_escala_operacional or [])|length == 0 %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for v in (tipos_escala_operacional or []) %}
+                <label class="dd-item" data-dd-text="{{ v|lower }}">
+                  <input type="checkbox" name="tipo_escala_operacional" value="{{ v }}"
+                    {% if v in (filtros.tipo_escala_operacional or []) %}checked{% endif %}>
+                  <span>{{ v }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select name="tipo_escala_operacional__single" class="legacy-hidden" disabled>
+          <option value="">Escala Operacional</option>
+          {% for v in (tipos_escala_operacional or []) %}
+            <option value="{{ v }}"
+              {% if (filtros.tipo_escala_operacional or [])|length and (v in (filtros.tipo_escala_operacional or [])) %}selected{% endif %}>
+              {{ v }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('classe_estrutural') %}
+      <div class="campo-dd">
+        <label>Classe Estrutural</label>
+        <details class="dd" data-dd="classe_estrutural">
+          <summary class="dd-summary">
+            <span class="dd-label">Classe Estrutural</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="classe_estrutural" value="" data-dd-all="1"
+                  {% if (filtros.classe_estrutural or [])|length == 0 %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for v in (classes_estruturais or []) %}
+                <label class="dd-item" data-dd-text="{{ v|lower }}">
+                  <input type="checkbox" name="classe_estrutural" value="{{ v }}"
+                    {% if v in (filtros.classe_estrutural or []) %}checked{% endif %}>
+                  <span>{{ v }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select name="classe_estrutural__single" class="legacy-hidden" disabled>
+          <option value="">Classe Estrutural</option>
+          {% for v in (classes_estruturais or []) %}
+            <option value="{{ v }}"
+              {% if (filtros.classe_estrutural or [])|length and (v in (filtros.classe_estrutural or [])) %}selected{% endif %}>
+              {{ v }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('classe_geo') %}
+      <div class="campo-dd">
+        <label>Classe Geo</label>
+        <details class="dd" data-dd="classe_geo">
+          <summary class="dd-summary">
+            <span class="dd-label">Classe Geo</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="classe_geo" value="" data-dd-all="1"
+                  {% if (filtros.classe_geo or [])|length == 0 %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for v in (classes_geo or []) %}
+                <label class="dd-item" data-dd-text="{{ v|lower }}">
+                  <input type="checkbox" name="classe_geo" value="{{ v }}"
+                    {% if v in (filtros.classe_geo or []) %}checked{% endif %}>
+                  <span>{{ v }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select name="classe_geo__single" class="legacy-hidden" disabled>
+          <option value="">Classe Geo</option>
+          {% for v in (classes_geo or []) %}
+            <option value="{{ v }}"
+              {% if (filtros.classe_geo or [])|length and (v in (filtros.classe_geo or [])) %}selected{% endif %}>
+              {{ v }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('classe_frequencia') %}
+      <div class="campo-dd">
+        <label>Classe Frequência</label>
+        <details class="dd" data-dd="classe_frequencia">
+          <summary class="dd-summary">
+            <span class="dd-label">Classe Frequência</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="classe_frequencia" value="" data-dd-all="1"
+                  {% if (filtros.classe_frequencia or [])|length == 0 %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for v in (classes_frequencia or []) %}
+                <label class="dd-item" data-dd-text="{{ v|lower }}">
+                  <input type="checkbox" name="classe_frequencia" value="{{ v }}"
+                    {% if v in (filtros.classe_frequencia or []) %}checked{% endif %}>
+                  <span>{{ v }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select name="classe_frequencia__single" class="legacy-hidden" disabled>
+          <option value="">Classe Frequência</option>
+          {% for v in (classes_frequencia or []) %}
+            <option value="{{ v }}"
+              {% if (filtros.classe_frequencia or [])|length and (v in (filtros.classe_frequencia or [])) %}selected{% endif %}>
+              {{ v }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('classe_recencia') %}
+      <div class="campo-dd">
+        <label>Classe Recência</label>
+        <details class="dd" data-dd="classe_recencia">
+          <summary class="dd-summary">
+            <span class="dd-label">Classe Recência</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="classe_recencia" value="" data-dd-all="1"
+                  {% if (filtros.classe_recencia or [])|length == 0 %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for v in (classes_recencia or []) %}
+                <label class="dd-item" data-dd-text="{{ v|lower }}">
+                  <input type="checkbox" name="classe_recencia" value="{{ v }}"
+                    {% if v in (filtros.classe_recencia or []) %}checked{% endif %}>
+                  <span>{{ v }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select name="classe_recencia__single" class="legacy-hidden" disabled>
+          <option value="">Classe Recência</option>
+          {% for v in (classes_recencia or []) %}
+            <option value="{{ v }}"
+              {% if (filtros.classe_recencia or [])|length and (v in (filtros.classe_recencia or [])) %}selected{% endif %}>
+              {{ v }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('nome_perfil_publico') %}
+      <div class="campo-dd">
+        <label>Perfil (Público Alvo)</label>
+        <details class="dd" data-dd="nome_perfil_publico">
+          <summary class="dd-summary">
+            <span class="dd-label">Perfil</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="nome_perfil_publico" value="" data-dd-all="1"
+                  {% if (filtros.nome_perfil_publico or [])|length == 0 %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for v in (nomes_perfil_publico or []) %}
+                <label class="dd-item" data-dd-text="{{ v|lower }}">
+                  <input type="checkbox" name="nome_perfil_publico" value="{{ v }}"
+                    {% if v in (filtros.nome_perfil_publico or []) %}checked{% endif %}>
+                  <span>{{ v }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select name="nome_perfil_publico__single" class="legacy-hidden" disabled>
+          <option value="">Perfil</option>
+          {% for v in (nomes_perfil_publico or []) %}
+            <option value="{{ v }}"
+              {% if (filtros.nome_perfil_publico or [])|length and (v in (filtros.nome_perfil_publico or [])) %}selected{% endif %}>
+              {{ v }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% endif %}
+      {% if filtros_clientes_visiveis.get('tipo_uso_territorio') %}
+      <div class="campo-dd">
+        <label>Uso do Território</label>
+        <details class="dd" data-dd="tipo_uso_territorio">
+          <summary class="dd-summary">
+            <span class="dd-label">Uso Território</span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Digite para filtrar a lista</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="tipo_uso_territorio" value="" data-dd-all="1"
+                  {% if (filtros.tipo_uso_territorio or [])|length == 0 %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              {% for v in (tipos_uso_territorio or []) %}
+                <label class="dd-item" data-dd-text="{{ v|lower }}">
+                  <input type="checkbox" name="tipo_uso_territorio" value="{{ v }}"
+                    {% if v in (filtros.tipo_uso_territorio or []) %}checked{% endif %}>
+                  <span>{{ v }}</span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+        </details>
+
+        <select name="tipo_uso_territorio__single" class="legacy-hidden" disabled>
+          <option value="">Uso Território</option>
+          {% for v in (tipos_uso_territorio or []) %}
+            <option value="{{ v }}"
+              {% if (filtros.tipo_uso_territorio or [])|length and (v in (filtros.tipo_uso_territorio or [])) %}selected{% endif %}>
+              {{ v }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% endif %}
+      <div class="campo-dd">
+        <label>Cliente</label>
+        <details class="dd" data-dd="cliente" data-single="1">
+          <summary class="dd-summary">
+            <span class="dd-label">
+              {% if filtros.cliente == "1" %}
+                Cliente
+              {% elif filtros.cliente == "0" %}
+                Não cliente
+              {% else %}
+                Cliente
+              {% endif %}
+            </span>
+            <span class="dd-caret">▾</span>
+          </summary>
+          <div class="dd-panel">
+            <input class="dd-search" type="text" placeholder="Pesquisar..." data-dd-search>
+            <div class="dd-hint">Escolha uma opção</div>
+            <div class="dd-list">
+              <label class="dd-item">
+                <input type="checkbox" name="cliente" value="todos" data-dd-all="1"
+                  {% if filtros.cliente == "todos" or not filtros.cliente %}checked{% endif %}>
+                <span>(Todos)</span>
+              </label>
+
+              <label class="dd-item" data-dd-text="cliente">
+                <input type="checkbox" name="cliente" value="1"
+                  {% if filtros.cliente == "1" %}checked{% endif %}>
+                <span>Cliente</span>
+              </label>
+
+              <label class="dd-item" data-dd-text="não cliente nao cliente">
+                <input type="checkbox" name="cliente" value="0"
+                  {% if filtros.cliente == "0" %}checked{% endif %}>
+                <span>Não cliente</span>
+              </label>
+            </div>
+          </div>
+        </details>
+
+        <select name="cliente__single" class="legacy-hidden" disabled>
+          <option value="todos" {% if filtros.cliente == "todos" or not filtros.cliente %}selected{% endif %}>Todos</option>
+          <option value="1" {% if filtros.cliente == "1" %}selected{% endif %}>Cliente</option>
+          <option value="0" {% if filtros.cliente == "0" %}selected{% endif %}>Não cliente</option>
+        </select>
+      </div>
+
+      <div class="campo-sm">
+        <label for="per_page">Por página</label>
+        <select id="per_page" name="per_page">
+          {% set pp = filtros.per_page %}
+          <option value="10"  {% if pp == 10 %}selected{% endif %}>10</option>
+          <option value="20"  {% if pp == 20 %}selected{% endif %}>20</option>
+          <option value="25"  {% if pp == 25 %}selected{% endif %}>25</option>
+          <option value="50"  {% if pp == 50 %}selected{% endif %}>50</option>
+          <option value="100" {% if pp == 100 %}selected{% endif %}>100</option>
+          <option value="200" {% if pp == 200 %}selected{% endif %}>200</option>
+        </select>
+      </div>
+
+      <div class="emp-actions">
+        <button class="btn btn-primary" type="submit">Aplicar</button>
+        <a class="btn btn-secondary" style="text-decoration:none;"
+           href="{{ url_for('Paineis.clientes_lista', page=1, per_page=filtros.per_page) }}">
+          Limpar
+        </a>
+      </div>
+
+    </form>
+  </div>
+
+  <div style="height:12px;"></div>
+
+  <div class="overflow-x">
+    <table class="tbl" id="tblEmpresas">
+      <thead>
+        <tr>
+          <th class="col-cnpj">CNPJ</th>
+          <th class="col-razao-social">Razão Social</th>
+          <th class="col-mun hide-sm">Município</th>
+          <th class="col-uf">UF</th>
+          <th class="col-setor">Setor</th>
+          <th class="col-score">Score Setor</th>
+          <th class="col-macro">Classificação Setor</th>
+          <th class="col-grupo-empresa">Grupo Empresa</th>
+          <th class="col-score-perfil">Score Perfil</th>
+          <th class="col-classificacao-perfil">Classificação Perfil</th>
+          <th class="col-porte">Porte</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {% if itens and itens|length > 0 %}
+          {% for e in itens %}
+            {% set macro = (e.get('ClassificacaoMacro','') or '')|trim %}
+            {% set macro_l = macro|lower %}
+            {% set macro_css = 'nd' %}
+
+            {% if 'muito desfavor' in macro_l %}
+              {% set macro_css = 'mdesfavor' %}
+            {% elif 'muito favor' in macro_l %}
+              {% set macro_css = 'mfavor' %}
+            {% elif 'desfavor' in macro_l %}
+              {% set macro_css = 'desfavor' %}
+            {% elif 'favor' in macro_l %}
+              {% set macro_css = 'favor' %}
+            {% elif 'neutro' in macro_l %}
+              {% set macro_css = 'neutro' %}
+            {% endif %}
+
+            {% set grupo_empresa = (e.get('ClusterGrupoCliente','') or '')|trim %}
+            {% set grupo_empresa_l = grupo_empresa|lower %}
+            {% set grupo_empresa_css = 'nd' %}
+
+            {% if 'alto retorno' in grupo_empresa_l %}
+              {% set grupo_empresa_css = 'alto' %}
+            {% elif 'medio retorno' in grupo_empresa_l or 'médio retorno' in grupo_empresa_l %}
+              {% set grupo_empresa_css = 'medio' %}
+            {% elif 'menor retorno' in grupo_empresa_l %}
+              {% set grupo_empresa_css = 'menor' %}
+            {% endif %}
+
+            {% set classificacao_perfil = (e.get('ClassificacaoPerfilEmpresa','') or '')|trim %}
+            {% set classificacao_perfil_l = classificacao_perfil|lower %}
+            {% set classificacao_perfil_css = 'nd' %}
+
+            {% if 'muito alto' in classificacao_perfil_l %}
+              {% set classificacao_perfil_css = 'muito-alto' %}
+            {% elif classificacao_perfil_l == 'alto' or (' alto' in classificacao_perfil_l and 'muito alto' not in classificacao_perfil_l) %}
+              {% set classificacao_perfil_css = 'alto' %}
+            {% elif 'médio' in classificacao_perfil_l or 'medio' in classificacao_perfil_l %}
+              {% set classificacao_perfil_css = 'medio' %}
+            {% elif 'muito baixo' in classificacao_perfil_l %}
+              {% set classificacao_perfil_css = 'muito-baixo' %}
+            {% elif classificacao_perfil_l == 'baixo' or (' baixo' in classificacao_perfil_l and 'muito baixo' not in classificacao_perfil_l) %}
+              {% set classificacao_perfil_css = 'baixo' %}
+            {% endif %}
+
+            <tr data-href="{{ url_for('Paineis.cliente_detalhe', id_empresa=e['IDDimClientesMidia'], return_to=retorno_lista) }}">
+
+
+              <td>
+                <div style="font-weight:1000;">{{ e.get('CNPJ','') }}</div>
+              </td>
+
+              <td class="td-razao-social">
+                <div class="razao-social-wrap">{{ e.get('RazaoSocial','') }}</div>
+              </td>
+
+              <td class="hide-sm">{{ e.get('Municipio','') }}</td>
+              <td>{{ e.get('UF','') }}</td>
+
+              <td>
+                {% if e.get('Setor','') %}
+                  <span class="badge">{{ e.get('Setor','') }}</span>
+                {% else %}
+                  <span class="badge gray">Sem Setor</span>
+                {% endif %}
+              </td>
+
+              <td class="td-score">
+                {% set score_setor = e.get('ScoreSetor') %}
+                {% if score_setor is not none and (score_setor|string)|trim != '' %}
+                  <span
+                    class="score-bolinha {{ macro_css }}"
+                    title="Score do setor: {{ '%.2f'|format(score_setor|float) }}"
+                  >
+                    {{ (score_setor|float)|round(0)|int }}
+                  </span>
+                {% else %}
+                  <span class="score-bolinha vazio" title="Score do setor não disponível">--</span>
+                {% endif %}
+              </td>
+
+              <td>
+                {% if macro %}
+                  <span class="badge-airflow {{ macro_css }}">{{ macro }}</span>
+                {% else %}
+                  <span class="badge-airflow nd">Sem classificação</span>
+                {% endif %}
+              </td>
+
+              <td>
+                {% if grupo_empresa %}
+                  <span class="badge-cluster {{ grupo_empresa_css }}">{{ grupo_empresa }}</span>
+                {% else %}
+                  <span class="badge-cluster nd">Sem grupo</span>
+                {% endif %}
+              </td>
+
+              <td class="td-score-perfil">
+                {% set score_perfil = e.get('ScorePerfilEmpresa') %}
+                {% if score_perfil is not none and (score_perfil|string)|trim != '' %}
+                  <span
+                    class="score-bolinha perfil-{{ classificacao_perfil_css }}"
+                    title="Score do perfil: {{ '%.2f'|format(score_perfil|float) }}"
+                  >
+                    {{ (score_perfil|float)|round(0)|int }}
+                  </span>
+                {% else %}
+                  <span class="score-bolinha vazio" title="Score do perfil não disponível">--</span>
+                {% endif %}
+              </td>
+
+              <td>
+                {% if classificacao_perfil %}
+                  <span class="badge-perfil {{ classificacao_perfil_css }}">{{ classificacao_perfil }}</span>
+                {% else %}
+                  <span class="badge-perfil nd">Sem classificação</span>
+                {% endif %}
+              </td>
+
+              <td>
+                {% if e.get('Porte','') %}
+                  <span class="badge yellow">{{ e.get('Porte','') }}</span>
+                {% else %}
+                  <span class="badge yellow">Porte n/d</span>
+                {% endif %}
+              </td>
+
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="11" class="muted" style="padding:14px;font-weight:1000;">
+              Nenhuma empresa encontrada com os filtros atuais.
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pager">
+    <div class="left">
+      {% if paginacao %}
+        Mostrando {{ paginacao.inicio }} até {{ paginacao.fim }} de {{ paginacao.total }} empresas
+      {% else %}
+        &nbsp;
+      {% endif %}
+    </div>
+
+    <div class="center">
+      {% if paginacao %}
+        {% set p = paginacao.page %}
+        {% set tp = paginacao.total_pages %}
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:7px 9px;"
+           href="{{ url_for('Paineis.clientes_lista',
+                            page=1,
+                            per_page=filtros.per_page,
+                            q=filtros.q,
+                            municipio=filtros.municipio,
+                            porte=filtros.porte,
+                            classe=filtros.classe,
+                            setor=filtros.setor,
+                            classificacao_macro=filtros.classificacao_macro,
+                            subclasse=filtros.subclasse,
+                            classe_valor=filtros.classe_valor,
+                            tipo_escala_operacional=filtros.tipo_escala_operacional,
+                            classe_estrutural=filtros.classe_estrutural,
+                            classe_geo=filtros.classe_geo,
+                            classe_frequencia=filtros.classe_frequencia,
+                            classe_recencia=filtros.classe_recencia,
+                            nome_perfil_publico=filtros.nome_perfil_publico,
+                            tipo_uso_territorio=filtros.tipo_uso_territorio,
+                            cliente=filtros.cliente) }}">«</a>
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:7px 9px;"
+           href="{{ url_for('Paineis.clientes_lista',
+                            page=(p-1 if p>1 else 1),
+                            per_page=filtros.per_page,
+                            q=filtros.q,
+                            municipio=filtros.municipio,
+                            porte=filtros.porte,
+                            classe=filtros.classe,
+                            setor=filtros.setor,
+                            classificacao_macro=filtros.classificacao_macro,
+                            subclasse=filtros.subclasse,
+                            classe_valor=filtros.classe_valor,
+                            tipo_escala_operacional=filtros.tipo_escala_operacional,
+                            classe_estrutural=filtros.classe_estrutural,
+                            classe_geo=filtros.classe_geo,
+                            classe_frequencia=filtros.classe_frequencia,
+                            classe_recencia=filtros.classe_recencia,
+                            nome_perfil_publico=filtros.nome_perfil_publico,
+                            tipo_uso_territorio=filtros.tipo_uso_territorio,
+                            cliente=filtros.cliente) }}">‹</a>
+
+        <span style="font-size:12px;font-weight:1000;color:var(--text);padding:0 8px;">
+          {{ p }} / {{ tp }}
+        </span>
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:7px 9px;"
+           href="{{ url_for('Paineis.clientes_lista',
+                            page=(p+1 if p<tp else tp),
+                            per_page=filtros.per_page,
+                            q=filtros.q,
+                            municipio=filtros.municipio,
+                            porte=filtros.porte,
+                            classe=filtros.classe,
+                            setor=filtros.setor,
+                            classificacao_macro=filtros.classificacao_macro,
+                            subclasse=filtros.subclasse,
+                            classe_valor=filtros.classe_valor,
+                            tipo_escala_operacional=filtros.tipo_escala_operacional,
+                            classe_estrutural=filtros.classe_estrutural,
+                            classe_geo=filtros.classe_geo,
+                            classe_frequencia=filtros.classe_frequencia,
+                            classe_recencia=filtros.classe_recencia,
+                            nome_perfil_publico=filtros.nome_perfil_publico,
+                            tipo_uso_territorio=filtros.tipo_uso_territorio,
+                            cliente=filtros.cliente) }}">›</a>
+
+        <a class="btn btn-secondary" style="text-decoration:none;padding:7px 9px;"
+           href="{{ url_for('Paineis.clientes_lista',
+                            page=tp,
+                            per_page=filtros.per_page,
+                            q=filtros.q,
+                            municipio=filtros.municipio,
+                            porte=filtros.porte,
+                            classe=filtros.classe,
+                            setor=filtros.setor,
+                            classificacao_macro=filtros.classificacao_macro,
+                            subclasse=filtros.subclasse,
+                            classe_valor=filtros.classe_valor,
+                            tipo_escala_operacional=filtros.tipo_escala_operacional,
+                            classe_estrutural=filtros.classe_estrutural,
+                            classe_geo=filtros.classe_geo,
+                            classe_frequencia=filtros.classe_frequencia,
+                            classe_recencia=filtros.classe_recencia,
+                            nome_perfil_publico=filtros.nome_perfil_publico,
+                            tipo_uso_territorio=filtros.tipo_uso_territorio,
+                            cliente=filtros.cliente) }}">»</a>
+      {% else %}
+        &nbsp;
+      {% endif %}
+    </div>
+
+    <div class="right">
+      {% if filtros %}
+        {{ filtros.per_page }} por página
+      {% else %}
+        &nbsp;
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<script>
+  (function(){
+    const tbl = document.getElementById("tblEmpresas");
+    if (tbl){
+      tbl.querySelectorAll("tbody tr[data-href]").forEach(tr => {
+        tr.addEventListener("dblclick", function(){
+          const href = tr.getAttribute("data-href");
+          if (href) window.location.href = href;
+        });
+      });
+    }
+
+    document.addEventListener("click", function(ev){
+      document.querySelectorAll("details.dd[open]").forEach(dd => {
+        if (!dd.contains(ev.target)) dd.removeAttribute("open");
+      });
+    });
+
+    document.querySelectorAll("details.dd").forEach(dd => {
+      const inp = dd.querySelector("[data-dd-search]");
+      if (!inp) return;
+
+      inp.addEventListener("input", function(){
+        const termo = (inp.value || "").trim().toLowerCase();
+        const itens = dd.querySelectorAll(".dd-item[data-dd-text]");
+        itens.forEach(li => {
+          const txt = (li.getAttribute("data-dd-text") || "");
+          li.style.display = (!termo || txt.includes(termo)) ? "" : "none";
+        });
+      });
+    });
+
+    function textoPadraoDropdown(dataDd){
+      if (dataDd === "municipio") return "Município";
+      if (dataDd === "porte") return "Porte";
+      if (dataDd === "classe") return "Classe";
+      if (dataDd === "setor") return "Setor";
+      if (dataDd === "classificacao_macro") return "Classificação Score Macro";
+      if (dataDd === "subclasse") return "SubClasse";
+      if (dataDd === "classe_valor") return "Classe Valor";
+      if (dataDd === "tipo_escala_operacional") return "Escala Operacional";
+      if (dataDd === "classe_estrutural") return "Classe Estrutural";
+      if (dataDd === "classe_geo") return "Classe Geo";
+      if (dataDd === "classe_frequencia") return "Classe Frequência";
+      if (dataDd === "classe_recencia") return "Classe Recência";
+      if (dataDd === "nome_perfil_publico") return "Perfil";
+      if (dataDd === "tipo_uso_territorio") return "Uso Território";
+      if (dataDd === "cliente") return "Cliente";
+      return "Selecionar";
+    }
+
+
+    const filtrosDinamicosClientes = new Set([
+      "municipio",
+      "porte",
+      "classe",
+      "setor",
+      "classificacao_macro",
+      "subclasse",
+      "classe_valor",
+      "tipo_escala_operacional",
+      "classe_estrutural",
+      "classe_geo",
+      "classe_frequencia",
+      "classe_recencia",
+      "nome_perfil_publico",
+      "tipo_uso_territorio"
+    ]);
+
+    const urlFiltroClientesModelo = "{{ url_for('Paineis.clientes_filtro_opcoes', nome_filtro='__FILTRO__') }}";
+
+    function escaparHtml(valor){
+      return String(valor || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function escaparAtributo(valor){
+      return escaparHtml(valor).replaceAll("`", "&#096;");
+    }
+
+    function nomeDoFiltroDropdown(dd){
+      return dd.getAttribute("data-dd") || "";
+    }
+
+    function renderizarEstadoFiltro(dd, mensagem){
+      const lista = dd.querySelector(".dd-list");
+      if (!lista) return;
+      lista.innerHTML = `
+        <label class="dd-item">
+          <input type="checkbox" data-dd-all="1" checked disabled>
+          <span>${escaparHtml(mensagem)}</span>
+        </label>
+      `;
+    }
+
+    function renderizarOpcoesFiltro(dd, opcoes){
+      const nomeFiltro = nomeDoFiltroDropdown(dd);
+      const lista = dd.querySelector(".dd-list");
+      if (!lista) return;
+
+      const itens = Array.isArray(opcoes) ? opcoes : [];
+      const algumSelecionado = itens.some(x => !!x.selecionado);
+      const todosMarcado = !algumSelecionado;
+
+      let html = `
+        <label class="dd-item">
+          <input type="checkbox" name="${escaparAtributo(nomeFiltro)}" value="" data-dd-all="1" ${todosMarcado ? "checked" : ""}>
+          <span>(Todos)</span>
+        </label>
+      `;
+
+      if (!itens.length){
+        html += `<div class="kb-combobox-vazio">Nenhuma opção encontrada.</div>`;
+      } else {
+        html += itens.map(item => {
+          const valor = String(item.valor || "");
+          const rotulo = String(item.rotulo || valor);
+          const selecionado = item.selecionado ? "checked" : "";
+          return `
+            <label class="dd-item" data-dd-text="${escaparAtributo(rotulo.toLowerCase())}">
+              <input type="checkbox" name="${escaparAtributo(nomeFiltro)}" value="${escaparAtributo(valor)}" ${selecionado}>
+              <span>${escaparHtml(rotulo)}</span>
+            </label>
+          `;
+        }).join("");
+      }
+
+      lista.innerHTML = html;
+      dd.dataset.filtroCarregado = "1";
+      atualizarLabelDropdown(dd);
+    }
+
+    async function carregarOpcoesFiltro(dd, forcar = false){
+      const nomeFiltro = nomeDoFiltroDropdown(dd);
+      if (!filtrosDinamicosClientes.has(nomeFiltro)) return;
+
+      const inputBuscaFiltro = dd.querySelector("[data-dd-search]");
+      const termo = inputBuscaFiltro ? (inputBuscaFiltro.value || "").trim() : "";
+      const termoAnterior = dd.dataset.termoCarregado || "";
+
+      if (!forcar && dd.dataset.filtroCarregado === "1" && termo === termoAnterior){
+        return;
+      }
+
+      dd.dataset.termoCarregado = termo;
+
+      const parametrosFormulario = [];
+      const form = dd.closest("form");
+      if (form){
+        const dados = new FormData(form);
+        for (const [chave, valor] of dados.entries()){
+          if (String(chave || "").endsWith("__single")) continue;
+          if (chave === "page") continue;
+          parametrosFormulario.push([chave, valor]);
+        }
+      }
+
+      renderizarEstadoFiltro(dd, "Carregando opções...");
+
+      try{
+        const caminho = urlFiltroClientesModelo.replace("__FILTRO__", encodeURIComponent(nomeFiltro));
+        const url = new URL(caminho, window.location.origin);
+
+        parametrosFormulario.forEach(([chave, valor]) => {
+          url.searchParams.append(chave, valor);
+        });
+
+        if (termo){
+          url.searchParams.set("termo", termo);
+        }
+
+        const resp = await fetch(url.toString(), {
+          method: "GET",
+          headers: {"X-Requested-With": "XMLHttpRequest"}
+        });
+
+        if (!resp.ok){
+          renderizarEstadoFiltro(dd, "Erro ao carregar opções");
+          return;
+        }
+
+        const payload = await resp.json();
+        renderizarOpcoesFiltro(dd, payload.opcoes || []);
+      }catch(err){
+        renderizarEstadoFiltro(dd, "Erro ao carregar opções");
+      }
+    }
+
+    document.querySelectorAll("details.dd").forEach(dd => {
+      dd.addEventListener("toggle", function(){
+        if (dd.open){
+          carregarOpcoesFiltro(dd, false);
+        }
+      });
+
+      const inputBuscaFiltro = dd.querySelector("[data-dd-search]");
+      if (inputBuscaFiltro && filtrosDinamicosClientes.has(nomeDoFiltroDropdown(dd))){
+        let timerFiltro = null;
+        inputBuscaFiltro.addEventListener("input", function(){
+          clearTimeout(timerFiltro);
+          timerFiltro = window.setTimeout(function(){
+            carregarOpcoesFiltro(dd, true);
+          }, 220);
+        });
+      }
+    });
+
+    function atualizarLabelDropdown(dd){
+      const label = dd.querySelector(".dd-label");
+      if (!label) return;
+
+      const dataDd = dd.getAttribute("data-dd") || "";
+      const todos = dd.querySelector('input[type="checkbox"][data-dd-all="1"]');
+      const itensMarcados = Array.from(
+        dd.querySelectorAll('input[type="checkbox"]:checked:not([data-dd-all="1"])')
+      );
+
+      if (todos && todos.checked){
+        label.textContent = textoPadraoDropdown(dataDd);
+        return;
+      }
+
+      if (itensMarcados.length === 0){
+        label.textContent = textoPadraoDropdown(dataDd);
+        return;
+      }
+
+      if (itensMarcados.length === 1){
+        const span = itensMarcados[0].closest(".dd-item")?.querySelector("span");
+        label.textContent = span ? span.textContent.trim() : textoPadraoDropdown(dataDd);
+        return;
+      }
+
+      label.textContent = itensMarcados.length + " selecionados";
+    }
+
+    document.querySelectorAll("details.dd").forEach(dd => {
+      dd.addEventListener("change", function(ev){
+        const el = ev.target;
+        if (!el || el.type !== "checkbox") return;
+
+        const nome = el.getAttribute("name");
+        if (!nome) return;
+
+        const isSingle = dd.getAttribute("data-single") === "1";
+        const todos = dd.querySelector('input[type="checkbox"][name="'+nome+'"][data-dd-all="1"]');
+        const itens = Array.from(dd.querySelectorAll('input[type="checkbox"][name="'+nome+'"]:not([data-dd-all="1"])'));
+
+        if (el === todos){
+          if (todos && todos.checked){
+            itens.forEach(x => x.checked = false);
+          } else {
+            if (todos && !itens.some(x => x.checked)) todos.checked = true;
+          }
+          atualizarLabelDropdown(dd);
+          return;
+        }
+
+        if (el.checked){
+          if (todos) todos.checked = false;
+
+          if (isSingle){
+            itens.forEach(x => {
+              if (x !== el) x.checked = false;
+            });
+          }
+        } else {
+          if (todos && !itens.some(x => x.checked)) todos.checked = true;
+        }
+
+        atualizarLabelDropdown(dd);
+      });
+
+      atualizarLabelDropdown(dd);
+    });
+
+    const formBusca = document.querySelector(".emp-filtros");
+    const comboBusca = document.getElementById("comboBuscaClientes");
+    const inputBusca = document.getElementById("q");
+    const btnToggleBusca = document.getElementById("btnToggleBuscaClientes");
+    const listaBusca = document.getElementById("listaBuscaClientes");
+
+    if (formBusca && comboBusca && inputBusca && btnToggleBusca && listaBusca){
+      let debounceTimer = null;
+      let abortController = null;
+      let sugestoes = [];
+      let indiceAtivo = -1;
+
+      function escaparHtml(valor){
+        return String(valor || "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function fecharSugestoes(){
+        listaBusca.hidden = true;
+        listaBusca.innerHTML = "";
+        sugestoes = [];
+        indiceAtivo = -1;
+        comboBusca.classList.remove("is-open");
+      }
+
+      function abrirSugestoes(){
+        listaBusca.hidden = false;
+        comboBusca.classList.add("is-open");
+      }
+
+      function renderizarSugestoes(items){
+        sugestoes = Array.isArray(items) ? items : [];
+        indiceAtivo = -1;
+
+        if (!sugestoes.length){
+          listaBusca.innerHTML = '<div class="kb-combobox-vazio">Nenhuma empresa encontrada.</div>';
+          abrirSugestoes();
+          return;
+        }
+
+        listaBusca.innerHTML = sugestoes.map((item, idx) => {
+          const classe = item.classe && String(item.classe).trim()
+            ? String(item.classe).trim()
+            : "Sem classe";
+
+          return `
+            <button
+              type="button"
+              class="kb-combobox-opcao"
+              data-idx="${idx}"
+              data-razao-social="${escaparHtml(item.razao_social)}"
+              data-id-empresa="${escaparHtml(item.id_empresa)}"
+            >
+              <strong>${escaparHtml(item.id_empresa)} • ${escaparHtml(item.razao_social)}</strong>
+              <span>Classe: ${escaparHtml(classe)}</span>
+            </button>
+          `;
+        }).join("");
+
+        abrirSugestoes();
+      }
+
+      async function buscarSugestoes(forcar = false){
+        const termo = (inputBusca.value || "").trim();
+
+        if (!forcar && termo.length < 2){
+          fecharSugestoes();
+          return;
+        }
+
+        if (abortController){
+          abortController.abort();
+        }
+
+        abortController = new AbortController();
+
+        try{
+          const url = new URL("{{ url_for('Paineis.clientes_autocomplete') }}", window.location.origin);
+          url.searchParams.set("q", termo);
+
+          const resp = await fetch(url.toString(), {
+            method: "GET",
+            headers: {
+              "X-Requested-With": "XMLHttpRequest"
+            },
+            signal: abortController.signal
+          });
+
+          if (!resp.ok){
+            fecharSugestoes();
+            return;
+          }
+
+          const payload = await resp.json();
+          renderizarSugestoes(payload.items || []);
+        }catch(err){
+          if (err && err.name === "AbortError"){
+            return;
+          }
+          fecharSugestoes();
+        }
+      }
+
+      function aplicarSugestaoPorIndice(idx){
+        const item = sugestoes[idx];
+        if (!item){
+          return;
+        }
+
+        inputBusca.value = item.razao_social || "";
+        fecharSugestoes();
+        formBusca.submit();
+      }
+
+      function atualizarItemAtivo(){
+        const botoes = Array.from(listaBusca.querySelectorAll(".kb-combobox-opcao"));
+        botoes.forEach((btn, idx) => {
+          btn.classList.toggle("is-active", idx === indiceAtivo);
+        });
+      }
+
+      inputBusca.addEventListener("input", function(){
+        clearTimeout(debounceTimer);
+        debounceTimer = window.setTimeout(function(){
+          buscarSugestoes(false);
+        }, 180);
+      });
+
+      inputBusca.addEventListener("focus", function(){
+        const termo = (inputBusca.value || "").trim();
+        if (termo.length >= 2){
+          buscarSugestoes(false);
+        }
+      });
+
+      inputBusca.addEventListener("keydown", function(ev){
+        const botoes = Array.from(listaBusca.querySelectorAll(".kb-combobox-opcao"));
+
+        if (ev.key === "ArrowDown"){
+          if (listaBusca.hidden){
+            ev.preventDefault();
+            buscarSugestoes(true);
+            return;
+          }
+
+          if (!botoes.length){
+            return;
+          }
+
+          ev.preventDefault();
+          indiceAtivo = (indiceAtivo + 1) % botoes.length;
+          atualizarItemAtivo();
+          return;
+        }
+
+        if (ev.key === "ArrowUp"){
+          if (!botoes.length){
+            return;
+          }
+
+          ev.preventDefault();
+          indiceAtivo = (indiceAtivo <= 0) ? (botoes.length - 1) : (indiceAtivo - 1);
+          atualizarItemAtivo();
+          return;
+        }
+
+        if (ev.key === "Enter"){
+          if (!listaBusca.hidden && indiceAtivo >= 0){
+            ev.preventDefault();
+            aplicarSugestaoPorIndice(indiceAtivo);
+          }
+          return;
+        }
+
+        if (ev.key === "Escape"){
+          fecharSugestoes();
+        }
+      });
+
+      btnToggleBusca.addEventListener("click", function(){
+        if (!listaBusca.hidden){
+          fecharSugestoes();
+          return;
+        }
+        buscarSugestoes(true);
+      });
+
+      listaBusca.addEventListener("click", function(ev){
+        const botao = ev.target.closest(".kb-combobox-opcao");
+        if (!botao){
+          return;
+        }
+
+        const idx = Number(botao.getAttribute("data-idx"));
+        if (Number.isNaN(idx)){
+          return;
+        }
+
+        aplicarSugestaoPorIndice(idx);
+      });
+
+      document.addEventListener("click", function(ev){
+        if (!comboBusca.contains(ev.target)){
+          fecharSugestoes();
+        }
+      });
+    }
+  })();
+</script>
+
+{% endblock %}

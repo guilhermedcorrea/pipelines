@@ -1,4 +1,4 @@
-{% extends "euromidia/base_euromidia.html" %}
+{% extends "midia/base_midia.html" %}
 
 {% block title %}{{ painel.CodFace }} | Editar Painel{% endblock %}
 
@@ -453,7 +453,7 @@
   </div>
 
   <div class="painel-identificacao">
-    <div><small>ID do painel</small><strong>{{ painel.IDDimPaineisEuromidia }}</strong></div>
+    <div><small>ID do painel</small><strong>{{ painel.IDDimPaineisMidia }}</strong></div>
     <div><small>ID da face</small><strong>{{ painel.IDDimFacesPaineis }}</strong></div>
     <div><small>CodPonto</small><strong>{{ painel.CodPonto }}</strong></div>
     <div><small>CodFace</small><strong>{{ painel.CodFace }}</strong></div>
@@ -603,7 +603,7 @@
             {% if imagem_principal %}
               <label class="painel-check" style="margin-top:10px;"><input type="checkbox" name="remover_imagem_principal" value="1"> Remover imagem principal atual</label>
             {% endif %}
-            <div class="painel-ajuda">Diretório: /home/euromidia/projetos/pipelines/FlaskApp/app/static/imagens/painéis</div>
+            <div class="painel-ajuda">Diretório: /home/midia/projetos/pipelines/FlaskApp/app/static/imagens/painéis</div>
           </div>
 
           <div class="painel-imagem-card">

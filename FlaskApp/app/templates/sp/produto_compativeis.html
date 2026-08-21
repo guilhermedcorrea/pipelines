@@ -1,0 +1,180 @@
+{% extends "midia/base_midia.html" %}
+{% block title %}{{ prod.NomeProduto }} – Produtos Compatíveis{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-2">
+  <h2 class="mb-2">{{ prod.NomeProduto }} – Produtos Compatíveis</h2>
+  <p><strong>Referência:</strong> {{ prod.ReferenciaExterna }}</p>
+  <p><strong>Família:</strong> {{ prod.FamiliaID }} – {{ prod.NomeFamilia or '-' }}</p>
+  <p><strong>PmvID:</strong> {{ prod.PmvID }}</p>
+
+  <form method="get"
+        action="{{ url_for('euro.produto_compativeis', produto_id=prod.IDItem) }}"
+        class="mb-2">
+    <div class="input-group">
+      <input type="text" name="search" class="form-control"
+             placeholder="Pesquisar por ID, Referência ou Nome"
+             value="{{ search }}">
+      <button type="submit" class="btn btn-primary">Pesquisar</button>
+    </div>
+  </form>
+
+  <div class="row g-0">
+    <div class="col-md-2 pe-3">
+      <h5 class="mb-2">Filtros</h5>
+      <a href="{{ url_for('euro.produto_compativeis',
+                          produto_id=prod.IDItem,
+                          search=search) }}"
+         class="btn btn-secondary mb-2">Limpar Filtros</a>
+
+      {% if filter_groups %}
+        {% for carac, valores in filter_groups.items() %}
+        <div class="mb-2">
+          <strong>{{ carac }}</strong>
+          <ul class="list-unstyled">
+            {% for val in valores %}
+            <li>
+              <a href="{{ url_for('euro.produto_compativeis',
+                                  produto_id=prod.IDItem,
+                                  search=search,
+                                  fcar=carac,
+                                  fval=val) }}">
+                {{ val }}
+              </a>
+              {% if fcar == carac and fval == val %}
+                <span class="badge bg-warning text-dark ms-1">Ativo</span>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endfor %}
+      {% else %}
+        <p>Nenhum filtro configurado.</p>
+      {% endif %}
+    </div>
+
+    <div class="col-md-10">
+      <div class="table-responsive">
+        <table class="table table-striped table-hover align-middle">
+          <thead class="table-success">
+            <tr>
+              <th>ID Item</th>
+              <th>Referência Externa</th>
+              <th>Foto</th>
+              <th>Nome Produto</th>
+              <th>Categoria</th>
+              <th>Departamento</th>
+              <th>Família</th>
+              <th>Ativo</th>
+              <th>Ver Estoques</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if produtos %}
+              {% for p in produtos %}
+              <tr>
+                <td>{{ p.IDItem }}</td>
+                <td>{{ p.ReferenciaExterna }}</td>
+                <td style="width:60px;">
+                  {% if image_urls[p.IDItem] %}
+                    <img
+                      src="{{ image_urls[p.IDItem] }}"
+                      alt="Foto"
+                      width="40" height="40"
+                      loading="lazy"
+                      onerror="this.onerror=null;
+                        this.src='https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif';"
+                    >
+                  {% else %}
+                    <img
+                      src="https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif"
+                      alt="Sem imagem"
+                      width="40" height="40"
+                    >
+                  {% endif %}
+                </td>
+                <td>
+                  <a href="{{ url_for('euro.item_detail', item_id=p.IDItem, pmv_id=pmv_id) }}">
+                    {{ p.NomeProduto }}
+                  </a>
+                </td>
+                <td>{{ p.NomeCategoria or '-' }}</td>
+                <td>{{ p.NomeDepartamento or '-' }}</td>
+                <td>{{ p.NomeFamilia or '-' }}</td>
+                <td>{{ 'Sim' if p.BitAtivo else 'Não' }}</td>
+                <td>
+                  <a href="{{ url_for('euro.ver_estoques', item_id=p.IDItem) }}"
+                     class="btn btn-custom">
+                    Ver Estoques
+                  </a>
+                </td>
+              </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="9" class="text-center">
+                  Nenhum produto compatível encontrado.
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      <nav aria-label="Page navigation">
+        <ul class="pagination justify-content-center mt-2">
+          {% if page > 1 %}
+          <li class="page-item">
+            <a class="page-link"
+               href="{{ url_for('euro.produto_compativeis',
+                                produto_id=prod.IDItem,
+                                page=page-1,
+                                search=search,
+                                fcar=fcar,
+                                fval=fval) }}">
+              Anterior
+            </a>
+          </li>
+          {% else %}
+          <li class="page-item disabled"><span class="page-link">Anterior</span></li>
+          {% endif %}
+
+          {% for pnum in range(1, total_pages + 1) %}
+          <li class="page-item {% if pnum == page %}active{% endif %}">
+            <a class="page-link"
+               href="{{ url_for('euro.produto_compativeis',
+                                produto_id=prod.IDItem,
+                                page=pnum,
+                                search=search,
+                                fcar=fcar,
+                                fval=fval) }}">
+              {{ pnum }}
+            </a>
+          </li>
+          {% endfor %}
+
+          {% if page < total_pages %}
+          <li class="page-item">
+            <a class="page-link"
+               href="{{ url_for('euro.produto_compativeis',
+                                produto_id=prod.IDItem,
+                                page=page+1,
+                                search=search,
+                                fcar=fcar,
+                                fval=fval) }}">
+              Próxima
+            </a>
+          </li>
+          {% else %}
+          <li class="page-item disabled"><span class="page-link">Próxima</span></li>
+          {% endif %}
+        </ul>
+      </nav>
+    </div>
+  </div>
+
+  <a href="{{ url_for('euro.familia_por_id', familia_id=prod.FamiliaID) }}"
+     class="btn btn-secondary mt-3">Voltar</a>
+</div>
+{% endblock %}

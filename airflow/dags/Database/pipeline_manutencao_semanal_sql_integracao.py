@@ -23,7 +23,7 @@ BANCOS_ORDEM_PROCESSAMENTO = [
     "Integracao",
     "Kanban",
     "DataMining",
-    "Shempo",
+    "Sp",
     "DataMart",
 ]
 

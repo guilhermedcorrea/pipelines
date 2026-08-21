@@ -33,8 +33,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
 
     AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
-    # Hostname estável para as TaskInstances e servidor interno de logs do Airflow.
-    # Sem isso, o Airflow pode tentar ler logs em http://:8793/log/... quando o hostname fica vazio/inválido.
+
     AIRFLOW__CORE__HOSTNAME_CALLABLE: airflow.utils.net.getfqdn
     AIRFLOW__LOGGING__WORKER_LOG_SERVER_PORT: "8793"
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
@@ -46,8 +45,7 @@ x-airflow-common: &airflow-common
 
     TZ: America/Sao_Paulo
 
-    # Backups SQL Server - a mesma pasta precisa estar montada no Airflow
-    # e existir no host/container onde o SQL Server grava os .bak/.trn.
+ 
     BACKUP_SQLSERVER_MANUAL_DIR: /var/opt/mssql/backups/manual
     BACKUP_FILESYSTEM_BACKEND: airflow
     BACKUP_MOVER_INVALIDOS: "1"
@@ -56,30 +54,24 @@ x-airflow-common: &airflow-common
     CAMINHO_STATIC_FLASK: /opt/airflow/FlaskApp/app/static
     CAMINHO_BASE_FLASK_APP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp
 
-    # DAG de mensageria chama o Nginx interno, e o Nginx distribui para as 2 instâncias Flask.
+   
     FLASK_MENSAGERIA_NOTIFICAR_URL: http://nginx-flask/admin/api/mensagens/notificar
     MENSAGERIA_SOCKET_TOKEN: ${MENSAGERIA_SOCKET_TOKEN}
 
-    # Rclone / SharePoint - BaseDados
-    # Remote confirmado no servidor: sharepoint_basedados:
-    # Pasta correta no SharePoint/rclone: 01- Controle de Contratos
-    # Arquivo correto no SharePoint/rclone: Copia-Controle de Contratos Euromidia.xlsm
-    # Fluxo correto: o DAG baixa o arquivo atualizado do SharePoint antes de ler no pandas.
+
     RCLONE_CONFIG: /opt/airflow/config/rclone/rclone.conf
     RCLONE_REMOTE_CONTROLE_CONTRATOS: "sharepoint_basedados"
     RCLONE_PASTA_CONTROLE_CONTRATOS: "01- Controle de Contratos"
-    NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS: "Copia-Controle de Contratos Euromidia.xlsm"
-    RCLONE_ARQUIVO_ORIGEM_CONTROLE_CONTRATOS: "sharepoint_basedados:01- Controle de Contratos/Copia-Controle de Contratos Euromidia.xlsm"
+    NOME_ARQUIVO_EXCEL_CONTROLE_CONTRATOS: "Copia-Controle de Contratos midia.xlsm"
+    RCLONE_ARQUIVO_ORIGEM_CONTROLE_CONTRATOS: "sharepoint_basedados:01- Controle de Contratos/Copia-Controle de Contratos Midia.xlsm"
     SHAREPOINT_BASEDADOS_DIR: "sharepoint_basedados:01- Controle de Contratos"
-    SHAREPOINT_BASEDADOS_ARQUIVO_DISPONIBILIDADE: "sharepoint_basedados:01- Controle de Contratos/Copia-Controle de Contratos Euromidia.xlsm"
-    CAMINHO_LOCAL_SHAREPOINT_BASEDADOS: "/home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos"
-    PASTA_BASE_DADOS_CONTRATOS_CONTAINER: "/home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos"
-    CAMINHO_CONTROLE_CONTRATOS_XLSM: "/home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos/Copia-Controle de Contratos Euromidia.xlsm"
+    SHAREPOINT_BASEDADOS_ARQUIVO_DISPONIBILIDADE: "sharepoint_basedados:01- Controle de Contratos/Copia-Controle de Contratos Midia.xlsm"
+    CAMINHO_LOCAL_SHAREPOINT_BASEDADOS: "/home/midia/projetos/pipelines/airflow/01- Controle de Contratos"
+    PASTA_BASE_DADOS_CONTRATOS_CONTAINER: "/home/midia/projetos/pipelines/airflow/01- Controle de Contratos"
+    CAMINHO_CONTROLE_CONTRATOS_XLSM: "/home/midia/projetos/pipelines/airflow/01- Controle de Contratos/Copia-Controle de Contratos Midia.xlsm"
 
-    # PDFs de contratos D4Sign.
-    # O DAG grava/atualiza a tabela FatoArquivosContratosEuromidia e salva o PDF físico nesta pasta.
-    # Esta pasta precisa ser o MESMO bind mount usado/servido pelo Flask para o botão de download encontrar o arquivo.
-    D4SIGN_PDF_LOCAL_PASTA_CONTRATO: /home/euromidia/projetos/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato
+
+    D4SIGN_PDF_LOCAL_PASTA_CONTRATO: /home/midia/projetos/pipelines/FlaskApp/Contratos/midia/Anexos/Contrato
     D4SIGN_GARANTIR_PDF_LOCAL_DAGS_HABILITADO: "1"
     D4SIGN_GARANTIR_PDF_LOCAL_LIMITE_POR_EXECUCAO: "5000"
     D4SIGN_GARANTIR_PDF_LOCAL_VERIFICAR_FISICO_TODOS: "1"
@@ -88,35 +80,26 @@ x-airflow-common: &airflow-common
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/queries:/opt/airflow/queries
     - ./airflow/Dados:/opt/airflow/Dados:rw
-    - /home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos:/home/euromidia/projetos/pipelines/airflow/01- Controle de Contratos:rw
-    # IMPORTANTE:
-    # Não monte uma pasta específica por cima de /opt/airflow/Dados/SharePoint/...
-    # O DAG grava o arquivo atualizado do SharePoint dentro do volume raiz /opt/airflow/Dados,
-    # que no host aparece em /root/PythonJobs/pipelines/airflow/Dados.
+    - /home/midia/projetos/pipelines/airflow/01- Controle de Contratos:/home/midia/projetos/pipelines/airflow/01- Controle de Contratos:rw
+
     - ./airflow/Artefatos:/opt/airflow/Artefatos
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/config:/opt/airflow/config
-    # Backups SQL Server: monta no Airflow o mesmo caminho usado pelo SQL Server.
+   
     - /var/opt/mssql/backups/manual:/var/opt/mssql/backups/manual:rw
-    # IMPORTANTE:
-    # O rclone.conf deve ficar em ./airflow/config/rclone/rclone.conf no host.
-    # Não use bind mount somente leitura para esse arquivo, porque o rclone precisa
-    # criar arquivo temporário e atualizar token/config quando necessário.
+
     - ./airflow/simple_auth:/opt/airflow/simple_auth
     - ./airflow/src:/opt/airflow/src
     - ./airflow/sharepoint_teste:/opt/airflow/sharepoint_teste
     - ./FlaskApp/app/static:/opt/airflow/FlaskApp/app/static:ro
-    # IMPORTANTE:
-    # Não monte /opt/airflow/Dados/Euromidia/Comercial/CargasSQL em outro caminho.
-    # Isso desviaria os CSVs para fora de /root/PythonJobs/pipelines/airflow/Dados.
+  
     - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin:rw
     - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis:rw
-    # PDFs/anexos de contratos D4Sign.
-    # Montagem no caminho real do servidor para o Airflow gravar exatamente onde você verifica no host.
-    - /home/euromidia/projetos/pipelines/FlaskApp/Contratos:/home/euromidia/projetos/pipelines/FlaskApp/Contratos:rw
-    # Montagem também no caminho legado usado por partes antigas do projeto, sem remover compatibilidade.
-    - /home/euromidia/projetos/pipelines/FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos:rw
+  
+    - /home/midia/projetos/pipelines/FlaskApp/Contratos:/home/midia/projetos/pipelines/FlaskApp/Contratos:rw
+
+    - /home/midia/projetos/pipelines/FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos:rw
 
   user: "${AIRFLOW_UID}:0"
 
@@ -154,8 +137,8 @@ x-flask-common: &flask-common
     CHECKING_PASTA_TEMP: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin/_temp
     PASTA_RELATORIOS_OCUPACAO: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios/ocupacao
     PASTA_BASE_CHECKIN: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis/pontos
-    PASTA_ANEXOS_CONTRATOS_EUROMIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato
-    PASTA_TEMP_ANEXOS_CONTRATOS_EUROMIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/_temp
+    PASTA_ANEXOS_CONTRATOS_MIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Midia/Anexos/Contrato
+    PASTA_TEMP_ANEXOS_CONTRATOS_MIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Midia/Anexos/_temp
     EXTENSOES_PERMITIDAS_ANEXOS_CONTRATOS: xlsm,csv,xlsx,pdf,jpg,jpeg,png,img,gif,bmp,webp,tif,tiff,heic,heif,svg
 
     MENSAGERIA_SOCKET_TOKEN: ${MENSAGERIA_SOCKET_TOKEN}
@@ -188,7 +171,7 @@ x-flask-common: &flask-common
     - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
     - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis
     - ./FlaskApp/relatorios:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios
-    - /home/euromidia/projetos/pipelines/FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos:rw
+    - /home/midia/projetos/pipelines/FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos:rw
     - ./FlaskApp/app/static:/app/app/static
   restart: unless-stopped
 
@@ -517,8 +500,8 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       CELERY_QUEUE_CONTRATOS_ANEXOS: contratos_anexos
-      PASTA_ANEXOS_CONTRATOS_EUROMIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato
-      PASTA_TEMP_ANEXOS_CONTRATOS_EUROMIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/_temp
+      PASTA_ANEXOS_CONTRATOS_MIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Midia/Anexos/Contrato
+      PASTA_TEMP_ANEXOS_CONTRATOS_MIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Midia/Anexos/_temp
       EXTENSOES_PERMITIDAS_ANEXOS_CONTRATOS: xlsm,csv,xlsx,pdf,jpg,jpeg,png,img,gif,bmp,webp,tif,tiff,heic,heif,svg
       MENSAGERIA_SOCKET_TOKEN: ${MENSAGERIA_SOCKET_TOKEN}
     command: python -m celery -A app.celery_app.celery_app worker -Q contratos_anexos -l info --concurrency=2 --prefetch-multiplier=1 --max-tasks-per-child=200
@@ -532,7 +515,7 @@ services:
       flask-app-2:
         condition: service_started
     volumes:
-      - /home/euromidia/projetos/pipelines/FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos:rw
+      - /home/midia/projetos/pipelines/FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos:rw
       - ./FlaskApp/app/static:/app/app/static
     restart: unless-stopped
 
@@ -556,12 +539,12 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       CELERY_QUEUE_AIRFLOW_ADMIN: airflow_admin
       CELERY_QUEUE_CONTRATOS_ANEXOS: contratos_anexos
-      PASTA_ANEXOS_CONTRATOS_EUROMIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato
-      PASTA_TEMP_ANEXOS_CONTRATOS_EUROMIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/_temp
+      PASTA_ANEXOS_CONTRATOS_MIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Midia/Anexos/Contrato
+      PASTA_TEMP_ANEXOS_CONTRATOS_MIDIA: /home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Midia/Anexos/_temp
       EXTENSOES_PERMITIDAS_ANEXOS_CONTRATOS: xlsm,csv,xlsx,pdf,jpg,jpeg,png,img,gif,bmp,webp,tif,tiff,heic,heif,svg
 
       AIRFLOW_API_BASE_URL: ${AIRFLOW_API_BASE_URL:-http://airflow-apiserver:8080}
-      AIRFLOW_DAG_MENSAGERIA_CAMPANHAS: ${AIRFLOW_DAG_MENSAGERIA_CAMPANHAS:-euromidia_mensageria_campanhas}
+      AIRFLOW_DAG_MENSAGERIA_CAMPANHAS: ${AIRFLOW_DAG_MENSAGERIA_CAMPANHAS:-midia_mensageria_campanhas}
       AIRFLOW_DAG_PRIORIDADE_RESERVAS: ${AIRFLOW_DAG_PRIORIDADE_RESERVAS:-pipeline_prioridade_reservas}
       AIRFLOW_TRIGGER_MENSAGERIA_HABILITADO: ${AIRFLOW_TRIGGER_MENSAGERIA_HABILITADO:-1}
       AIRFLOW_TRIGGER_PRIORIDADE_RESERVAS_HABILITADO: ${AIRFLOW_TRIGGER_PRIORIDADE_RESERVAS_HABILITADO:-1}
@@ -582,7 +565,7 @@ services:
       - ./FlaskApp/chekin:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/chekin
       - ./FlaskApp/paineis:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/paineis
       - ./FlaskApp/relatorios:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/relatorios
-      - /home/euromidia/projetos/pipelines/FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos:rw
+      - /home/midia/projetos/pipelines/FlaskApp/Contratos:/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos:rw
       - ./FlaskApp/app/static:/app/app/static
     restart: unless-stopped
 

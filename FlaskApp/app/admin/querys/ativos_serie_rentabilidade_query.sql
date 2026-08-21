@@ -73,7 +73,7 @@ contratos_base AS (
         DATEFROMPARTS(YEAR(f.DataInicioPrevisto),  MONTH(f.DataInicioPrevisto),  1) AS IniMes,
         DATEFROMPARTS(YEAR(f.DataTerminoPrevisto), MONTH(f.DataTerminoPrevisto), 1) AS FimMes,
         TRY_CONVERT(DECIMAL(18,2), f.TotalLiquidoContratoAGBRCTACORDO) AS TotalContrato
-    FROM Integracao.Silver.FatoControleContratosItensEuromidia f WITH (NOLOCK)
+    FROM Integracao.Silver.FatoControleContratosItensMidia f WITH (NOLOCK)
     WHERE
         f.CodPonto = @CodPonto
         AND f.DataInicioPrevisto IS NOT NULL
@@ -160,7 +160,7 @@ dias_ocupados AS (
     WHERE
         EXISTS (
             SELECT 1
-            FROM Integracao.Silver.FatoControleContratosItensEuromidia f WITH (NOLOCK)
+            FROM Integracao.Silver.FatoControleContratosItensMidia f WITH (NOLOCK)
             WHERE
                 f.CodPonto = @CodPonto
                 AND f.DataInicioPrevisto IS NOT NULL

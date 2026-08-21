@@ -1,0 +1,62 @@
+{% extends "midia/base_midia.html" %}
+{% block title %}Vincular Componentes{% endblock %}
+
+{% block content %}
+<h2>Vincular Componentes</h2>
+<form method="POST" action="{{ url_for('euro.vincular_componentes') }}">
+
+  <div class="mb-3">
+    <label for="id_componente" class="form-label">ID Componente</label>
+    <input type="number" class="form-control" id="id_componente" name="id_componente" placeholder="Informe um IDItem válido" required>
+  </div>
+  
+  
+  <h4>Compatibilidade Componentes</h4>
+  <div id="compatibilidade-list">
+    <div class="row g-2 mb-3">
+      <div class="col-md-10">
+        <select class="form-select" name="pmv_compat" required>
+          <option value="">Selecione um PMV</option>
+          {% for pmv in pmvs %}
+          <option value="{{ pmv.PmvID }}">{{ pmv.NomePMV }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <button type="button" class="btn btn-danger" onclick="removerCompatibilidade(this)">Remover</button>
+      </div>
+    </div>
+    <button type="button" class="btn btn-sm btn-success" onclick="adicionarCompatibilidade()">Informar Mais compatibilidade</button>
+  </div>
+  
+  <hr>
+ 
+  <button type="submit" class="btn btn-primary">Confirmar alterações</button>
+</form>
+
+<script>
+function adicionarCompatibilidade() {
+  const container = document.getElementById('compatibilidade-list');
+  const div = document.createElement('div');
+  div.className = 'row g-2 mb-3';
+  div.innerHTML = `
+    <div class="col-md-10">
+      <select class="form-select" name="pmv_compat">
+        <option value="">Selecione um PMV</option>
+        {% for pmv in pmvs %}
+        <option value="{{ pmv.PmvID }}">{{ pmv.NomePMV }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <button type="button" class="btn btn-danger" onclick="removerCompatibilidade(this)">Remover</button>
+    </div>
+  `;
+  container.insertBefore(div, container.lastElementChild);
+}
+
+function removerCompatibilidade(btn) {
+  btn.parentElement.parentElement.remove();
+}
+</script>
+{% endblock %}

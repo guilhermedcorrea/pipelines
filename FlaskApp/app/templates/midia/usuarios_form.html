@@ -1,0 +1,206 @@
+{% extends "midia/base_midia.html" %}
+
+{% if modo == "novo" %}
+  {% set titulo = "Novo Usuário" %}
+{% else %}
+  {% set titulo = "Editar Usuário #" ~ usuario.IDDimUsuarios %}
+{% endif %}
+
+{% block title %}Admin | {{ titulo }}{% endblock %}
+
+{% block content %}
+<div class="card">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <h1 class="page-title" style="margin:0;">Admin · {{ titulo }}</h1>
+    <a class="btn btn-secondary" href="{{ url_for('Paineis.admin_usuarios_lista') }}" style="text-decoration:none;">
+      ← Voltar
+    </a>
+  </div>
+
+  <!-- helper pra erros -->
+  {% macro render_erros(campo) %}
+    {% if campo.errors %}
+      <div style="margin-top:6px;">
+        {% for e in campo.errors %}
+          <div class="flash danger" style="padding:8px 10px;margin:6px 0;">
+            {{ e }}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endmacro %}
+
+  <!-- FORM PRINCIPAL -->
+  <div style="margin-top:14px;">
+    {% if modo == "novo" %}
+      <form method="post" action="{{ url_for('Paineis.admin_usuarios_novo_post') }}">
+    {% else %}
+      <form method="post" action="{{ url_for('Paineis.admin_usuarios_editar_post', id_usuario=usuario.IDDimUsuarios) }}">
+    {% endif %}
+
+      {{ form_usuario.hidden_tag() }}
+
+      <div class="grid">
+        <div>
+          <label>{{ form_usuario.nome.label.text }}</label>
+          {{ form_usuario.nome(class_="") }}
+          {{ render_erros(form_usuario.nome) }}
+        </div>
+
+        <div>
+          <label>{{ form_usuario.email.label.text }}</label>
+          {{ form_usuario.email(class_="") }}
+          {{ render_erros(form_usuario.email) }}
+        </div>
+
+        <div>
+          <label>{{ form_usuario.id_perfil.label.text }}</label>
+          {{ form_usuario.id_perfil() }}
+          {{ render_erros(form_usuario.id_perfil) }}
+        </div>
+
+        <div>
+          <label>{{ form_usuario.ativo.label.text }}</label>
+          {{ form_usuario.ativo() }}
+          {{ render_erros(form_usuario.ativo) }}
+        </div>
+
+        {% if modo == "novo" %}
+        <div style="grid-column: 1 / -1;">
+          <label>{{ form_usuario.senha.label.text }}</label>
+          {{ form_usuario.senha(type="password") }}
+          {{ render_erros(form_usuario.senha) }}
+          <div class="muted" style="font-size:12px;margin-top:6px;">
+            A senha será salva como hash (não é armazenada em texto).
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">
+          {% if modo == "novo" %}Criar{% else %}Salvar{% endif %}
+        </button>
+      </div>
+    </form>
+  </div>
+
+  {% if modo == "editar" %}
+
+  <!-- TROCAR SENHA -->
+  <div class="card" style="margin-top:16px;">
+    <div style="font-weight:900;color:var(--euro-blue);margin-bottom:10px;">Trocar senha</div>
+
+    <form method="post" action="{{ url_for('Paineis.admin_usuarios_trocar_senha', id_usuario=usuario.IDDimUsuarios) }}">
+      {{ form_senha.hidden_tag() }}
+
+      <div class="grid" style="grid-template-columns: 1fr 220px;">
+        <div>
+          <label>{{ form_senha.senha.label.text }}</label>
+          {{ form_senha.senha(type="password") }}
+          {{ render_erros(form_senha.senha) }}
+        </div>
+        <div style="display:flex;align-items:flex-end;">
+          <button type="submit" class="btn btn-secondary" style="width:100%;">Atualizar senha</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- PERMISSÕES EXTRAS -->
+  <div class="card" style="margin-top:16px;">
+    <div style="font-weight:900;color:var(--euro-blue);margin-bottom:10px;">Permissões extras do usuário</div>
+
+    <!-- ADD/UPSERT -->
+    <form method="post" action="{{ url_for('Paineis.admin_usuarios_add_perm_extra', id_usuario=usuario.IDDimUsuarios) }}">
+      {{ form_perm_extra.hidden_tag() }}
+
+      <div class="grid" style="grid-template-columns: 1fr 200px 180px 180px;">
+        <div>
+          <label>{{ form_perm_extra.id_permissao.label.text }}</label>
+          {{ form_perm_extra.id_permissao() }}
+          {{ render_erros(form_perm_extra.id_permissao) }}
+        </div>
+
+        <div>
+          <label>{{ form_perm_extra.tipo.label.text }}</label>
+          {{ form_perm_extra.tipo() }}
+          {{ render_erros(form_perm_extra.tipo) }}
+        </div>
+
+        <div>
+          <label>{{ form_perm_extra.data_expiracao.label.text }}</label>
+          {{ form_perm_extra.data_expiracao(type="date") }}
+          {{ render_erros(form_perm_extra.data_expiracao) }}
+        </div>
+
+        <div>
+          <label>{{ form_perm_extra.observacao.label.text }}</label>
+          {{ form_perm_extra.observacao() }}
+          {{ render_erros(form_perm_extra.observacao) }}
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Aplicar permissão extra</button>
+      </div>
+    </form>
+
+    <!-- LISTA EXTRAS -->
+    <div class="overflow-x" style="margin-top:12px;">
+      <table class="mr-table" style="width:100%; border-collapse:separate; border-spacing:0;">
+        <thead>
+          <tr>
+            <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Permissão</th>
+            <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Tipo</th>
+            <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Expira</th>
+            <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Obs</th>
+            <th style="text-align:left; padding:10px; border-bottom:1px solid var(--border);">Ação</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in extras %}
+          <tr>
+            <td style="padding:10px; border-bottom:1px solid var(--border);">
+              {{ row.permissao.CodigoPermissao if row.permissao else row.IDDimPermissoes }}
+            </td>
+            <td style="padding:10px; border-bottom:1px solid var(--border);">{{ row.TipoAtribuicao }}</td>
+            <td style="padding:10px; border-bottom:1px solid var(--border);">
+              {% if row.DataExpiracao %}{{ row.DataExpiracao.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
+            </td>
+            <td style="padding:10px; border-bottom:1px solid var(--border);">{{ row.Observacao or '—' }}</td>
+            <td style="padding:10px; border-bottom:1px solid var(--border);">
+
+              {% set f = remover_forms.get(row.IDDimPermissoes) %}
+              {% if f %}
+                <form method="post" action="{{ url_for('Paineis.admin_usuarios_remover_perm_extra', id_usuario=usuario.IDDimUsuarios) }}">
+                  {{ f.hidden_tag() }}
+                  {{ f.id_permissao(value=row.IDDimPermissoes) }}
+                  <button type="submit" class="btn btn-secondary">Remover</button>
+                </form>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="5" style="padding:12px;">
+              <span class="muted">Nenhuma permissão extra definida.</span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="muted" style="margin-top:10px;font-size:12px;">
+      Regra: REVOGAR vence CONCEDER, e CONCEDER/REVOGAR vencem as permissões do perfil.
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

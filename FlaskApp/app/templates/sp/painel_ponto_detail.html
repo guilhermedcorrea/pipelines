@@ -1,0 +1,154 @@
+{% extends "base2.html" %}
+{% block title %}Ponto/CodPonto #{{ r.CodPonto }} – {{ r.PainelNome or '—' }}{% endblock %}
+
+{% block content %}
+<style>
+  .kv {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: .25rem .75rem;
+    align-items: center;
+  }
+  .kv .k { color: #6c757d; white-space: nowrap; }
+  .kv .v { font-weight: 500; min-width: 0; word-break: break-word; }
+  @media (max-width: 576px) {
+    .kv { grid-template-columns: 1fr; }
+    .kv .k { margin-top:.5rem; }
+  }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="mb-0">Detalhe do Ponto – CodPonto #{{ r.CodPonto }}</h2>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary btn-sm" href="{{ request.referrer or url_for('admin_bp.lista_paineis') }}">← Voltar</a>
+    <a class="btn btn-primary btn-sm" href="{{ url_for('admin_bp.visualizar_painel', painel_id=r.PainelID) }}">Visualizar Grade do Painel</a>
+  </div>
+</div>
+
+{# Exibe SOMENTE o NomeProduto, se houver vínculo via Painel.IDItem -> Produto.IDItem #}
+{% if r.NomeProduto %}
+  <div class="alert alert-info py-2 mb-3" role="alert">
+    {{ r.NomeProduto }}
+  </div>
+{% endif %}
+
+<div class="row g-3 mb-4">
+  <!-- Card: Painel -->
+  <div class="col-12 col-lg-4">
+    <div class="card h-100">
+      <div class="card-header"><strong>Painel</strong></div>
+      <div class="card-body">
+        <div class="kv">
+          <div class="k">ID Painel</div>
+          <div class="v">{{ r.PainelID }}</div>
+
+          <div class="k">Nome</div>
+          <div class="v">{{ r.PainelNome or '—' }}</div>
+
+          <div class="k">Referência (Painel)</div>
+          <div class="v">{{ r.ReferenciaPainel if r.ReferenciaPainel is not none else '—' }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card: Localização -->
+  <div class="col-12 col-lg-4">
+    <div class="card h-100">
+      <div class="card-header"><strong>Localização</strong></div>
+      <div class="card-body">
+        <div class="kv">
+          <div class="k">Município</div>
+          <div class="v">{{ r.Municipio or '—' }}</div>
+
+          <div class="k">Bairro</div>
+          <div class="v">{{ r.Bairro or '—' }}</div>
+
+          <div class="k">Logradouro</div>
+          <div class="v">{{ r.Logradouro or '—' }}</div>
+
+          <div class="k">Número</div>
+          <div class="v">{{ r.Numero if r.Numero is not none else '—' }}</div>
+
+          <div class="k">Referência</div>
+          <div class="v">{{ r.Referencia or '—' }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card: Configuração -->
+  <div class="col-12 col-lg-4">
+    <div class="card h-100">
+      <div class="card-header"><strong>Configuração</strong></div>
+      <div class="card-body">
+        <div class="kv">
+          <div class="k">Faces</div>
+          <div class="v">{{ r.Faces if r.Faces is not none else '—' }}</div>
+
+          <div class="k">Status (Ponto)</div>
+          <div class="v">
+            {% if r.PontoAtivo %}
+              <span class="badge bg-success">Ativo</span>
+            {% else %}
+              <span class="badge bg-secondary">Inativo</span>
+            {% endif %}
+          </div>
+
+          {# Compatibilidade: só aparece se houver IDItem #}
+          {% if r.IDItem %}
+            <div class="k">Compatibilidade</div>
+            <div class="v">
+              <a class="btn btn-sm btn-outline-secondary"
+                 title="Caracteristicas"
+                 href="{{ url_for('euro.produto_compativeis', produto_id=r.IDItem) }}">
+                <span aria-hidden="true">🔗</span> Caracteristicas
+              </a>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ==== TAXA DE OCUPAÇÃO (Jan–Dez do ano atual) ==== #}
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <strong>Taxa de Ocupação do Painel — {{ ano_atual }}</strong>
+    <small class="text-muted">Capacidade diária: {{ total_colunas }} colunas</small>
+  </div>
+  <div class="card-body">
+    {% macro mes_label(n) -%}
+      {%- set nomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'] -%}
+      {{ nomes[n-1] }}
+    {%- endmacro %}
+
+    <div class="row g-3">
+      {% for m in ocupacao_mensal %}
+        {% set pct = (m.taxa * 100) | round(1) %}
+        {% set cap_mes = total_colunas * m.dias %}
+        {# cor da barra por faixa: <40 cinza, <70 info, <90 warning, senão success #}
+        {% set bar_class = 'bg-secondary' %}
+        {% if pct >= 90 %}{% set bar_class = 'bg-success' %}
+        {% elif pct >= 70 %}{% set bar_class = 'bg-warning' %}
+        {% elif pct >= 40 %}{% set bar_class = 'bg-info' %}{% endif %}
+
+        <div class="col-12 col-md-6 col-lg-4">
+          <div class="d-flex justify-content-between">
+            <div><strong>{{ mes_label(m.month) }}</strong> <small class="text-muted">({{ m.dias }} dias)</small></div>
+            <div><strong>{{ pct }}%</strong></div>
+          </div>
+          <div class="progress" role="progressbar" aria-label="Ocupação {{ mes_label(m.month) }}"
+               aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100" style="height: 18px;">
+            <div class="progress-bar {{ bar_class }}" style="width: {{ pct }}%"></div>
+          </div>
+          <div class="mt-1 small text-muted">
+            {{ m.ocup_unidades }} / {{ cap_mes }} unidades-dia ocupadas
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

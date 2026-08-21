@@ -1,6 +1,6 @@
-{% extends "euromidia/base_euromidia.html" %}
+{% extends "midia/base_midia.html" %}
 
-{% block title %}Solicitação de Contrato #{{ solicitacao.IDFatoSolicitacaoContratoEuromidia }} | Euromídia{% endblock %}
+{% block title %}Solicitação de Contrato #{{ solicitacao.IDFatoSolicitacaoContratoMidia }} | Euromídia{% endblock %}
 
 {% block content %}
 <div class="card">
@@ -1488,7 +1488,7 @@
 
         <div class="titulo-wrap">
           <h1 class="titulo-principal">
-            Solicitação #{{ solicitacao.IDFatoSolicitacaoContratoEuromidia }}
+            Solicitação #{{ solicitacao.IDFatoSolicitacaoContratoMidia }}
           </h1>
           <div class="subtitulo">
             Empresa: {{ solicitacao.RazaoSocialEmpresa or solicitacao.RazaoSocial or "—" }}
@@ -1498,7 +1498,7 @@
           <div class="badges">
             <span class="badge">{{ solicitacao.TipoSolicitacaoExibicao }}</span>
             <span class="badge neutral">Card #{{ solicitacao.IDFatoKanbanCard }}</span>
-            <span class="badge neutral">Contrato #{{ solicitacao.IDFatoControleContratosEuromidia or "—" }}</span>
+            <span class="badge neutral">Contrato #{{ solicitacao.IDFatoControleContratosMidia or "—" }}</span>
             <span class="badge warn">Criado por {{ solicitacao.NomeUsuarioCriacao or "—" }}</span>
             <span class="badge status-dinamico" style="{% if solicitacao.CorHexStatusContrato %}--status-color: {{ solicitacao.CorHexStatusContrato }};{% endif %}">Status Atual: {{ solicitacao.StatusContrato or "—" }}</span>
           </div>
@@ -1617,7 +1617,7 @@
         <div class="grid-4">
           <div class="field">
             <label>ID Solicitação</label>
-            <input type="text" value="{{ solicitacao.IDFatoSolicitacaoContratoEuromidia }}" readonly>
+            <input type="text" value="{{ solicitacao.IDFatoSolicitacaoContratoMidia }}" readonly>
           </div>
           <div class="field">
             <label>ID Kanban Card</label>
@@ -1625,7 +1625,7 @@
           </div>
           <div class="field">
             <label>ID Contrato</label>
-            <input type="text" value="{{ solicitacao.IDFatoControleContratosEuromidia or '' }}" readonly>
+            <input type="text" value="{{ solicitacao.IDFatoControleContratosMidia or '' }}" readonly>
           </div>
           <div class="field">
             <label>Data Envio Avaliação</label>
@@ -1869,8 +1869,8 @@
             {% for vinculo in marcas_ocupacao_card %}
               <div class="marca-ocupacao-row" data-role="marca-ocupacao-row">
                 <input type="hidden" name="marca_ocupacao_card_idx" value="{{ loop.index0 }}" data-role="marca-ocupacao-idx">
-                <input type="hidden" name="marca_ocupacao_card_{{ loop.index0 }}__IDFatoOcupacaoPaineisEuromidia" value="{{ vinculo.IDFatoOcupacaoPaineisEuromidia or '' }}">
-                <input type="hidden" name="marca_ocupacao_card_{{ loop.index0 }}__IDDimPaineisEuromidia" value="{{ vinculo.IDDimPaineisEuromidia or '' }}">
+                <input type="hidden" name="marca_ocupacao_card_{{ loop.index0 }}__IDFatoOcupacaoPaineisMidia" value="{{ vinculo.IDFatoOcupacaoPaineisMidia or '' }}">
+                <input type="hidden" name="marca_ocupacao_card_{{ loop.index0 }}__IDDimPaineisMidia" value="{{ vinculo.IDDimPaineisMidia or '' }}">
                 <input type="hidden" name="marca_ocupacao_card_{{ loop.index0 }}__IDDimFacesPaineis" value="{{ vinculo.IDDimFacesPaineis or '' }}">
 
                 <div class="field">
@@ -1922,8 +1922,8 @@
           {% else %}
             <div class="marca-ocupacao-row" data-role="marca-ocupacao-row">
               <input type="hidden" name="marca_ocupacao_card_idx" value="0" data-role="marca-ocupacao-idx">
-              <input type="hidden" name="marca_ocupacao_card_0__IDFatoOcupacaoPaineisEuromidia" value="">
-              <input type="hidden" name="marca_ocupacao_card_0__IDDimPaineisEuromidia" value="">
+              <input type="hidden" name="marca_ocupacao_card_0__IDFatoOcupacaoPaineisMidia" value="">
+              <input type="hidden" name="marca_ocupacao_card_0__IDDimPaineisMidia" value="">
               <input type="hidden" name="marca_ocupacao_card_0__IDDimFacesPaineis" value="">
 
               <div class="field">
@@ -1985,23 +1985,23 @@
       <div class="section-body" style="display:flex;flex-direction:column;gap:16px;">
         {% if itens and itens|length > 0 %}
           {% for item in itens %}
-            <input type="hidden" name="item_id" value="{{ item.IDFatoSolicitacaoContratoItemEuromidia }}">
+            <input type="hidden" name="item_id" value="{{ item.IDFatoSolicitacaoContratoItemMidia }}">
             <input type="hidden"
-                   name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__IDFatoControleContratosItensEuromidia"
-                   value="{{ item.IDFatoControleContratosItensEuromidia or '' }}">
+                   name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__IDFatoControleContratosItensMidia"
+                   value="{{ item.IDFatoControleContratosItensMidia or '' }}">
 
             <div class="item-card"
                  data-item-card
-                 data-item-id="{{ item.IDFatoSolicitacaoContratoItemEuromidia }}"
+                 data-item-id="{{ item.IDFatoSolicitacaoContratoItemMidia }}"
                  data-data-inicio="{{ item.DataInicioPrevistoInput or '' }}"
                  data-data-termino="{{ item.DataTerminoPrevistoInput or '' }}">
               <div class="item-head">
                 <div>
                   <h3 class="item-title">
-                    Item #{{ item.IDFatoSolicitacaoContratoItemEuromidia }}
+                    Item #{{ item.IDFatoSolicitacaoContratoItemMidia }}
                   </h3>
                   <div class="subtitulo">
-                    Solicitação #{{ item.IDFatoSolicitacaoContratoEuromidia }} • ContratoItem #{{ item.IDFatoControleContratosItensEuromidia or "—" }}
+                    Solicitação #{{ item.IDFatoSolicitacaoContratoMidia }} • ContratoItem #{{ item.IDFatoControleContratosItensMidia or "—" }}
                   </div>
                 </div>
 
@@ -2063,12 +2063,12 @@
                     <input
                       type="hidden"
                       data-role="agendamento-ativo"
-                      name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__DividirOcupacaoPeriodos"
+                      name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__DividirOcupacaoPeriodos"
                       value="{{ '1' if item.TemAgendamentoFaceContrato else '0' }}">
 
                     <input
                       type="hidden"
-                      name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__QuantidadePeriodosOcupacao"
+                      name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__QuantidadePeriodosOcupacao"
                       value="{{ item.QuantidadeAgendamentosFaceContrato if item.TemAgendamentoFaceContrato else 0 }}"
                       data-role="agendamento-quantidade-total">
 
@@ -2077,7 +2077,7 @@
                         <label>Tipo de divisão</label>
                         <input
                           type="hidden"
-                          name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__TipoDivisaoOcupacao"
+                          name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__TipoDivisaoOcupacao"
                           value="MENSAL"
                           data-role="agendamento-tipo-divisao">
                         <div class="agendamento-tipo-fixo">Mensal</div>
@@ -2091,7 +2091,7 @@
                           max="120"
                           step="1"
                           placeholder="Ex: 12"
-                          name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__QuantidadePeriodosOcupacaoBase"
+                          name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__QuantidadePeriodosOcupacaoBase"
                           value="{{ item.QuantidadeAgendamentosFaceContrato if item.TemAgendamentoFaceContrato else '' }}"
                           data-role="agendamento-quantidade">
                       </div>
@@ -2123,7 +2123,7 @@
                         <tbody data-role="agendamento-tbody">
                           {% for ag in item.AgendamentosFaceContrato %}
                             {% set ordem_ag = ag.Sequencia or loop.index %}
-                            {% set nome_ag = 'item_' ~ item.IDFatoSolicitacaoContratoItemEuromidia ~ '__Agendamento_' ~ ordem_ag %}
+                            {% set nome_ag = 'item_' ~ item.IDFatoSolicitacaoContratoItemMidia ~ '__Agendamento_' ~ ordem_ag %}
                             <tr class="{% if ag.EhPeriodoRestante %}agendamento-linha-restante{% endif %}">
                               <td>
                                 {{ ordem_ag }}
@@ -2168,87 +2168,87 @@
                 <div class="grid-4">
                   <div class="field">
                     <label>CodPonto</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__CodPonto" value="{{ item.CodPonto or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__CodPonto" value="{{ item.CodPonto or '' }}">
                   </div>
                   <div class="field">
                     <label>CodFace</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__CodFace" value="{{ item.CodFace or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__CodFace" value="{{ item.CodFace or '' }}">
                   </div>
                   <div class="field">
                     <label>Cidade Exibição</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__CidadeExibicao" value="{{ item.CidadeExibicao or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__CidadeExibicao" value="{{ item.CidadeExibicao or '' }}">
                   </div>
                   <div class="field">
                     <label>Tipo</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__Tipo" value="{{ item.Tipo or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__Tipo" value="{{ item.Tipo or '' }}">
                   </div>
 
                   <div class="field">
                     <label>Cota</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__Cota" value="{{ item.Cota|int if item.Cota is not none and item.Cota != '' else '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__Cota" value="{{ item.Cota|int if item.Cota is not none and item.Cota != '' else '' }}">
                   </div>
                   <div class="field">
                     <label>Data Início Previsto</label>
-                    <input type="date" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__DataInicioPrevisto" value="{{ item.DataInicioPrevistoInput or '' }}">
+                    <input type="date" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__DataInicioPrevisto" value="{{ item.DataInicioPrevistoInput or '' }}">
                   </div>
                   <div class="field">
                     <label>Data Término Previsto</label>
-                    <input type="date" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__DataTerminoPrevisto" value="{{ item.DataTerminoPrevistoInput or '' }}">
+                    <input type="date" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__DataTerminoPrevisto" value="{{ item.DataTerminoPrevistoInput or '' }}">
                   </div>
                   <div class="field">
                     <label>Número Parcelas</label>
-                    <input type="number" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__NumeroParcelas" value="{{ item.NumeroParcelas or '' }}">
+                    <input type="number" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__NumeroParcelas" value="{{ item.NumeroParcelas or '' }}">
                   </div>
 
                   <div class="field">
                     <label>Data Início Vencimento</label>
-                    <input type="date" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__DataInicioVencimento" value="{{ item.DataInicioVencimentoInput or '' }}">
+                    <input type="date" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__DataInicioVencimento" value="{{ item.DataInicioVencimentoInput or '' }}">
                   </div>
                   <div class="field">
                     <label>Faturamento Bruto Mensal</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__FaturamentoBrutoMensal" value="{{ item.FaturamentoBrutoMensal or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__FaturamentoBrutoMensal" value="{{ item.FaturamentoBrutoMensal or '' }}">
                   </div>
                   <div class="field">
                     <label>Percentual Permuta</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__PercentualPermuta" value="{{ item.PercentualPermuta or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__PercentualPermuta" value="{{ item.PercentualPermuta or '' }}">
                   </div>
                   <div class="field">
                     <label>Valor Permuta</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__ValorPermuta" value="{{ item.ValorPermuta or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__ValorPermuta" value="{{ item.ValorPermuta or '' }}">
                   </div>
 
                   <div class="field">
                     <label>Fat. Líquido Permuta</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__FaturamentoLiquidoPermuta" value="{{ item.FaturamentoLiquidoPermuta or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__FaturamentoLiquidoPermuta" value="{{ item.FaturamentoLiquidoPermuta or '' }}">
                   </div>
                   <div class="field">
                     <label>Fat. Líquido Mensal</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__FaturamentoLiquidoMensal" value="{{ item.FaturamentoLiquidoMensal or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__FaturamentoLiquidoMensal" value="{{ item.FaturamentoLiquidoMensal or '' }}">
                   </div>
                   <div class="field">
                     <label>Fat. Líquido Final Mensal</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__FaturamentoLiquidoFinalMensal" value="{{ item.FaturamentoLiquidoFinalMensal or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__FaturamentoLiquidoFinalMensal" value="{{ item.FaturamentoLiquidoFinalMensal or '' }}">
                   </div>
                   <div class="field">
                     <label>% Comissão Vendedor</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__PercentualComissaoVendedor" value="{{ item.PercentualComissaoVendedor or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__PercentualComissaoVendedor" value="{{ item.PercentualComissaoVendedor or '' }}">
                   </div>
 
                   <div class="field">
                     <label>Valor Vendedor</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__ValorVendedor" value="{{ item.ValorVendedor or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__ValorVendedor" value="{{ item.ValorVendedor or '' }}">
                   </div>
                   <div class="field">
                     <label>Valor Vendedor Total</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__ValorVendedorTotal" value="{{ item.ValorVendedorTotal or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__ValorVendedorTotal" value="{{ item.ValorVendedorTotal or '' }}">
                   </div>
                   <div class="field">
                     <label>Status</label>
-                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__Status" value="{{ item.Status or '' }}">
+                    <input type="text" name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__Status" value="{{ item.Status or '' }}">
                   </div>
                   <div class="field">
                     <label>Ativo</label>
-                    <select name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__BitAtivo">
+                    <select name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__BitAtivo">
                       <option value="1" {{ 'selected' if item.BitAtivo else '' }}>1 - Ativo</option>
                       <option value="0" {{ 'selected' if not item.BitAtivo else '' }}>0 - Inativo</option>
                     </select>
@@ -2257,7 +2257,7 @@
 
                 <div class="field">
                   <label>Observação do Item</label>
-                  <textarea name="item_{{ item.IDFatoSolicitacaoContratoItemEuromidia }}__OBS">{{ item.OBS or '' }}</textarea>
+                  <textarea name="item_{{ item.IDFatoSolicitacaoContratoItemMidia }}__OBS">{{ item.OBS or '' }}</textarea>
                 </div>
               </div>
             </div>
@@ -2368,8 +2368,8 @@
         <div
           class="anexos-contrato-wrap"
           data-role="anexos-contrato"
-          data-upload-url="{{ url_for('admin.upload_anexos_contrato', id_solicitacao=solicitacao.IDFatoSolicitacaoContratoEuromidia) }}"
-          data-list-url="{{ url_for('admin.listar_anexos_contrato', id_solicitacao=solicitacao.IDFatoSolicitacaoContratoEuromidia) }}"
+          data-upload-url="{{ url_for('admin.upload_anexos_contrato', id_solicitacao=solicitacao.IDFatoSolicitacaoContratoMidia) }}"
+          data-list-url="{{ url_for('admin.listar_anexos_contrato', id_solicitacao=solicitacao.IDFatoSolicitacaoContratoMidia) }}"
           data-csrf-token="{{ csrf_token() }}"
         >
           <label class="anexos-dropzone" data-role="anexos-dropzone">
@@ -2386,14 +2386,14 @@
           <div class="anexos-lista" data-role="anexos-lista">
             {% if anexos_contrato %}
               {% for anexo in anexos_contrato %}
-                <div class="anexo-row" data-anexo-id="{{ anexo.IDFatoAnexosContratosEuromidia }}">
+                <div class="anexo-row" data-anexo-id="{{ anexo.IDFatoAnexosContratosMidia }}">
                   <div class="anexo-numero">Anexo {{ anexo.NumeroAnexo or loop.index }}</div>
                   <div class="anexo-nome" title="{{ anexo.NomeArquivo or '' }}">{{ anexo.NomeArquivo or 'Arquivo sem nome' }}</div>
                   <div class="anexo-meta">{{ anexo.Extensao or '—' }}</div>
                   <div class="anexo-meta">{{ anexo.TamanhoArquivoFormatado or '—' }}</div>
                   <div class="anexo-actions">
-                    <a class="anexo-btn download" href="{{ url_for('admin.download_anexo_contrato', id_anexo=anexo.IDFatoAnexosContratosEuromidia) }}">Baixar</a>
-                    <button type="button" class="anexo-btn remove" data-role="anexo-remover" data-url="{{ url_for('admin.remover_anexo_contrato', id_anexo=anexo.IDFatoAnexosContratosEuromidia) }}">Remover</button>
+                    <a class="anexo-btn download" href="{{ url_for('admin.download_anexo_contrato', id_anexo=anexo.IDFatoAnexosContratosMidia) }}">Baixar</a>
+                    <button type="button" class="anexo-btn remove" data-role="anexo-remover" data-url="{{ url_for('admin.remover_anexo_contrato', id_anexo=anexo.IDFatoAnexosContratosMidia) }}">Remover</button>
                   </div>
                 </div>
               {% endfor %}

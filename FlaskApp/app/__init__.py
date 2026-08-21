@@ -86,14 +86,14 @@ def create_app() -> Flask:
         PASTA_RELATORIOS_OCUPACAO,
     )
 
-    app.config["PASTA_ANEXOS_CONTRATOS_EUROMIDIA"] = os.getenv(
-        "PASTA_ANEXOS_CONTRATOS_EUROMIDIA",
-        "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/Contrato",
+    app.config["PASTA_ANEXOS_CONTRATOS_MIDIA"] = os.getenv(
+        "PASTA_ANEXOS_CONTRATOS_MIDIA",
+        "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Midia/Anexos/Contrato",
     )
 
-    app.config["PASTA_TEMP_ANEXOS_CONTRATOS_EUROMIDIA"] = os.getenv(
-        "PASTA_TEMP_ANEXOS_CONTRATOS_EUROMIDIA",
-        "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Euromidia/Anexos/_temp",
+    app.config["PASTA_TEMP_ANEXOS_CONTRATOS_MIDIA"] = os.getenv(
+        "PASTA_TEMP_ANEXOS_CONTRATOS_MIDIA",
+        "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/Contratos/Midia/Anexos/_temp",
     )
 
     app.config["EXTENSOES_PERMITIDAS_ANEXOS_CONTRATOS"] = os.getenv(
@@ -201,13 +201,13 @@ def create_app() -> Flask:
             )
             cursor.close()
 
-        # Aplica as mesmas opções de sessão ao banco principal e ao bind Shempo.
+        # Aplica as mesmas opções de sessão ao banco principal e ao bind Sp.
         for engine in db.engines.values():
             event.listen(engine, "connect", _set_sqlserver_session_settings)
 
-    from .euromidia.controle_paineis_views import paineis_bp
+    from .midia.controle_paineis_views import paineis_bp
     from .autenticacao.autenticacao_views import autenticacao_bp
-    from .shempo.shempo_views import euro
+    from .sp.sp_views import euro
   
     from .admin.admin_views import admin
     from .kanban.kanban_views import kanban_bp

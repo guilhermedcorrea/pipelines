@@ -56,7 +56,7 @@ def _agora():
 RECUPERACAO_SENHA_SALT = "autenticacao-recuperacao-senha-v1"
 RECUPERACAO_SENHA_EXPIRACAO_SEGUNDOS = 30 * 60
 RECUPERACAO_SENHA_ASSUNTO = "Recuperação de senha Usuário"
-RECUPERACAO_SENHA_EMAIL_REMETENTE = "notificacoes@euromidia.com.br"
+RECUPERACAO_SENHA_EMAIL_REMETENTE = "notificacoes@midia.com.br"
 _EMAIL_MINIMO_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
@@ -150,7 +150,7 @@ def _carregar_logo_recuperacao_senha():
         "/app/app/static/imagens/logoeuro.png",
         str(Path(current_app.root_path) / "static" / "imagens" / "logoeuro.png"),
         str(Path(current_app.static_folder or "") / "imagens" / "logoeuro.png"),
-        "/home/euromidia/projetos/pipelines/FlaskApp/app/static/imagens/logoeuro.png",
+        "/home/midia/projetos/pipelines/FlaskApp/app/static/imagens/logoeuro.png",
         "/home/guilherme_correa/PythonJobs/pipelines/FlaskApp/app/static/imagens/logoeuro.png",
     ):
         candidato = _texto(candidato)
@@ -198,7 +198,7 @@ def _enviar_email_recuperacao_senha(usuario: DimUsuarios, link_recuperacao: str)
         raise RuntimeError("Configuração SMTP incompleta: verifique SMTP, porta, criptografia e SENHA_EMAIL.")
 
     nome_usuario = _texto(getattr(usuario, "NomeUsuario", None)) or "Usuário"
-    logo_cid = "euromidia_logo_recuperacao"
+    logo_cid = "midia_logo_recuperacao"
     logo_bytes, logo_subtype, logo_path = _carregar_logo_recuperacao_senha()
 
     if logo_bytes:
@@ -557,8 +557,8 @@ PERMISSOES_OPERACIONAIS_COORDENADOR = {
     "CLIENTES_DETALHE_VER",
     "CARTEIRAS_VER",
     "CARTEIRA_PROPRIA_VER",
-    "PRECOS_EUROMIDIA_VER",
-    "LISTA_PRECOS_EUROMIDIA_VER",
+    "PRECOS_MIDIA_VER",
+    "LISTA_PRECOS_MIDIA_VER",
     "VENCIMENTOS_CAMPANHAS_VER",
 }
 
@@ -598,8 +598,8 @@ PERMISSOES_BLOQUEADAS_COORDENADOR = {
 
 ROTAS_ADMIN_OPERACIONAIS_COORDENADOR = (
     "/admin/vencimentos-campanhas",
-    "/admin/precos/euromidia",
-    "/precos/euromidia",
+    "/admin/precos/midia",
+    "/precos/midia",
     "/lista-precos",
     "/listas-precos",
 )
@@ -821,7 +821,7 @@ def requer_permissao(codigo_permissao: str):
 
 
 
-ID_EMPRESA_PROPRIETARIA_EUROMIDIA = 3
+ID_EMPRESA_PROPRIETARIA_MIDIA = 3
 
 
 def _converter_int_seguro(valor, padrao: int = 0) -> int:
@@ -902,7 +902,7 @@ def _usuario_logado_pode_executar_controle_contratos() -> bool:
     if not bool(getattr(current_user, "BitAtivo", False)):
         return False
 
-    return _usuario_logado_empresa_proprietaria() == ID_EMPRESA_PROPRIETARIA_EUROMIDIA
+    return _usuario_logado_empresa_proprietaria() == ID_EMPRESA_PROPRIETARIA_MIDIA
 
 
 def _agora_utc_iso_airflow() -> str:
@@ -1089,7 +1089,7 @@ def reserva_ocupacao():
 
     Mantive esta rota antiga apenas para não quebrar links salvos/favoritos.
     """
-    if _usuario_logado_empresa_proprietaria() != ID_EMPRESA_PROPRIETARIA_EUROMIDIA:
+    if _usuario_logado_empresa_proprietaria() != ID_EMPRESA_PROPRIETARIA_MIDIA:
         abort(403)
 
     return redirect(url_for("Paineis.reserva_ocupacao"))
@@ -1122,7 +1122,7 @@ def executar_pipeline_controle_contratos():
     base_url = _normalizar_airflow_base_url(base_url_original)
     usuario_api = _config_ambiente("AIRFLOW_API_USERNAME", "")
     senha_api = _config_ambiente("AIRFLOW_API_PASSWORD", "")
-    dag_id = _config_ambiente("AIRFLOW_DAG_CONTROLE_CONTRATOS", "pipeline_controle_contratos_euromidia")
+    dag_id = _config_ambiente("AIRFLOW_DAG_CONTROLE_CONTRATOS", "pipeline_controle_contratos_midia")
 
     try:
         timeout_segundos = int(_config_ambiente("AIRFLOW_API_TIMEOUT_SEGUNDOS", "15"))

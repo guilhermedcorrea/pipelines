@@ -60,13 +60,13 @@ MAPA_ITEM_MENU_PERMISSOES = {
     "criar_os_auvo": {"ADMIN_TUDO"},
     "lista_precos": {"ADMIN_TUDO"},
     "listas_precos": {"ADMIN_TUDO"},
-    "lista_precos_euromidia": {"ADMIN_TUDO"},
-    "precos_euromidia": {"ADMIN_TUDO"},
+    "lista_precos_midia": {"ADMIN_TUDO"},
+    "precos_midia": {"ADMIN_TUDO"},
     "editar_paineis": {"ADMIN_TUDO"},
     "cadastro_paineis_lista": {"ADMIN_TUDO"},
     "cadastro_painel_editar": {"ADMIN_TUDO"},
     "vencimentos_campanhas": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
-    "vencimentos_campanhas_euromidia": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
+    "vencimentos_campanhas_midia": {"KANBAN_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
     "aprovacao_preco": {"KANBAN_CUSTO_MARGEM_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
     "aprovacao_desconto_kanban": {"KANBAN_CUSTO_MARGEM_VER", "KANBAN_EDITAR", "ADMIN_TUDO"},
 
@@ -90,8 +90,8 @@ ITENS_MENU_ADMIN_BLOQUEADOS_PARA_VENDEDOR = {
     "criar_os_auvo",
     "lista_precos",
     "listas_precos",
-    "lista_precos_euromidia",
-    "precos_euromidia",
+    "lista_precos_midia",
+    "precos_midia",
     "checkin_novo",
     "lista_checkins",
     "checkin_arquivo",
@@ -141,7 +141,7 @@ ITENS_MENU_BLOQUEADOS_PARA_EMPRESA_1 = {
     "reserva_ocupacao",
     "ocupacao_reserva",
     "vencimentos_campanhas",
-    "vencimentos_campanhas_euromidia",
+    "vencimentos_campanhas_midia",
 
     # Check-in: cadastro, listagem, arquivos e visualização.
     "checkin",
@@ -191,7 +191,7 @@ ITENS_MENU_LIBERADOS_PARA_COORDENADOR = {
     "historico_cards_lista",
     "health_check_comercial",
     "vencimentos_campanhas",
-    "vencimentos_campanhas_euromidia",
+    "vencimentos_campanhas_midia",
     "disponibilidades",
     "paineis",
     "grade_painel",
@@ -203,8 +203,8 @@ ITENS_MENU_LIBERADOS_PARA_COORDENADOR = {
     "lista_ocupacao",
     "lista_precos",
     "listas_precos",
-    "lista_precos_euromidia",
-    "precos_euromidia",
+    "lista_precos_midia",
+    "precos_midia",
 }
 
 
@@ -886,7 +886,7 @@ def pode_acessar_menu_paineis(item_menu: str) -> bool:
     if usuario_pertence_empresa_proprietaria_1() and item_menu_bloqueado_para_empresa_1(chave):
         return False
 
-    if chave in {"vencimentos_campanhas", "vencimentos_campanhas_euromidia"}:
+    if chave in {"vencimentos_campanhas", "vencimentos_campanhas_midia"}:
         return (
             usuario_eh_perfil_admin()
             or usuario_eh_perfil_coordenador()

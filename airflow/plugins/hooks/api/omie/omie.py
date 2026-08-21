@@ -41,7 +41,7 @@ class OmieHook(BaseHook):
     5. Expor helpers para endpoints específicos quando necessário.
 
     Connection esperada no Airflow:
-    - conn_id: por exemplo OMIE_SHEMPO
+    - conn_id: por exemplo OMIE_SP
     - conn_type: http
     - host: https://app.omie.com.br
 
@@ -50,7 +50,7 @@ class OmieHook(BaseHook):
       "app_key": "...",
       "app_secret": "...",
       "id_empresa_proprietaria": 1,
-      "nome_empresa": "Shempo Indústria e Comércio Ltda",
+      "nome_empresa": "Sp Indústria e Comércio Ltda",
       "timeout": 90
     }
     """

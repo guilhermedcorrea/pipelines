@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>{% block title %}Peças e Componentes{% endblock %}</title>
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  {% block styles_global %}
+  <link rel="stylesheet"
+        href="{{ url_for('static', filename='css/style.css') }}">
+  {% endblock %}
+  
+
+  <style>
+    #itemImagesCarousel .carousel-item img {
+      margin-left: auto !important;
+      margin-right: auto !important;
+      display: block;
+    }
+  </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.css">
+
+  {% block head %}
+    <script
+      src="https://code.jquery.com/jquery-3.6.0.min.js"
+      integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4="
+      crossorigin="anonymous"></script>
+  {% endblock %}
+</head>
+<body>
+  <nav class="navbar navbar-expand-lg">
+    <div class="container-fluid">
+      
+      <a class="nav-link d-inline-block ms-3" href="{{ url_for('admin_bp.lista_paineis') }}">Home</a>
+      <div class="position-absolute end-0 me-4 d-flex align-items-center">
+        <img src=""
+             alt="Logo Sp"
+             height="55">
+      </div>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="navbarSupportedContent">
+        <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('euro.listar_familias') }}">Famílias</a>
+          </li>
+
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" id="cadastrosDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+              Cadastros
+            </a>
+            <ul class="dropdown-menu" aria-labelledby="cadastrosDropdown">
+              <li><a class="dropdown-item" href="{{ url_for('euro.cadastrar_empresa') }}">Cadastrar Empresa</a></li>
+             
+            </ul>
+          </li>
+
+
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" id="cadastrosDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+              Paineis
+            </a>
+            <ul class="dropdown-menu" aria-labelledby="cadastrosDropdown">
+                <li><a class="dropdown-item" href="{{ url_for('admin_bp.lista_paineis') }}">Lista Paineis</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('admin_bp.vincular_cliente') }}">Vincular Cliente</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('euro.cadastrar_empresa') }}">Cadastrar Empresa</a></li>
+             
+            </ul>
+          </li>
+
+
+
+
+          <li class="nav-item dropdown">
+            <a class="nav-link dropdown-toggle" href="#" id="comercialDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+              Comercial
+            </a>
+            <ul class="dropdown-menu" aria-labelledby="comercialDropdown">
+              <li><a class="dropdown-item" href="{{ url_for('admin_bp.lista_clientes') }}">Ver Empresas</a></li>
+             
+            </ul>
+          </li>
+
+   
+       
+          {% if session.get('user_id') %}
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('euro.logout') }}">Sair</a>
+          </li>
+          {% else %}
+          <li class="nav-item">
+            <a class="nav-link" href="{{ url_for('euro.login') }}">Login</a>
+          </li>
+          {% endif %}
+
+      
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container my-4">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </div>
+
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+  <!-- ▼▼▼ ADIÇÃO: desativa fallback inline do template do modal e inclui o controlador externo ▼▼▼ -->
+  <script>window.__DESMEMBRAR_EXTERNAL__ = true;</script>
+  <script src="{{ url_for('static', filename='js/desmembrar_modal.js') }}" defer></script>
+  <!-- ▲▲▲ FIM DA ADIÇÃO ▲▲▲ -->
+
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+
+  {% block scripts %}{% endblock %}
+
+  <footer class="d-flex justify-content-center mt-5 mb-3 text-muted" style="font-size:1rem; width:100%;">
+    <div style="text-align:left;">
+      © 2025 Controle - Sp<br>
+      Sp Admin – v1.0
+    </div>
+  </footer>
+</body>
+</html>
+
+<script>
+(() => {
+  const TIMEOUT = 80; 
+  let buf   = '';
+  let timer = null;
+
+  async function sendCode(code){
+    try{
+      const r = await fetch('{{ url_for("euro.scan_to_cart") }}', {
+        method : 'POST',
+        headers: {
+          'Content-Type'   : 'application/json',
+          'X-Requested-With':'fetch',
+          'X-CSRFToken'    : '{{ csrf_token() if csrf_token is defined else "" }}'
+        },
+        body: JSON.stringify({code})
+      });
+      const j = await r.json();
+      if(j.ok){
+        console.log('[SCAN] adicionado:', code);
+      }else{
+        alert(j.msg || 'Falha ao adicionar: '+code);
+      }
+    }catch(e){ console.error(e); }
+  }
+
+  window.addEventListener('keydown', ev => {
+    if(/^(input|textarea|select)$/i.test(ev.target.tagName)) return;
+
+    if(ev.key === 'Enter'){
+      if(buf){
+        sendCode(buf);
+        buf = '';
+      }
+      if(timer){ clearTimeout(timer); timer = null; }
+      return;
+    }
+
+    if(ev.key.length === 1){ 
+      buf += ev.key;
+      if(timer) clearTimeout(timer);
+      timer = setTimeout(() => buf='', TIMEOUT);
+    }
+  });
+})();
+</script>
+
+<!-- ▼▼▼ ADIÇÃO OPCIONAL: helper para inicializar o modal após innerHTML ▼▼▼ -->
+<script>
+  // Chame window.initDesmembrarModal(root) logo após:
+  //   root.innerHTML = html;
+  //   const modalEl = root.querySelector('#desmembrarModal');
+  // Isso encaminha para __desmembrarInit se o controlador externo já estiver carregado.
+  window.initDesmembrarModal = function(root) {
+    try {
+      const el = root ? (root.querySelector?.('#desmembrarModal') || root) : document;
+      if (window.__desmembrarInit) {
+        window.__desmembrarInit(el);
+      }
+    } catch (e) {
+      console.error('[initDesmembrarModal] erro:', e);
+    }
+  };
+</script>
+

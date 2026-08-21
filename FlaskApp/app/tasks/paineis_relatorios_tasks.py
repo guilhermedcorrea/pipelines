@@ -29,7 +29,7 @@ def gerar_relatorio_ocupacao_excel_async(self, ano: int, dt_ini=None, dt_fim=Non
             },
         )
 
-        from app.euromidia.controle_paineis_views import (
+        from app.midia.controle_paineis_views import (
             _gerar_excel_ocupacao_ano_bytes,
             _normalizar_periodo_exportacao_ocupacao,
             _obter_pasta_relatorios_ocupacao,
@@ -116,7 +116,7 @@ def gerar_relatorio_ocupacao_clientes_excel_async(self, ano: int, dt_ini=None, d
             },
         )
 
-        from app.euromidia.controle_paineis_views import (
+        from app.midia.controle_paineis_views import (
             _gerar_excel_ocupacao_clientes_bytes,
             _normalizar_periodo_exportacao_ocupacao,
             _obter_pasta_relatorios_ocupacao,

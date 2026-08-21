@@ -1,0 +1,1058 @@
+from __future__ import annotations
+
+import logging
+from datetime import timedelta
+from typing import Any
+
+import pendulum
+from airflow.exceptions import AirflowFailException
+from sqlalchemy import text
+
+try:
+    from airflow.sdk import dag, task
+except ImportError:
+    from airflow.decorators import dag, task
+
+try:
+    from airflow.providers.standard.operators.trigger_dagrun import (
+        TriggerDagRunOperator,
+    )
+except ImportError:
+    from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+
+from hooks.BancodeDados.SqlServer import HookSqlServer
+
+
+logger = logging.getLogger(__name__)
+
+NOME_DAG = "pipeline_cancela_reserva"
+NOME_DAG_NOTIFICACOES = "pipeline_notificacoes_midia"
+CONN_ID_SQL_SERVER = "mssql_integracao"
+TIMEZONE_SAO_PAULO = pendulum.timezone("America/Sao_Paulo")
+NOME_TIMEZONE_SAO_PAULO = "America/Sao_Paulo"
+
+# As colunas de data/hora desta rotina representam o horário civil de
+# Campinas/São Paulo, sem informação de fuso no SQL Server. O instante atual
+# é calculado pelo Python/Pendulum e enviado como parâmetro para todas as
+# consultas. Assim, o DAG não depende do fuso configurado no servidor, no
+# container ou na instância do SQL Server.
+SQL_AGORA_SAO_PAULO = "CAST(:agora_sao_paulo AS datetime2)"
+
+NOME_USUARIO_INTEGRACAO = "INTEGRACAO"
+HORAS_MINIMAS_RESERVA_ABERTA = 48
+DIAS_UTEIS_RESERVA_COMUM = 2
+DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM = 1
+UF_CALENDARIO_RESERVA = "SP"
+MUNICIPIO_CALENDARIO_RESERVA = "VALINHOS"
+CODIGO_IBGE_CALENDARIO_RESERVA = 3556206
+LIMITE_DIAS_CALENDARIO_PARA_BUSCA = 60
+
+
+def _sql_data_apos_dias_uteis(
+    expressao_data: str,
+    quantidade_dias_uteis: int,
+) -> str:
+    """
+    Monta uma expressão SQL Server que retorna a data do enésimo dia útil
+    posterior à data informada.
+
+    Um dia é útil quando:
+    - não é sábado nem domingo;
+    - não existe feriado/ponto facultativo ativo e não útil aplicável ao
+      Brasil, ao Estado de São Paulo ou ao Município de Valinhos.
+
+    A conta do dia da semana usa uma segunda-feira fixa (1900-01-01), portanto
+    não depende de SET DATEFIRST nem do idioma configurado na sessão SQL.
+    """
+    if quantidade_dias_uteis < 1:
+        raise ValueError("quantidade_dias_uteis deve ser maior ou igual a 1.")
+
+    return f"""
+(
+    SELECT MAX(dias_uteis.DataUtil)
+    FROM (
+        SELECT TOP ({quantidade_dias_uteis})
+               calendario.DataCalendario AS DataUtil
+        FROM (
+            SELECT TOP ({LIMITE_DIAS_CALENDARIO_PARA_BUSCA})
+                   ROW_NUMBER() OVER (ORDER BY objetos_a.object_id, objetos_b.object_id) AS Numero
+            FROM sys.all_objects AS objetos_a
+            CROSS JOIN sys.all_objects AS objetos_b
+        ) AS numeros
+        CROSS APPLY (
+            SELECT DATEADD(
+                       DAY,
+                       CAST(numeros.Numero AS int),
+                       CAST({expressao_data} AS date)
+                   ) AS DataCalendario
+        ) AS calendario
+        WHERE
+            DATEDIFF(
+                DAY,
+                CONVERT(date, '19000101', 112),
+                calendario.DataCalendario
+            ) % 7 BETWEEN 0 AND 4
+            AND NOT EXISTS (
+                SELECT 1
+                FROM [Integracao].[Silver].[FatoFeriados] AS feriado
+                WHERE
+                    feriado.Ativo = 1
+                    AND CAST(feriado.DataFeriado AS date) = calendario.DataCalendario
+                    AND COALESCE(
+                            feriado.ConsiderarComoDiaUtil,
+                            CASE
+                                WHEN ISNULL(feriado.EhFeriado, 0) = 1
+                                  OR ISNULL(feriado.EhPontoFacultativo, 0) = 1
+                                    THEN 0
+                                ELSE 1
+                            END
+                        ) = 0
+                    AND (
+                        UPPER(LTRIM(RTRIM(ISNULL(feriado.TipoFeriado, N''))))
+                            COLLATE Latin1_General_CI_AI = N'NACIONAL'
+                        OR UPPER(LTRIM(RTRIM(ISNULL(feriado.Abrangencia, N''))))
+                            COLLATE Latin1_General_CI_AI IN (N'BRASIL', N'NACIONAL')
+                        OR (
+                            (
+                                UPPER(LTRIM(RTRIM(ISNULL(feriado.TipoFeriado, N''))))
+                                    COLLATE Latin1_General_CI_AI = N'ESTADUAL'
+                                OR UPPER(LTRIM(RTRIM(ISNULL(feriado.Abrangencia, N''))))
+                                    COLLATE Latin1_General_CI_AI = N'ESTADO'
+                            )
+                            AND UPPER(LTRIM(RTRIM(ISNULL(feriado.UF, N''))))
+                                COLLATE Latin1_General_CI_AI = N'{UF_CALENDARIO_RESERVA}'
+                        )
+                        OR (
+                            UPPER(LTRIM(RTRIM(ISNULL(feriado.Abrangencia, N''))))
+                                COLLATE Latin1_General_CI_AI = N'MUNICIPIO'
+                            AND UPPER(LTRIM(RTRIM(ISNULL(feriado.UF, N''))))
+                                COLLATE Latin1_General_CI_AI = N'{UF_CALENDARIO_RESERVA}'
+                            AND (
+                                TRY_CONVERT(bigint, feriado.CodigoIBGE)
+                                    = {CODIGO_IBGE_CALENDARIO_RESERVA}
+                                OR UPPER(LTRIM(RTRIM(ISNULL(feriado.Municipio, N''))))
+                                    COLLATE Latin1_General_CI_AI
+                                    = N'{MUNICIPIO_CALENDARIO_RESERVA}'
+                            )
+                        )
+                    )
+            )
+        ORDER BY
+            calendario.DataCalendario
+    ) AS dias_uteis
+)
+"""
+
+
+def _sql_data_hora_apos_dias_uteis(
+    expressao_data_hora: str,
+    quantidade_dias_uteis: int,
+) -> str:
+    """
+    Retorna o enésimo dia útil posterior preservando o horário original.
+
+    Exemplo: sexta-feira às 14:30 + 2 dias úteis = terça-feira às 14:30,
+    desde que segunda-feira não seja feriado.
+    """
+    data_limite = _sql_data_apos_dias_uteis(
+        expressao_data_hora,
+        quantidade_dias_uteis,
+    )
+
+    return f"""
+DATEADD(
+    MILLISECOND,
+    DATEDIFF(
+        MILLISECOND,
+        CAST({expressao_data_hora} AS date),
+        {expressao_data_hora}
+    ),
+    CAST({data_limite} AS datetime2)
+)
+"""
+
+
+SQL_DATA_HORA_LIMITE_RESERVA_COMUM = _sql_data_hora_apos_dias_uteis(
+    "reserva.CriadoEm",
+    DIAS_UTEIS_RESERVA_COMUM,
+)
+
+SQL_DATA_CANCELAMENTO_PREFERENCIA_VENCIDA = _sql_data_apos_dias_uteis(
+    "reserva.DataFim",
+    1,
+)
+
+SQL_DATA_CANCELAMENTO_PREFERENCIA_ORIGEM_NAO_RENOVADA = (
+    _sql_data_apos_dias_uteis(
+        "ocupacao_origem.DataFim",
+        DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM + 1,
+    )
+)
+
+SQL_DATA_LIMITE_RENOVACAO_OCUPACAO_ORIGEM_AMOSTRA = (
+    _sql_data_apos_dias_uteis(
+        "ocupacao_origem_amostra.DataFim",
+        DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM,
+    )
+)
+
+SQL_DATA_CANCELAMENTO_PREFERENCIA_ORIGEM_AMOSTRA = (
+    _sql_data_apos_dias_uteis(
+        "ocupacao_origem_amostra.DataFim",
+        DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM + 1,
+    )
+)
+
+
+SQL_BUSCAR_USUARIO_INTEGRACAO = """
+SELECT TOP (1)
+       usr.IDDimUsuarios,
+       usr.NomeUsuario,
+       usr.Email
+FROM [Integracao].[Silver].[DimUsuarios] AS usr WITH (NOLOCK)
+WHERE
+    usr.BitAtivo = 1
+    AND UPPER(LTRIM(RTRIM(usr.NomeUsuario))) COLLATE Latin1_General_CI_AI = :nome_usuario_integracao
+ORDER BY
+    usr.IDDimUsuarios;
+"""
+
+
+SQL_CONDICAO_RESERVA_ABERTA = """
+    UPPER(LTRIM(RTRIM(ISNULL(reserva.Origem, N'')))) COLLATE Latin1_General_CI_AI = N'RESERVA'
+    AND reserva.CanceladoEm IS NULL
+    AND ISNULL(UPPER(LTRIM(RTRIM(reserva.Status))), N'') COLLATE Latin1_General_CI_AI <> N'CANCELADO'
+"""
+
+
+SQL_CONDICAO_TIPO_VINCULO_PREFERENCIA_RENOVACAO = """
+    UPPER(LTRIM(RTRIM(ISNULL(reserva.TipoVinculoOrigem, N'')))) COLLATE Latin1_General_CI_AI
+        LIKE N'%PREFERENCIA%RENOVACAO%CONTRATO%'
+"""
+
+
+SQL_EXISTE_ITEM_VINCULADO_BITPREFERENCIA_ATIVO = """
+EXISTS (
+    SELECT 1
+    FROM [Integracao].[Silver].[FatoControleContratosItensMidia] AS item_pref WITH (NOLOCK)
+    WHERE
+        item_pref.IDFatoControleContratosItensMidia = reserva.IDFatoControleContratosItemOrigem
+        AND ISNULL(item_pref.BitPreferencia, 0) = 1
+        AND ISNULL(item_pref.BitAtivo, 1) = 1
+)
+"""
+
+
+SQL_CONDICAO_RESERVA_PREFERENCIA = f"""
+(
+    {SQL_CONDICAO_TIPO_VINCULO_PREFERENCIA_RENOVACAO}
+    OR {SQL_EXISTE_ITEM_VINCULADO_BITPREFERENCIA_ATIVO}
+)
+"""
+
+
+SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA = f"""
+(
+    {SQL_CONDICAO_RESERVA_PREFERENCIA}
+    AND reserva.DataFim IS NOT NULL
+    AND {SQL_DATA_CANCELAMENTO_PREFERENCIA_VENCIDA}
+        <= CAST({SQL_AGORA_SAO_PAULO} AS date)
+)
+"""
+
+
+SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA = f"""
+(
+    {SQL_CONDICAO_RESERVA_PREFERENCIA}
+    AND reserva.IDFatoOcupacaoOrigem IS NOT NULL
+    AND reserva.IDFatoControleContratosItemOrigem IS NOT NULL
+    AND EXISTS (
+        SELECT 1
+        FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS ocupacao_origem WITH (NOLOCK)
+        WHERE
+            ocupacao_origem.IDFatoOcupacaoPaineisMidia = reserva.IDFatoOcupacaoOrigem
+            AND ocupacao_origem.IDFatoControleContratosItemOrigem = reserva.IDFatoControleContratosItemOrigem
+            AND ocupacao_origem.DataFim IS NOT NULL
+            AND {SQL_DATA_CANCELAMENTO_PREFERENCIA_ORIGEM_NAO_RENOVADA}
+                <= CAST({SQL_AGORA_SAO_PAULO} AS date)
+    )
+)
+"""
+
+
+SQL_CONDICAO_RESERVA_PREFERENCIA_PROTEGIDA = f"""
+(
+    {SQL_CONDICAO_RESERVA_PREFERENCIA}
+    AND NOT {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
+    AND NOT {SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA}
+)
+"""
+
+
+SQL_CONDICAO_RESERVA_PREFERENCIA_SEM_DATA_FIM = f"""
+(
+    {SQL_CONDICAO_RESERVA_PREFERENCIA}
+    AND reserva.DataFim IS NULL
+)
+"""
+
+
+SQL_CONDICAO_RESERVA_COMUM_MAIS_DE_48H = f"""
+(
+    NOT {SQL_CONDICAO_RESERVA_PREFERENCIA}
+    AND reserva.CriadoEm IS NOT NULL
+    AND {SQL_DATA_HORA_LIMITE_RESERVA_COMUM} <= {SQL_AGORA_SAO_PAULO}
+)
+"""
+
+
+SQL_CONDICAO_RESERVA_ELEGIVEL_CANCELAMENTO = f"""
+{SQL_CONDICAO_RESERVA_ABERTA}
+AND (
+    {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
+    OR {SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA}
+    OR {SQL_CONDICAO_RESERVA_COMUM_MAIS_DE_48H}
+)
+"""
+
+
+SQL_MOTIVO_CANCELAMENTO = f"""
+CASE
+    WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
+        THEN N'PREFERENCIA_RENOVACAO_VENCIDA'
+    WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA}
+        THEN N'PREFERENCIA_RENOVACAO_ORIGEM_NAO_RENOVADA'
+    ELSE N'RESERVA_COMUM_MAIS_DE_48H'
+END
+"""
+
+
+SQL_OBSERVACAO_CANCELAMENTO = f"""
+CASE
+    WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
+        THEN N'Reserva de preferência de renovação cancelada automaticamente no primeiro dia útil após a DataFim da própria reserva.'
+    WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA}
+        THEN N'Reserva de preferência de renovação cancelada automaticamente porque a ocupação origem não foi renovada após o prazo de 1 dia útil completo.'
+    ELSE N'Reserva comum cancelada automaticamente após 2 dias úteis (48 horas úteis), mantendo o horário de criação.'
+END
+"""
+
+
+SQL_CONTAR_RESERVAS_ELEGIVEIS_CANCELAMENTO = f"""
+SELECT
+    COUNT(1) AS TotalElegivel
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS reserva WITH (NOLOCK)
+WHERE
+{SQL_CONDICAO_RESERVA_ELEGIVEL_CANCELAMENTO};
+"""
+
+
+SQL_CONTAR_RESERVAS_COMUNS_ELEGIVEIS = f"""
+SELECT
+    COUNT(1) AS TotalReservaComumElegivel
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS reserva WITH (NOLOCK)
+WHERE
+{SQL_CONDICAO_RESERVA_ABERTA}
+AND {SQL_CONDICAO_RESERVA_COMUM_MAIS_DE_48H};
+"""
+
+
+SQL_CONTAR_RESERVAS_PREFERENCIA_PROTEGIDAS = f"""
+SELECT
+    COUNT(1) AS TotalProtegido
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS reserva WITH (NOLOCK)
+WHERE
+{SQL_CONDICAO_RESERVA_ABERTA}
+AND {SQL_CONDICAO_RESERVA_PREFERENCIA_PROTEGIDA};
+"""
+
+
+SQL_CONTAR_RESERVAS_PREFERENCIA_VENCIDAS = f"""
+SELECT
+    COUNT(1) AS TotalPreferenciaVencida
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS reserva WITH (NOLOCK)
+WHERE
+{SQL_CONDICAO_RESERVA_ABERTA}
+AND {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA};
+"""
+
+
+SQL_CONTAR_RESERVAS_PREFERENCIA_ORIGEM_NAO_RENOVADA = f"""
+SELECT
+    COUNT(1) AS TotalPreferenciaOrigemNaoRenovada
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS reserva WITH (NOLOCK)
+WHERE
+{SQL_CONDICAO_RESERVA_ABERTA}
+AND {SQL_CONDICAO_RESERVA_PREFERENCIA_ORIGEM_NAO_RENOVADA};
+"""
+
+
+SQL_CONTAR_RESERVAS_PREFERENCIA_SEM_DATA_FIM = f"""
+SELECT
+    COUNT(1) AS TotalPreferenciaSemDataFim
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS reserva WITH (NOLOCK)
+WHERE
+{SQL_CONDICAO_RESERVA_ABERTA}
+AND {SQL_CONDICAO_RESERVA_PREFERENCIA_SEM_DATA_FIM};
+"""
+
+
+SQL_LISTAR_AMOSTRA_RESERVAS_ELEGIVEIS_CANCELAMENTO = f"""
+SELECT TOP (30)
+       reserva.IDFatoOcupacaoPaineisMidia,
+       reserva.Referencia,
+       reserva.CodPonto,
+       reserva.CodFace,
+       reserva.MarcaExibida,
+       reserva.Status,
+       reserva.Origem,
+       reserva.TipoVinculoOrigem,
+       reserva.CriadoEm,
+       reserva.ExpiraEm,
+       reserva.DataInicio,
+       reserva.DataFim,
+       reserva.IDFatoControleContratos,
+       reserva.IDFatoControleContratosItemOrigem,
+       reserva.IDFatoOcupacaoOrigem,
+       item_amostra.IDFatoControleContratosItensMidia AS IDItemContratoVinculado,
+       item_amostra.BitPreferencia,
+       item_amostra.BitAtivo AS BitAtivoItemContrato,
+       item_amostra.DataInicioPrevisto AS DataInicioPrevistoItemContrato,
+       item_amostra.DataTerminoPrevisto AS DataTerminoPrevistoItemContrato,
+       item_amostra.DataFimEfetiva AS DataFimEfetivaItemContrato,
+       ocupacao_origem_amostra.IDFatoOcupacaoPaineisMidia AS IDOcupacaoOrigemRegraCancelamento,
+       ocupacao_origem_amostra.DataInicio AS DataInicioOcupacaoOrigem,
+       ocupacao_origem_amostra.DataFim AS DataFimOcupacaoOrigem,
+       {SQL_DATA_LIMITE_RENOVACAO_OCUPACAO_ORIGEM_AMOSTRA}
+           AS DataLimiteRenovacaoOcupacaoOrigem,
+       {SQL_DATA_CANCELAMENTO_PREFERENCIA_ORIGEM_AMOSTRA}
+           AS DataCancelamentoPreferenciaOcupacaoOrigem,
+       {SQL_DATA_CANCELAMENTO_PREFERENCIA_VENCIDA}
+           AS DataCancelamentoPreferenciaPelaPropriaDataFim,
+       {SQL_DATA_HORA_LIMITE_RESERVA_COMUM}
+           AS DataHoraLimiteReservaComum,
+       reserva.DataFim AS DataFimRegraCancelamento,
+       {SQL_MOTIVO_CANCELAMENTO} AS MotivoCancelamento,
+       CAST(DATEDIFF(MINUTE, reserva.CriadoEm, {SQL_AGORA_SAO_PAULO}) / 60.0 AS DECIMAL(18, 2)) AS HorasDesdeCriacao
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS reserva WITH (NOLOCK)
+OUTER APPLY (
+    SELECT TOP (1)
+           item_pref.IDFatoControleContratosItensMidia,
+           item_pref.BitPreferencia,
+           item_pref.BitAtivo,
+           item_pref.DataInicioPrevisto,
+           item_pref.DataTerminoPrevisto,
+           item_pref.DataFimEfetiva
+    FROM [Integracao].[Silver].[FatoControleContratosItensMidia] AS item_pref WITH (NOLOCK)
+    WHERE
+        item_pref.IDFatoControleContratosItensMidia = reserva.IDFatoControleContratosItemOrigem
+) AS item_amostra
+OUTER APPLY (
+    SELECT TOP (1)
+           origem.IDFatoOcupacaoPaineisMidia,
+           origem.Origem,
+           origem.Status,
+           origem.DataInicio,
+           origem.DataFim,
+           origem.CanceladoEm
+    FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS origem WITH (NOLOCK)
+    WHERE
+        origem.IDFatoOcupacaoPaineisMidia = reserva.IDFatoOcupacaoOrigem
+) AS ocupacao_origem_amostra
+WHERE
+{SQL_CONDICAO_RESERVA_ELEGIVEL_CANCELAMENTO}
+ORDER BY
+    CASE
+        WHEN {SQL_CONDICAO_RESERVA_PREFERENCIA_VENCIDA}
+            THEN 0
+        ELSE 1
+    END,
+    reserva.CriadoEm ASC,
+    reserva.IDFatoOcupacaoPaineisMidia ASC;
+"""
+
+
+SQL_LISTAR_AMOSTRA_RESERVAS_PREFERENCIA_PROTEGIDAS = f"""
+SELECT TOP (30)
+       reserva.IDFatoOcupacaoPaineisMidia,
+       reserva.Referencia,
+       reserva.CodPonto,
+       reserva.CodFace,
+       reserva.MarcaExibida,
+       reserva.Status,
+       reserva.Origem,
+       reserva.TipoVinculoOrigem,
+       reserva.CriadoEm,
+       reserva.DataInicio,
+       reserva.DataFim,
+       reserva.IDFatoControleContratos,
+       reserva.IDFatoControleContratosItemOrigem,
+       reserva.IDFatoOcupacaoOrigem,
+       item_amostra.IDFatoControleContratosItensMidia AS IDItemContratoVinculado,
+       item_amostra.BitPreferencia,
+       item_amostra.BitAtivo AS BitAtivoItemContrato,
+       item_amostra.DataInicioPrevisto AS DataInicioPrevistoItemContrato,
+       item_amostra.DataTerminoPrevisto AS DataTerminoPrevistoItemContrato,
+       item_amostra.DataFimEfetiva AS DataFimEfetivaItemContrato,
+       ocupacao_origem_amostra.IDFatoOcupacaoPaineisMidia AS IDOcupacaoOrigemRegraCancelamento,
+       ocupacao_origem_amostra.DataInicio AS DataInicioOcupacaoOrigem,
+       ocupacao_origem_amostra.DataFim AS DataFimOcupacaoOrigem,
+       {SQL_DATA_LIMITE_RENOVACAO_OCUPACAO_ORIGEM_AMOSTRA}
+           AS DataLimiteRenovacaoOcupacaoOrigem,
+       {SQL_DATA_CANCELAMENTO_PREFERENCIA_ORIGEM_AMOSTRA}
+           AS DataCancelamentoPreferenciaOcupacaoOrigem,
+       {SQL_DATA_CANCELAMENTO_PREFERENCIA_VENCIDA}
+           AS DataCancelamentoPreferenciaPelaPropriaDataFim,
+       {SQL_DATA_HORA_LIMITE_RESERVA_COMUM}
+           AS DataHoraLimiteReservaComum,
+       reserva.DataFim AS DataFimRegraCancelamento,
+       CAST(DATEDIFF(MINUTE, reserva.CriadoEm, {SQL_AGORA_SAO_PAULO}) / 60.0 AS DECIMAL(18, 2)) AS HorasDesdeCriacao
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS reserva WITH (NOLOCK)
+OUTER APPLY (
+    SELECT TOP (1)
+           item_pref.IDFatoControleContratosItensMidia,
+           item_pref.BitPreferencia,
+           item_pref.BitAtivo,
+           item_pref.DataInicioPrevisto,
+           item_pref.DataTerminoPrevisto,
+           item_pref.DataFimEfetiva
+    FROM [Integracao].[Silver].[FatoControleContratosItensMidia] AS item_pref WITH (NOLOCK)
+    WHERE
+        item_pref.IDFatoControleContratosItensMidia = reserva.IDFatoControleContratosItemOrigem
+) AS item_amostra
+OUTER APPLY (
+    SELECT TOP (1)
+           origem.IDFatoOcupacaoPaineisMidia,
+           origem.Origem,
+           origem.Status,
+           origem.DataInicio,
+           origem.DataFim,
+           origem.CanceladoEm
+    FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS origem WITH (NOLOCK)
+    WHERE
+        origem.IDFatoOcupacaoPaineisMidia = reserva.IDFatoOcupacaoOrigem
+) AS ocupacao_origem_amostra
+WHERE
+{SQL_CONDICAO_RESERVA_ABERTA}
+AND {SQL_CONDICAO_RESERVA_PREFERENCIA_PROTEGIDA}
+ORDER BY
+    reserva.DataFim ASC,
+    reserva.CriadoEm ASC,
+    reserva.IDFatoOcupacaoPaineisMidia ASC;
+"""
+
+
+SQL_LISTAR_AMOSTRA_RESERVAS_PREFERENCIA_SEM_DATA_FIM = f"""
+SELECT TOP (30)
+       reserva.IDFatoOcupacaoPaineisMidia,
+       reserva.Referencia,
+       reserva.CodPonto,
+       reserva.CodFace,
+       reserva.MarcaExibida,
+       reserva.Status,
+       reserva.Origem,
+       reserva.TipoVinculoOrigem,
+       reserva.CriadoEm,
+       reserva.DataInicio,
+       reserva.DataFim,
+       reserva.IDFatoControleContratos,
+       reserva.IDFatoControleContratosItemOrigem,
+       reserva.IDFatoOcupacaoOrigem,
+       ocupacao_origem_amostra.DataInicio AS DataInicioOcupacaoOrigem,
+       ocupacao_origem_amostra.DataFim AS DataFimOcupacaoOrigem,
+       {SQL_DATA_LIMITE_RENOVACAO_OCUPACAO_ORIGEM_AMOSTRA}
+           AS DataLimiteRenovacaoOcupacaoOrigem,
+       {SQL_DATA_CANCELAMENTO_PREFERENCIA_ORIGEM_AMOSTRA}
+           AS DataCancelamentoPreferenciaOcupacaoOrigem
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS reserva WITH (NOLOCK)
+OUTER APPLY (
+    SELECT TOP (1)
+           origem.IDFatoOcupacaoPaineisMidia,
+           origem.DataInicio,
+           origem.DataFim
+    FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS origem WITH (NOLOCK)
+    WHERE
+        origem.IDFatoOcupacaoPaineisMidia = reserva.IDFatoOcupacaoOrigem
+) AS ocupacao_origem_amostra
+WHERE
+{SQL_CONDICAO_RESERVA_ABERTA}
+AND {SQL_CONDICAO_RESERVA_PREFERENCIA_SEM_DATA_FIM}
+ORDER BY
+    reserva.CriadoEm ASC,
+    reserva.IDFatoOcupacaoPaineisMidia ASC;
+"""
+
+
+SQL_CANCELAR_RESERVAS_ELEGIVEIS = f"""
+UPDATE reserva
+SET
+    reserva.CanceladoEm = {SQL_AGORA_SAO_PAULO},
+    reserva.CanceladoPorIDUsuario = :id_usuario_integracao,
+    reserva.Status = N'CANCELADO',
+    reserva.Observacao = {SQL_OBSERVACAO_CANCELAMENTO},
+    reserva.DataAtualizacao = {SQL_AGORA_SAO_PAULO}
+OUTPUT
+    INSERTED.IDFatoOcupacaoPaineisMidia AS IDReserva
+FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS reserva WITH (UPDLOCK, READPAST, ROWLOCK)
+WHERE
+{SQL_CONDICAO_RESERVA_ELEGIVEL_CANCELAMENTO};
+"""
+
+
+SQL_OBTER_DATA_HORA_SQL_SERVER = f"""
+SELECT
+    {SQL_AGORA_SAO_PAULO} AS DataExecucaoSaoPaulo,
+    SYSUTCDATETIME() AS DataExecucaoUtcSqlServer,
+    CAST({SQL_AGORA_SAO_PAULO} AS date) AS DataReferenciaCancelamentoPreferencia,
+    {HORAS_MINIMAS_RESERVA_ABERTA} AS HorasUteisPrazoReservaComum,
+    {DIAS_UTEIS_RESERVA_COMUM} AS DiasUteisPrazoReservaComum,
+    {DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM}
+        AS DiasUteisToleranciaRenovacaoAposFimOcupacaoOrigem,
+    N'{UF_CALENDARIO_RESERVA}' AS UFCalendario,
+    N'{MUNICIPIO_CALENDARIO_RESERVA}' AS MunicipioCalendario,
+    {CODIGO_IBGE_CALENDARIO_RESERVA} AS CodigoIBGECalendario;
+"""
+
+
+DOC_MD = """
+# pipeline_cancela_reserva
+
+## Objetivo
+
+Cancelar automaticamente reservas antigas da tabela:
+
+`Integracao.Silver.FatoOcupacaoPaineisMidia`
+
+## Regra correta de cancelamento
+
+O DAG trabalha com três regras.
+
+### 1. Reserva comum
+
+Cancela quando:
+
+- `Origem = 'RESERVA'`
+- `CriadoEm IS NOT NULL`
+- atingiu 2 dias úteis (48 horas úteis) depois de `CriadoEm`, preservando o horário
+- `CanceladoEm IS NULL`
+- `Status` diferente de `CANCELADO`
+- não é reserva de preferência de renovação.
+
+Exemplo:
+
+- criada na sexta-feira às 14:30
+- se segunda-feira for útil, vence na terça-feira às 14:30
+- se segunda-feira for feriado não útil, vence na quarta-feira às 14:30.
+
+### 2. Reserva de preferência de renovação
+
+A preferência é identificada principalmente pela própria ocupação/reserva:
+
+- `Origem = 'RESERVA'`
+- `TipoVinculoOrigem` contendo `PREFERENCIA RENOVACAO CONTRATO`
+
+Como fallback de compatibilidade, também entra na exceção se o item vinculado diretamente por
+`IDFatoControleContratosItemOrigem` tiver `BitPreferencia = 1` e `BitAtivo = 1`.
+
+Essa reserva não é cancelada pela regra de 48 horas úteis.
+
+Ela é cancelada em duas situações:
+
+#### 2.1. Validade/período da própria reserva vencido
+
+A reserva é cancelada no primeiro dia útil posterior a `reserva.DataFim`.
+
+Exemplo:
+
+- `reserva.DataFim` em uma sexta-feira
+- sábado e domingo não cancelam
+- na segunda-feira cancela, se não houver feriado
+- se segunda-feira for feriado não útil, cancela na terça-feira.
+
+#### 2.2. Ocupação origem não renovada no prazo
+
+Quando a reserva foi criada por uma ocupação origem, o DAG usa:
+
+`reserva.IDFatoOcupacaoOrigem = ocupacao_origem.IDFatoOcupacaoPaineisMidia`
+
+A ocupação origem possui 1 dia útil completo de tolerância depois de sua
+`DataFim`. A preferência é cancelada no dia útil seguinte ao encerramento dessa
+tolerância, sempre vinculada pelo mesmo `IDFatoControleContratosItemOrigem`.
+
+Exemplo:
+
+- `ocupacao_origem.DataFim` em uma sexta-feira
+- segunda-feira é o dia útil de tolerância, se não for feriado
+- terça-feira é a data de cancelamento
+- se segunda-feira for feriado não útil, terça-feira será a tolerância e
+  quarta-feira será a data de cancelamento.
+
+Se `reserva.DataFim` estiver nula em uma preferência e a ocupação origem ainda não tiver vencido o prazo de renovação, o DAG protege a reserva e não cancela automaticamente.
+
+## Calendário de dias úteis
+
+O DAG consulta `Integracao.Silver.FatoFeriados`.
+
+São considerados:
+
+- feriados nacionais;
+- feriados estaduais de São Paulo;
+- feriados e pontos facultativos de Valinhos/SP;
+- somente registros ativos;
+- `ConsiderarComoDiaUtil = 1` mantém a data como útil;
+- `ConsiderarComoDiaUtil = 0` retira a data da contagem.
+
+Sábado e domingo nunca entram na contagem. O cálculo do dia da semana não
+depende de `SET DATEFIRST` nem do idioma da sessão SQL Server.
+
+## Segurança / idempotência
+
+O DAG não recancela registros já cancelados porque a atualização exige:
+
+- `CanceladoEm IS NULL`
+- `Status <> 'CANCELADO'`
+
+Também usa `UPDLOCK`, `READPAST` e `ROWLOCK` no `UPDATE` para reduzir risco de concorrência.
+
+O próprio `UPDATE` devolve, por meio de `OUTPUT INSERTED`, somente os IDs que
+foram realmente cancelados. A transação é confirmada antes de o DAG
+`pipeline_notificacoes_midia` ser disparado. Quando nenhum registro é
+alterado, o DAG de notificações não é chamado.
+
+O disparo é assíncrono: o DAG pai não mantém um worker ocupado aguardando o
+DAG de notificações. Isso evita bloqueio quando o executor ou o pool possui
+poucos slots disponíveis.
+
+## Horário de negócio
+
+O servidor e os containers podem permanecer em UTC. No início de cada
+execução, o DAG calcula o horário civil de Campinas/SP usando
+`America/Sao_Paulo` e envia esse mesmo valor, sem fuso, como parâmetro para
+todas as consultas e para o `UPDATE`.
+
+Isso evita que `SYSDATETIME()` compare uma hora UTC com colunas gravadas no
+horário local e cancele reservas aproximadamente 3 horas antes do prazo.
+
+## Agendamento
+
+Executa todos os dias a cada 8 minutos:
+
+`*/8 * * * *`
+"""
+
+
+def _normalizar_linhas_para_log(linhas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    linhas_normalizadas: list[dict[str, Any]] = []
+
+    for linha in linhas:
+        linha_normalizada: dict[str, Any] = {}
+
+        for chave, valor in linha.items():
+            if hasattr(valor, "isoformat"):
+                linha_normalizada[chave] = valor.isoformat()
+            else:
+                linha_normalizada[chave] = valor
+
+        linhas_normalizadas.append(linha_normalizada)
+
+    return linhas_normalizadas
+
+
+@dag(
+    dag_id=NOME_DAG,
+    description="Cancela reservas comuns após 2 dias úteis e preferências conforme DataFim e tolerância útil da ocupação origem.",
+    schedule="*/8 * * * *",
+    start_date=pendulum.datetime(2026, 5, 13, 0, 0, tz=TIMEZONE_SAO_PAULO),
+    catchup=False,
+    max_active_runs=1,
+    tags=[
+        "midia",
+        "ocupacao",
+        "reserva",
+        "preferencia-renovacao",
+        "ocupacao-origem",
+        "sql-server",
+        "integracao",
+        "cancelamento-automatico",
+    ],
+    doc_md=DOC_MD,
+    default_args={
+        "owner": "integracao",
+        "retries": 2,
+        "retry_delay": timedelta(minutes=1),
+    },
+)
+def pipeline_cancela_reserva():
+    @task(task_id="cancelar_reservas_elegiveis")
+    def cancelar_reservas_elegiveis() -> dict[str, Any]:
+        """
+        Cancela reservas conforme a regra de negócio.
+
+        Regra final:
+        - reserva comum: cancela após 2 dias úteis (48 horas úteis), mantendo o horário de criação;
+        - reserva com TipoVinculoOrigem = PREFERENCIA RENOVAÇÃO CONTRATO: não cancela pela regra de 48 horas úteis;
+        - reserva de preferência: cancela no primeiro dia útil após reserva.DataFim;
+        - reserva de preferência criada por ocupação origem: concede 1 dia útil completo de tolerância e cancela no próximo dia útil sem renovação;
+        - sábado, domingo e feriados não úteis de Brasil/SP/Valinhos não entram na contagem.
+        """
+        hook_sql_server = HookSqlServer(conn_id=CONN_ID_SQL_SERVER)
+        engine = hook_sql_server.obter_engine()
+
+        # O relógio físico do servidor pode estar em UTC. Pendulum converte o
+        # instante atual para Campinas/São Paulo e removemos apenas o tzinfo
+        # porque as colunas datetime/datetime2 da base guardam horário local
+        # sem offset. O mesmo valor é reutilizado em toda a transação.
+        agora_sao_paulo_com_fuso = pendulum.now(TIMEZONE_SAO_PAULO)
+        agora_sao_paulo = agora_sao_paulo_com_fuso.naive()
+        parametros_tempo = {"agora_sao_paulo": agora_sao_paulo}
+
+        logger.info(
+            "Relógio do cancelamento: timezone=%s | agora_sao_paulo=%s | offset_utc=%s",
+            NOME_TIMEZONE_SAO_PAULO,
+            agora_sao_paulo_com_fuso.isoformat(),
+            agora_sao_paulo_com_fuso.utcoffset(),
+        )
+
+        with engine.begin() as conexao:
+            usuario_integracao = conexao.execute(
+                text(SQL_BUSCAR_USUARIO_INTEGRACAO),
+                {"nome_usuario_integracao": NOME_USUARIO_INTEGRACAO},
+            ).mappings().first()
+
+            if not usuario_integracao:
+                raise AirflowFailException(
+                    "Usuário ativo 'Integração' não encontrado em "
+                    "[Integracao].[Silver].[DimUsuarios]. "
+                    "Verifique se existe um registro ativo com NomeUsuario = 'Integração'."
+                )
+
+            id_usuario_integracao = int(usuario_integracao["IDDimUsuarios"])
+            nome_usuario_encontrado = str(usuario_integracao["NomeUsuario"])
+
+            datas_execucao = conexao.execute(
+                text(SQL_OBTER_DATA_HORA_SQL_SERVER),
+                parametros_tempo,
+            ).mappings().first()
+
+            data_execucao_sao_paulo = datas_execucao["DataExecucaoSaoPaulo"]
+            data_execucao_utc_sql_server = datas_execucao[
+                "DataExecucaoUtcSqlServer"
+            ]
+            data_referencia_cancelamento_preferencia = datas_execucao[
+                "DataReferenciaCancelamentoPreferencia"
+            ]
+
+            total_elegivel_antes = int(
+                conexao.execute(
+                    text(SQL_CONTAR_RESERVAS_ELEGIVEIS_CANCELAMENTO),
+                    parametros_tempo,
+                ).scalar_one()
+                or 0
+            )
+
+            total_reserva_comum_elegivel = int(
+                conexao.execute(
+                    text(SQL_CONTAR_RESERVAS_COMUNS_ELEGIVEIS),
+                    parametros_tempo,
+                ).scalar_one()
+                or 0
+            )
+
+            total_preferencia_protegida = int(
+                conexao.execute(
+                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_PROTEGIDAS),
+                    parametros_tempo,
+                ).scalar_one()
+                or 0
+            )
+
+            total_preferencia_vencida_elegivel = int(
+                conexao.execute(
+                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_VENCIDAS),
+                    parametros_tempo,
+                ).scalar_one()
+                or 0
+            )
+
+            total_preferencia_origem_nao_renovada = int(
+                conexao.execute(
+                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_ORIGEM_NAO_RENOVADA),
+                    parametros_tempo,
+                ).scalar_one()
+                or 0
+            )
+
+            total_preferencia_sem_data_fim = int(
+                conexao.execute(
+                    text(SQL_CONTAR_RESERVAS_PREFERENCIA_SEM_DATA_FIM),
+                    parametros_tempo,
+                ).scalar_one()
+                or 0
+            )
+
+            amostra_elegiveis = [
+                dict(linha)
+                for linha in conexao.execute(
+                    text(SQL_LISTAR_AMOSTRA_RESERVAS_ELEGIVEIS_CANCELAMENTO),
+                    parametros_tempo,
+                ).mappings().all()
+            ]
+
+            amostra_preferencia_protegida = [
+                dict(linha)
+                for linha in conexao.execute(
+                    text(SQL_LISTAR_AMOSTRA_RESERVAS_PREFERENCIA_PROTEGIDAS),
+                    parametros_tempo,
+                ).mappings().all()
+            ]
+
+            amostra_preferencia_sem_data_fim = [
+                dict(linha)
+                for linha in conexao.execute(
+                    text(SQL_LISTAR_AMOSTRA_RESERVAS_PREFERENCIA_SEM_DATA_FIM),
+                    parametros_tempo,
+                ).mappings().all()
+            ]
+
+            logger.info(
+                "Reservas elegíveis para cancelamento: total=%s | "
+                "reserva_comum_48h=%s | preferencia_vencida_elegivel=%s | "
+                "preferencia_origem_nao_renovada=%s | preferencia_protegida=%s | "
+                "preferencia_sem_data_fim=%s | "
+                "amostra_elegiveis=%s | amostra_preferencia_protegida=%s | "
+                "amostra_preferencia_sem_data_fim=%s",
+                total_elegivel_antes,
+                total_reserva_comum_elegivel,
+                total_preferencia_vencida_elegivel,
+                total_preferencia_origem_nao_renovada,
+                total_preferencia_protegida,
+                total_preferencia_sem_data_fim,
+                _normalizar_linhas_para_log(amostra_elegiveis),
+                _normalizar_linhas_para_log(amostra_preferencia_protegida),
+                _normalizar_linhas_para_log(amostra_preferencia_sem_data_fim),
+            )
+
+            resultado_update = conexao.execute(
+                text(SQL_CANCELAR_RESERVAS_ELEGIVEIS),
+                {
+                    "id_usuario_integracao": id_usuario_integracao,
+                    **parametros_tempo,
+                },
+            )
+
+            reservas_canceladas = [
+                dict(linha) for linha in resultado_update.mappings().all()
+            ]
+            ids_reservas_canceladas = [
+                int(linha["IDReserva"]) for linha in reservas_canceladas
+            ]
+            total_cancelado = len(ids_reservas_canceladas)
+
+        # A saída do bloco engine.begin() confirma a transação. Somente depois
+        # desse ponto o resumo fica disponível para a tarefa que dispara o DAG
+        # de notificações.
+
+        resumo = {
+            "dag": NOME_DAG,
+            "regra": (
+                "Reserva comum cancela após 2 dias úteis (48 horas úteis). "
+                "Reserva com TipoVinculoOrigem=PREFERENCIA RENOVAÇÃO CONTRATO não cancela pela regra de 48 horas úteis. "
+                "Reserva de preferência cancela no primeiro dia útil após reserva.DataFim ou quando a ocupação origem "
+                "não for renovada depois de 1 dia útil completo de tolerância."
+            ),
+            "usuario_integracao": nome_usuario_encontrado,
+            "id_usuario_integracao": id_usuario_integracao,
+            "horas_minimas_reserva_aberta": HORAS_MINIMAS_RESERVA_ABERTA,
+            "dias_uteis_reserva_comum": DIAS_UTEIS_RESERVA_COMUM,
+            "dias_tolerancia_renovacao_apos_fim_ocupacao_origem": DIAS_TOLERANCIA_RENOVACAO_APOS_FIM_OCUPACAO_ORIGEM,
+            "uf_calendario_reserva": UF_CALENDARIO_RESERVA,
+            "municipio_calendario_reserva": MUNICIPIO_CALENDARIO_RESERVA,
+            "codigo_ibge_calendario_reserva": CODIGO_IBGE_CALENDARIO_RESERVA,
+            "total_elegivel_antes": total_elegivel_antes,
+            "total_reserva_comum_elegivel": total_reserva_comum_elegivel,
+            "total_preferencia_protegida": total_preferencia_protegida,
+            "total_preferencia_vencida_elegivel": total_preferencia_vencida_elegivel,
+            "total_preferencia_origem_nao_renovada": total_preferencia_origem_nao_renovada,
+            "total_preferencia_sem_data_fim": total_preferencia_sem_data_fim,
+            "total_cancelado": int(total_cancelado or 0),
+            "ids_reservas_canceladas": ids_reservas_canceladas,
+            # Mantido para compatibilidade com o DAG de notificações. Agora
+            # este campo representa o horário de negócio de Campinas/SP.
+            "data_execucao_sql_server": (
+                data_execucao_sao_paulo.isoformat()
+                if hasattr(data_execucao_sao_paulo, "isoformat")
+                else str(data_execucao_sao_paulo)
+            ),
+            "data_execucao_sao_paulo": (
+                data_execucao_sao_paulo.isoformat()
+                if hasattr(data_execucao_sao_paulo, "isoformat")
+                else str(data_execucao_sao_paulo)
+            ),
+            "data_execucao_utc_sql_server": (
+                data_execucao_utc_sql_server.isoformat()
+                if hasattr(data_execucao_utc_sql_server, "isoformat")
+                else str(data_execucao_utc_sql_server)
+            ),
+            "timezone_negocio": NOME_TIMEZONE_SAO_PAULO,
+            "offset_utc_timezone_negocio": str(
+                agora_sao_paulo_com_fuso.utcoffset()
+            ),
+            "data_referencia_cancelamento_preferencia": (
+                data_referencia_cancelamento_preferencia.isoformat()
+                if hasattr(data_referencia_cancelamento_preferencia, "isoformat")
+                else str(data_referencia_cancelamento_preferencia)
+            ),
+            "amostra_elegiveis": _normalizar_linhas_para_log(amostra_elegiveis),
+            "amostra_preferencia_protegida": _normalizar_linhas_para_log(
+                amostra_preferencia_protegida
+            ),
+            "amostra_preferencia_sem_data_fim": _normalizar_linhas_para_log(
+                amostra_preferencia_sem_data_fim
+            ),
+        }
+
+        logger.info("Resumo do cancelamento automático de reservas: %s", resumo)
+
+        return resumo
+
+    @task.short_circuit(task_id="verificar_se_houve_cancelamento")
+    def verificar_se_houve_cancelamento(resumo: dict[str, Any]) -> bool:
+        ids_cancelados = resumo.get("ids_reservas_canceladas") or []
+        houve_cancelamento = bool(ids_cancelados)
+
+        if not houve_cancelamento:
+            logger.info(
+                "Nenhuma reserva foi cancelada nesta execução; o DAG %s não será disparado.",
+                NOME_DAG_NOTIFICACOES,
+            )
+
+        return houve_cancelamento
+
+    resultado_cancelamento = cancelar_reservas_elegiveis()
+    houve_cancelamento = verificar_se_houve_cancelamento(resultado_cancelamento)
+
+    disparar_notificacoes = TriggerDagRunOperator(
+        task_id="disparar_pipeline_notificacoes_midia",
+        trigger_dag_id=NOME_DAG_NOTIFICACOES,
+        conf={
+            "origem_disparo": NOME_DAG,
+            "tipo_evento": "RESERVA CANCELADA AUTOMATICAMENTE",
+            "ids_reservas_canceladas": (
+                "{{ ti.xcom_pull(task_ids='cancelar_reservas_elegiveis', "
+                "key='return_value')['ids_reservas_canceladas'] }}"
+            ),
+            "data_execucao_cancelamento": (
+                "{{ ti.xcom_pull(task_ids='cancelar_reservas_elegiveis', "
+                "key='return_value')['data_execucao_sql_server'] }}"
+            ),
+            "run_id_origem": "{{ run_id }}",
+        },
+  
+        wait_for_completion=False,
+        retries=0,
+    )
+
+    houve_cancelamento >> disparar_notificacoes
+
+
+pipeline_cancela_reserva()

@@ -1,0 +1,1497 @@
+{# templates/sp/movimentar_estoque_transfer.html #}
+{% extends "midia/base_midia.html" %}
+
+{% block title %}Movimentar Estoque do Item {{ item.IDItem }}{% endblock %}
+
+{% block content %}
+<style>
+  .stock-transfer-page {
+    --st-bg: #f4f7fb;
+    --st-surface: #ffffff;
+    --st-surface-soft: #f8fafc;
+    --st-border: #dbe3ee;
+    --st-border-strong: #c9d4e2;
+    --st-text: #132238;
+    --st-muted: #61728a;
+    --st-primary: #f5a800;
+    --st-primary-hover: #dc9500;
+    --st-primary-soft: #fff7dc;
+    --st-blue: #1f5da8;
+    --st-blue-soft: #edf5ff;
+    --st-success: #1d7a4f;
+    --st-success-soft: #eaf8f1;
+    --st-danger: #b42318;
+    --st-shadow: 0 12px 34px rgba(19, 34, 56, 0.08);
+    box-sizing: border-box;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    margin: 0;
+    padding: clamp(12px, 1.35vw, 28px);
+    color: var(--st-text);
+  }
+
+  .stock-transfer-page *,
+  .stock-transfer-page *::before,
+  .stock-transfer-page *::after {
+    box-sizing: border-box;
+  }
+
+  .stock-transfer-page h1,
+  .stock-transfer-page h2,
+  .stock-transfer-page h3,
+  .stock-transfer-page p {
+    margin-top: 0;
+  }
+
+  .st-hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 20px;
+    padding: clamp(20px, 3vw, 32px);
+    overflow: hidden;
+    border: 1px solid var(--st-border);
+    border-radius: 20px;
+    background:
+      radial-gradient(circle at 100% 0, rgba(245, 168, 0, 0.18), transparent 34%),
+      linear-gradient(135deg, #ffffff 0%, #f7faff 100%);
+    box-shadow: var(--st-shadow);
+  }
+
+  .st-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    color: var(--st-blue);
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .st-eyebrow::before {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--st-primary);
+    content: "";
+  }
+
+  .st-hero h1 {
+    margin-bottom: 8px;
+    font-size: clamp(1.55rem, 2.6vw, 2.25rem);
+    line-height: 1.18;
+    overflow-wrap: anywhere;
+  }
+
+  .st-hero-description {
+    max-width: 820px;
+    margin-bottom: 0;
+    color: var(--st-muted);
+    font-size: clamp(0.95rem, 1.4vw, 1.08rem);
+    line-height: 1.55;
+  }
+
+  .st-item-badge {
+    flex: 0 0 auto;
+    min-width: 110px;
+    padding: 14px 18px;
+    border: 1px solid #f1cf70;
+    border-radius: 16px;
+    background: var(--st-primary-soft);
+    text-align: center;
+  }
+
+  .st-item-badge span {
+    display: block;
+    margin-bottom: 2px;
+    color: #765400;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .st-item-badge strong {
+    font-size: 1.35rem;
+  }
+
+  .st-form {
+    display: grid;
+    gap: 20px;
+  }
+
+  .st-panel {
+    overflow: hidden;
+    border: 1px solid var(--st-border);
+    border-radius: 18px;
+    background: var(--st-surface);
+    box-shadow: 0 8px 24px rgba(19, 34, 56, 0.06);
+  }
+
+  .st-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--st-border);
+    background: var(--st-surface-soft);
+  }
+
+  .st-panel-header h2,
+  .st-panel-header h3 {
+    margin-bottom: 3px;
+    font-size: 1.08rem;
+    line-height: 1.3;
+  }
+
+  .st-panel-header p {
+    margin-bottom: 0;
+    color: var(--st-muted);
+    font-size: 0.88rem;
+    line-height: 1.45;
+  }
+
+  .st-step {
+    display: inline-grid;
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    border-radius: 11px;
+    background: var(--st-blue);
+    color: #fff;
+    font-size: 0.88rem;
+    font-weight: 800;
+  }
+
+  .st-panel-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .st-panel-body {
+    padding: clamp(18px, 2.5vw, 26px);
+  }
+
+  .st-route-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 48px minmax(0, 1fr);
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .st-location-card {
+    min-width: 0;
+    padding: clamp(16px, 2vw, 22px);
+    border: 1px solid var(--st-border);
+    border-radius: 16px;
+    background: var(--st-surface-soft);
+  }
+
+  .st-location-card--origin {
+    border-top: 4px solid var(--st-blue);
+  }
+
+  .st-location-card--destination {
+    border-top: 4px solid var(--st-success);
+  }
+
+  .st-location-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+
+  .st-location-title h3 {
+    margin-bottom: 0;
+    font-size: 1rem;
+  }
+
+  .st-location-tag {
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: var(--st-blue-soft);
+    color: var(--st-blue);
+    font-size: 0.72rem;
+    font-weight: 800;
+  }
+
+  .st-location-card--destination .st-location-tag {
+    background: var(--st-success-soft);
+    color: var(--st-success);
+  }
+
+  .st-flow-marker {
+    display: grid;
+    align-self: center;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    border: 1px solid #efd17c;
+    border-radius: 999px;
+    background: var(--st-primary-soft);
+    color: #765400;
+    font-size: 1.35rem;
+    font-weight: 900;
+  }
+
+  .st-field + .st-field {
+    margin-top: 15px;
+  }
+
+  .st-label {
+    display: block;
+    margin-bottom: 7px;
+    color: #34445c;
+    font-size: 0.82rem;
+    font-weight: 800;
+  }
+
+  .st-required {
+    color: var(--st-danger);
+  }
+
+  .st-control {
+    display: block;
+    width: 100%;
+    min-height: 46px;
+    padding: 10px 13px;
+    border: 1px solid var(--st-border-strong);
+    border-radius: 11px;
+    outline: none;
+    background: #fff;
+    color: var(--st-text);
+    font: inherit;
+    line-height: 1.35;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  select.st-control {
+    padding-right: 38px;
+    cursor: pointer;
+  }
+
+  .st-control:focus {
+    border-color: var(--st-blue);
+    box-shadow: 0 0 0 4px rgba(31, 93, 168, 0.12);
+  }
+
+  .st-control:disabled {
+    cursor: not-allowed;
+    background: #eef2f7;
+    color: var(--st-muted);
+  }
+
+  .st-help {
+    display: block;
+    margin-top: 7px;
+    color: var(--st-muted);
+    font-size: 0.78rem;
+    line-height: 1.4;
+  }
+
+  .st-quantity-box {
+    display: grid;
+    grid-template-columns: minmax(200px, 320px) minmax(0, 1fr);
+    align-items: end;
+    gap: 22px;
+    margin-top: 22px;
+    padding: 18px;
+    border: 1px solid #efd998;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #fffaf0, #fffdf8);
+  }
+
+  .st-quantity-box .st-field {
+    margin: 0;
+  }
+
+  .st-quantity-status {
+    display: flex;
+    align-items: center;
+    min-height: 46px;
+    margin: 0;
+    color: #6d5315;
+    font-size: 0.88rem;
+    font-weight: 700;
+    line-height: 1.45;
+  }
+
+  .st-quantity-status.is-error {
+    color: var(--st-danger);
+  }
+
+  .st-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--st-border);
+    border-radius: 13px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .st-table {
+    width: 100%;
+    min-width: 560px;
+    border-collapse: collapse;
+    background: #fff;
+  }
+
+  .st-table th,
+  .st-table td {
+    padding: 13px 15px;
+    border-bottom: 1px solid var(--st-border);
+    text-align: left;
+    vertical-align: middle;
+  }
+
+  .st-table th {
+    background: var(--st-surface-soft);
+    color: #43526a;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .st-table td {
+    font-size: 0.9rem;
+  }
+
+  .st-table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .st-empty-row {
+    color: var(--st-muted);
+    text-align: center !important;
+  }
+
+  .st-lot-selector {
+    max-width: 640px;
+    margin-top: 18px;
+  }
+
+  .st-series-section {
+    margin-top: 18px;
+    padding: 18px;
+    border: 1px solid var(--st-border);
+    border-radius: 14px;
+    background: var(--st-surface-soft);
+  }
+
+  .st-series-section h3 {
+    margin-bottom: 6px;
+    font-size: 0.98rem;
+  }
+
+  .st-series-select-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .st-series-select-row .st-control {
+    flex: 1 1 auto;
+  }
+
+  .st-balance-grid,
+  .st-details-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .st-balance-card {
+    padding: 20px;
+    border: 1px solid var(--st-border);
+    border-radius: 15px;
+    background: var(--st-surface-soft);
+  }
+
+  .st-balance-card--origin {
+    background: var(--st-blue-soft);
+  }
+
+  .st-balance-card--destination {
+    background: var(--st-success-soft);
+  }
+
+  .st-balance-label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--st-muted);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .st-balance-value {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+  }
+
+  .st-balance-value strong {
+    font-size: clamp(1.65rem, 3vw, 2.15rem);
+    line-height: 1;
+  }
+
+  .st-balance-value small {
+    color: var(--st-muted);
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+
+  .st-detail-card {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--st-border);
+    border-radius: 15px;
+    background: #fff;
+  }
+
+  .st-detail-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 15px 17px;
+    border-bottom: 1px solid var(--st-border);
+    background: var(--st-surface-soft);
+  }
+
+  .st-detail-card-header h3 {
+    margin-bottom: 0;
+    font-size: 0.95rem;
+  }
+
+  .st-detail-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0;
+    padding: 6px 17px;
+  }
+
+  .st-detail-item {
+    min-width: 0;
+    padding: 12px 8px 12px 0;
+    border-bottom: 1px solid var(--st-border);
+  }
+
+  .st-detail-item:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .st-detail-item dt {
+    margin-bottom: 4px;
+    color: var(--st-muted);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .st-detail-item dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+    font-size: 0.9rem;
+    font-weight: 700;
+  }
+
+  .st-actions {
+    position: sticky;
+    z-index: 5;
+    bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 15px;
+    border: 1px solid var(--st-border);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 12px 34px rgba(19, 34, 56, 0.14);
+    backdrop-filter: blur(10px);
+  }
+
+  .st-btn {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border: 1px solid transparent;
+    border-radius: 11px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 800;
+    line-height: 1.2;
+    text-decoration: none !important;
+    transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .st-btn:hover {
+    transform: translateY(-1px);
+  }
+
+  .st-btn-primary {
+    border-color: var(--st-primary);
+    background: var(--st-primary);
+    color: #251b00 !important;
+    box-shadow: 0 7px 16px rgba(245, 168, 0, 0.24);
+  }
+
+  .st-btn-primary:hover {
+    border-color: var(--st-primary-hover);
+    background: var(--st-primary-hover);
+  }
+
+  .st-btn-secondary {
+    border-color: var(--st-border-strong);
+    background: #fff;
+    color: var(--st-text) !important;
+  }
+
+  .st-btn-outline {
+    min-height: 38px;
+    padding: 8px 13px;
+    border-color: #9eb7d6;
+    background: #fff;
+    color: var(--st-blue) !important;
+  }
+
+  .st-btn-danger {
+    flex: 0 0 40px;
+    width: 40px;
+    min-height: 40px;
+    padding: 7px;
+    border-color: #e6aaa5;
+    background: #fff;
+    color: var(--st-danger) !important;
+  }
+
+  .st-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+    transform: none;
+  }
+
+  @media (min-width: 1600px) {
+    .stock-transfer-page {
+      padding: 24px 32px 32px;
+    }
+
+    .st-form {
+      gap: 24px;
+    }
+
+    .st-panel-body {
+      padding: 28px 30px;
+    }
+
+    .st-location-card {
+      padding: 24px 26px;
+    }
+
+    .st-control {
+      min-height: 50px;
+      font-size: 1rem;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .st-route-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .st-flow-marker {
+      transform: rotate(90deg);
+      justify-self: center;
+    }
+
+    .st-quantity-box {
+      grid-template-columns: 1fr;
+      align-items: start;
+      gap: 10px;
+    }
+  }
+
+  @media (max-width: 680px) {
+    .stock-transfer-page {
+      padding: 12px;
+    }
+
+    .st-hero {
+      flex-direction: column;
+      gap: 16px;
+      border-radius: 16px;
+    }
+
+    .st-item-badge {
+      width: 100%;
+      text-align: left;
+    }
+
+    .st-panel,
+    .st-actions {
+      border-radius: 14px;
+    }
+
+    .st-panel-header {
+      align-items: flex-start;
+      padding: 15px;
+    }
+
+    .st-panel-body {
+      padding: 15px;
+    }
+
+    .st-balance-grid,
+    .st-details-grid,
+    .st-detail-list {
+      grid-template-columns: 1fr;
+    }
+
+    .st-detail-item:nth-last-child(2) {
+      border-bottom: 1px solid var(--st-border);
+    }
+
+    .st-actions {
+      bottom: 6px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .st-btn {
+      width: 100%;
+    }
+  }
+
+  @media (max-width: 460px) {
+    .stock-transfer-page {
+      padding: 8px;
+    }
+
+    .st-panel-title {
+      align-items: flex-start;
+    }
+
+    .st-actions {
+      grid-template-columns: 1fr;
+    }
+
+    .st-series-select-row {
+      align-items: stretch;
+      flex-wrap: wrap;
+    }
+
+    .st-series-select-row .st-btn-danger {
+      width: 100%;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .stock-transfer-page * {
+      scroll-behavior: auto !important;
+      transition: none !important;
+    }
+  }
+</style>
+
+{% if pedido is defined %}
+  {% set voltar_url = url_for('euro.editar_pedido', pedido_id=pedido.IDPedido) %}
+{% else %}
+  {% set voltar_url = url_for('euro.ver_estoques', item_id=item.IDItem) %}
+{% endif %}
+
+<main class="stock-transfer-page">
+  <header class="st-hero">
+    <div>
+      <span class="st-eyebrow">Movimentação de estoque</span>
+      <h1>Transferir item entre estoques</h1>
+      <p class="st-hero-description">{{ item.NomeProduto }}</p>
+    </div>
+    <div class="st-item-badge" aria-label="Identificador do item">
+      <span>Item</span>
+      <strong>#{{ item.IDItem }}</strong>
+    </div>
+  </header>
+
+  <form
+    id="stock-transfer-form"
+    class="st-form"
+    method="POST"
+    action="{{ url_for('euro.movimentar_estoque', item_id=item.IDItem) }}"
+    autocomplete="off"
+  >
+    {# Obrigatório para o Flask-WTF/CSRFProtect aceitar este POST. #}
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <section class="st-panel" aria-labelledby="movimentacao-heading">
+      <header class="st-panel-header">
+        <div class="st-panel-title">
+          <span class="st-step" aria-hidden="true">1</span>
+          <div>
+            <h2 id="movimentacao-heading">Defina a movimentação</h2>
+            <p>Escolha de onde o item sairá e onde será recebido.</p>
+          </div>
+        </div>
+      </header>
+
+      <div class="st-panel-body">
+        <div class="st-route-grid">
+          <article class="st-location-card st-location-card--origin">
+            <div class="st-location-title">
+              <h3>Estoque de origem</h3>
+              <span class="st-location-tag">Saída</span>
+            </div>
+
+            <div class="st-field">
+              <label class="st-label" for="estoque_origem">
+                Tipo de estoque <span class="st-required" aria-hidden="true">*</span>
+              </label>
+              <select
+                class="st-control"
+                name="estoque_origem"
+                id="estoque_origem"
+                required
+              >
+                {% if not origem_groups %}
+                  <option value="" selected disabled>Nenhum estoque com saldo disponível</option>
+                {% endif %}
+                {% for nome, lista in origem_groups.items() %}
+                  <option value="{{ nome }}" data-tipo="{{ lista[0].IDTipoEstoque }}">
+                    {{ nome }} (Qtd: {{ lista[0].Saldo }})
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="st-field">
+              <label class="st-label" for="proprietario_origem">
+                Local / proprietário <span class="st-required" aria-hidden="true">*</span>
+              </label>
+              <select
+                class="st-control"
+                name="proprietario_origem"
+                id="proprietario_origem"
+                required
+              >
+                <option value="" selected disabled>Selecione o estoque de origem</option>
+              </select>
+            </div>
+          </article>
+
+          <div class="st-flow-marker" aria-hidden="true">→</div>
+
+          <article class="st-location-card st-location-card--destination">
+            <div class="st-location-title">
+              <h3>Estoque de destino</h3>
+              <span class="st-location-tag">Entrada</span>
+            </div>
+
+            <div class="st-field">
+              <label class="st-label" for="estoque_destino">
+                Tipo de estoque <span class="st-required" aria-hidden="true">*</span>
+              </label>
+              <select
+                class="st-control"
+                name="estoque_destino"
+                id="estoque_destino"
+                required
+              >
+                {% if not destino_groups %}
+                  <option value="" selected disabled>Nenhum estoque de destino disponível</option>
+                {% endif %}
+                {% for nome, lista in destino_groups.items() %}
+                  <option value="{{ nome }}">{{ nome }} (Qtd: {{ lista[0].Saldo }})</option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="st-field">
+              <label class="st-label" for="proprietario_destino">
+                Local / proprietário <span class="st-required" aria-hidden="true">*</span>
+              </label>
+              <select
+                class="st-control"
+                name="proprietario_destino"
+                id="proprietario_destino"
+                required
+              >
+                <option value="" selected disabled>Selecione o estoque de destino</option>
+              </select>
+            </div>
+          </article>
+        </div>
+
+        <div class="st-quantity-box">
+          <div class="st-field">
+            <label class="st-label" for="quantidade">
+              Quantidade a transferir <span class="st-required" aria-hidden="true">*</span>
+            </label>
+            <input
+              class="st-control"
+              type="number"
+              name="quantidade"
+              id="quantidade"
+              value="1"
+              min="1"
+              step="1"
+              inputmode="numeric"
+              required
+            >
+          </div>
+          <p id="quantidade_status" class="st-quantity-status" role="status" aria-live="polite">
+            Selecione os estoques para conferir o saldo disponível.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    {% if item.ControlaLote %}
+      <section class="st-panel" aria-labelledby="lotes-heading">
+        <header class="st-panel-header">
+          <div class="st-panel-title">
+            <span class="st-step" aria-hidden="true">2</span>
+            <div>
+              <h2 id="lotes-heading">Selecione o lote</h2>
+              <p>Somente lotes disponíveis no estoque de origem são exibidos.</p>
+            </div>
+          </div>
+        </header>
+
+        <div class="st-panel-body">
+          <div class="st-table-wrap">
+            <table class="st-table" id="table_lotes_origem">
+              <thead>
+                <tr>
+                  <th scope="col">Número do lote</th>
+                  <th scope="col">Quantidade disponível</th>
+                  <th scope="col">Produto</th>
+                </tr>
+              </thead>
+              <tbody id="tbody_lotes_origem">
+                <tr><td class="st-empty-row" colspan="3">Selecione um estoque de origem.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="st-field st-lot-selector">
+            <label class="st-label" for="numero_lote_escolhido">
+              Lote a transferir <span class="st-required" aria-hidden="true">*</span>
+            </label>
+
+            {% if pedido is defined %}
+              <input
+                class="st-control"
+                type="text"
+                name="numero_lote_escolhido"
+                id="numero_lote_escolhido"
+                placeholder="Ex.: 100"
+                required
+              >
+            {% else %}
+              <select
+                class="st-control"
+                name="numero_lote_escolhido"
+                id="numero_lote_escolhido"
+                required
+              >
+                <option value="" disabled selected>Selecione um lote</option>
+              </select>
+            {% endif %}
+          </div>
+
+          {% if item.ControlaNumerodeSerie and pedido is not defined %}
+            <div id="serie_section" class="st-series-section" hidden>
+              <h3>Séries do lote selecionado</h3>
+              <span class="st-help">Selecione as séries que acompanharão esta transferência.</span>
+              <div id="serie_container"></div>
+              <button type="button" id="add_serie_btn" class="st-btn st-btn-outline">
+                + Selecionar outra série
+              </button>
+            </div>
+          {% endif %}
+        </div>
+      </section>
+    {% endif %}
+
+    <section class="st-panel" aria-labelledby="resumo-heading">
+      <header class="st-panel-header">
+        <div class="st-panel-title">
+          <span class="st-step" aria-hidden="true">{% if item.ControlaLote %}3{% else %}2{% endif %}</span>
+          <div>
+            <h2 id="resumo-heading">Confira o resultado</h2>
+            <p>Os saldos abaixo são uma prévia antes da confirmação.</p>
+          </div>
+        </div>
+      </header>
+
+      <div class="st-panel-body">
+        <div class="st-balance-grid" aria-live="polite">
+          <article class="st-balance-card st-balance-card--origin">
+            <span class="st-balance-label">Saldo na origem após a transferência</span>
+            <div class="st-balance-value">
+              <strong id="origem_restante">0</strong>
+              <small>unidade(s)</small>
+            </div>
+          </article>
+
+          <article class="st-balance-card st-balance-card--destination">
+            <span class="st-balance-label">Saldo no destino após a transferência</span>
+            <div class="st-balance-value">
+              <strong id="destino_restante">0</strong>
+              <small>unidade(s)</small>
+            </div>
+          </article>
+        </div>
+
+        <div class="st-details-grid" style="margin-top: 16px;">
+          <article class="st-detail-card">
+            <header class="st-detail-card-header">
+              <h3>Detalhes da origem</h3>
+              <span class="st-location-tag">Saída</span>
+            </header>
+            <dl class="st-detail-list">
+              <div class="st-detail-item">
+                <dt>ID do item</dt>
+                <dd>{{ item.IDItem }}</dd>
+              </div>
+              <div class="st-detail-item">
+                <dt>Família</dt>
+                <dd>{{ item.FamiliaID or '-' }}</dd>
+              </div>
+              <div class="st-detail-item">
+                <dt>Referência externa</dt>
+                <dd>{{ item.ReferenciaExterna or '-' }}</dd>
+              </div>
+              <div class="st-detail-item">
+                <dt>Saldo atual → final</dt>
+                <dd><span id="origem_atual">0</span> → <span id="origem_transferido">0</span></dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="st-detail-card">
+            <header class="st-detail-card-header">
+              <h3>Detalhes do destino</h3>
+              <span class="st-location-tag" style="background: var(--st-success-soft); color: var(--st-success);">Entrada</span>
+            </header>
+            <dl class="st-detail-list">
+              <div class="st-detail-item">
+                <dt>ID do item</dt>
+                <dd>{{ item.IDItem }}</dd>
+              </div>
+              <div class="st-detail-item">
+                <dt>Família</dt>
+                <dd>{{ item.FamiliaID or '-' }}</dd>
+              </div>
+              <div class="st-detail-item">
+                <dt>Referência externa</dt>
+                <dd>{{ item.ReferenciaExterna or '-' }}</dd>
+              </div>
+              <div class="st-detail-item">
+                <dt>Saldo atual → final</dt>
+                <dd><span id="destino_atual">0</span> → <span id="destino_transferido">0</span></dd>
+              </div>
+            </dl>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <div class="st-actions">
+      <a href="{{ voltar_url }}" class="st-btn st-btn-secondary">← Voltar</a>
+      <button type="submit" id="confirmar_transferencia" class="st-btn st-btn-primary">
+        <span id="confirmar_texto">Confirmar transferência</span>
+      </button>
+    </div>
+  </form>
+</main>
+
+<script>
+  (() => {
+    'use strict';
+
+    const origemGroups = {{ origem_groups|tojson }};
+    const destinoGroups = {{ destino_groups|tojson }};
+    const nomeProduto = {{ (item.NomeProduto or '')|tojson }};
+    const seriesUrl = {{ url_for('euro.api_series')|tojson }};
+
+    const form = document.getElementById('stock-transfer-form');
+    const origemSelect = document.getElementById('estoque_origem');
+    const destinoSelect = document.getElementById('estoque_destino');
+    const origemPropSelect = document.getElementById('proprietario_origem');
+    const destinoPropSelect = document.getElementById('proprietario_destino');
+    const quantidadeInput = document.getElementById('quantidade');
+    const quantidadeStatus = document.getElementById('quantidade_status');
+    const confirmarButton = document.getElementById('confirmar_transferencia');
+    const confirmarTexto = document.getElementById('confirmar_texto');
+
+    function numero(valor) {
+      const convertido = Number(valor);
+      return Number.isFinite(convertido) ? convertido : 0;
+    }
+
+    function chaveRegistro(registro) {
+      const idEstoque = registro.IDEstoque ?? '';
+      const idProprietario = registro.IDProprietario ?? '';
+      const codPonto = registro.CodPonto ?? '';
+      return `${idEstoque}|${idProprietario}|${codPonto}`;
+    }
+
+    function identidadeRegistro(nomeEstoque, registro) {
+      if (!registro) return null;
+
+      const tipo = String(nomeEstoque || registro.NomeEstoque || '').trim().toLowerCase();
+      const proprietario = String(registro.IDProprietario ?? '').trim();
+      const codPonto = String(registro.CodPonto ?? '').trim().toLowerCase();
+      const idEstoque = registro.IDEstoque;
+
+      // Estoques Euro/Sp podem aparecer no destino sem IDEstoque criado.
+      // Nesses casos, proprietário + ponto identificam o mesmo local físico.
+      if ((proprietario && proprietario !== '0') || codPonto) {
+        return `${tipo}|proprietario:${proprietario}|ponto:${codPonto}`;
+      }
+
+      if (idEstoque !== null && idEstoque !== undefined && idEstoque !== '') {
+        return `${tipo}|estoque:${idEstoque}`;
+      }
+
+      return `${tipo}|generico:${proprietario}|ponto:${codPonto}`;
+    }
+
+    function textoRegistro(registro) {
+      const partes = [registro.NomeEstoque || 'Estoque'];
+      if (registro.IDEstoque !== null && registro.IDEstoque !== undefined && registro.IDEstoque !== '') {
+        partes.push(`ID ${registro.IDEstoque}`);
+      }
+      if (registro.IDProprietario !== null && registro.IDProprietario !== undefined && numero(registro.IDProprietario) !== 0) {
+        partes.push(`Proprietário ${registro.IDProprietario}`);
+      }
+      if (registro.CodPonto) partes.push(`Ponto ${registro.CodPonto}`);
+      if (registro.Logradouro) partes.push(registro.Logradouro);
+      return partes.join(' • ');
+    }
+
+    function adicionarOpcao(select, valor, texto, desabilitada = false) {
+      const opcao = document.createElement('option');
+      opcao.value = valor;
+      opcao.textContent = texto;
+      opcao.disabled = desabilitada;
+      select.appendChild(opcao);
+      return opcao;
+    }
+
+    function registroSelecionado(tipo) {
+      const estoque = tipo === 'origem' ? origemSelect : destinoSelect;
+      const proprietario = tipo === 'origem' ? origemPropSelect : destinoPropSelect;
+      const grupos = tipo === 'origem' ? origemGroups : destinoGroups;
+      const lista = grupos[estoque.value] || [];
+      const selecionado = lista.find((registro) => chaveRegistro(registro) === proprietario.value);
+
+      if (tipo === 'origem') return selecionado || lista[0] || null;
+      if (selecionado && !registroEhOrigem(estoque.value, selecionado)) return selecionado;
+      return lista.find((registro) => !registroEhOrigem(estoque.value, registro)) || null;
+    }
+
+    function saldoRegistro(registro) {
+      return registro ? numero(registro.Saldo ?? registro.Quantidade) : 0;
+    }
+
+    function registroEhOrigem(nomeDestino, registroDestino) {
+      const origem = registroSelecionado('origem');
+      if (!origem || !registroDestino) return false;
+
+      return identidadeRegistro(origemSelect.value, origem)
+        === identidadeRegistro(nomeDestino, registroDestino);
+    }
+
+    function mesmaLocalizacaoSelecionada() {
+      const origem = registroSelecionado('origem');
+      const destino = registroSelecionado('destino');
+      if (!origem || !destino) return false;
+
+      return identidadeRegistro(origemSelect.value, origem)
+        === identidadeRegistro(destinoSelect.value, destino);
+    }
+
+    function atualizarTiposDestino() {
+      Array.from(destinoSelect.options).forEach((opcao) => {
+        if (!opcao.dataset.rotuloOriginal) {
+          opcao.dataset.rotuloOriginal = opcao.textContent;
+        }
+
+        const lista = destinoGroups[opcao.value] || [];
+        const temLocalDiferente = lista.some(
+          (registro) => !registroEhOrigem(opcao.value, registro)
+        );
+
+        opcao.disabled = !temLocalDiferente;
+        opcao.textContent = temLocalDiferente
+          ? opcao.dataset.rotuloOriginal
+          : `${opcao.dataset.rotuloOriginal} — mesmo estoque da origem`;
+      });
+
+      const opcaoAtual = destinoSelect.selectedOptions[0];
+      if (!opcaoAtual || opcaoAtual.disabled) {
+        const primeiraValida = Array.from(destinoSelect.options).find(
+          (opcao) => !opcao.disabled && opcao.value
+        );
+
+        if (primeiraValida) {
+          destinoSelect.value = primeiraValida.value;
+        } else {
+          destinoSelect.selectedIndex = -1;
+        }
+      }
+
+      atualizarProprietario('destino');
+    }
+
+    function atualizarProprietario(tipo) {
+      const estoque = tipo === 'origem' ? origemSelect : destinoSelect;
+      const proprietario = tipo === 'origem' ? origemPropSelect : destinoPropSelect;
+      const grupos = tipo === 'origem' ? origemGroups : destinoGroups;
+      const lista = grupos[estoque.value] || [];
+      const vistos = new Set();
+
+      proprietario.replaceChildren();
+
+      lista.forEach((registro) => {
+        const chave = chaveRegistro(registro);
+        if (vistos.has(chave)) return;
+        vistos.add(chave);
+        const ehMesmoLocal = tipo === 'destino' && registroEhOrigem(estoque.value, registro);
+        const texto = ehMesmoLocal
+          ? `${textoRegistro(registro)} — mesmo estoque da origem`
+          : textoRegistro(registro);
+        adicionarOpcao(proprietario, chave, texto, ehMesmoLocal);
+      });
+
+      const primeiraOpcaoValida = Array.from(proprietario.options).find(
+        (opcao) => !opcao.disabled && opcao.value
+      );
+
+      if (primeiraOpcaoValida) {
+        primeiraOpcaoValida.selected = true;
+      } else {
+        const mensagem = tipo === 'destino'
+          ? 'Escolha um estoque de destino diferente da origem'
+          : 'Nenhum local disponível';
+        adicionarOpcao(proprietario, '', mensagem, true).selected = true;
+      }
+
+      {% if item.ControlaLote %}
+      if (tipo === 'origem') popularLotes();
+      {% endif %}
+
+      if (tipo === 'origem') {
+        atualizarTiposDestino();
+        return;
+      }
+
+      atualizarCalculos();
+    }
+
+    {% if item.ControlaLote %}
+    const lotesData = {{ lotes_data|tojson }};
+
+    {% if pedido is defined %}
+    const pedidoLotes = [
+      {% for lote in pedido_lotes_data %}
+      {
+        NumeroLote: {{ lote.NumeroLote|tojson }},
+        Quantidade: {{ lote.Quantidade }},
+        NomeProduto: {{ (lote.NomeProduto or '')|tojson }}
+      }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ];
+    {% endif %}
+
+    const lotesBody = document.getElementById('tbody_lotes_origem');
+    const loteControl = document.getElementById('numero_lote_escolhido');
+
+    function adicionarCelula(linha, texto, classe = '') {
+      const celula = document.createElement('td');
+      celula.textContent = texto;
+      if (classe) celula.className = classe;
+      linha.appendChild(celula);
+    }
+
+    function mostrarLotesVazios(mensagem) {
+      const linha = document.createElement('tr');
+      const celula = document.createElement('td');
+      celula.colSpan = 3;
+      celula.className = 'st-empty-row';
+      celula.textContent = mensagem;
+      linha.appendChild(celula);
+      lotesBody.replaceChildren(linha);
+    }
+
+    function lotesDoEstoqueSelecionado() {
+      const idEstoque = String(origemPropSelect.value || '').split('|')[0];
+      let lotes = lotesData[idEstoque] || [];
+
+      {% if pedido is defined %}
+      if (numero(idEstoque) === {{ pedido.IDPedido }}) lotes = pedidoLotes;
+      {% endif %}
+
+      const vistos = new Set();
+      return lotes.filter((lote) => {
+        const chave = String(lote.NumeroLote ?? '');
+        if (!chave || vistos.has(chave)) return false;
+        vistos.add(chave);
+        return true;
+      });
+    }
+
+    function popularLotes() {
+      const lotes = lotesDoEstoqueSelecionado();
+
+      {% if pedido is not defined %}
+      loteControl.replaceChildren();
+      adicionarOpcao(loteControl, '', 'Selecione um lote', true).selected = true;
+      {% endif %}
+
+      if (!lotes.length) {
+        mostrarLotesVazios('Nenhum lote disponível neste estoque.');
+        atualizarCalculos();
+        return;
+      }
+
+      lotesBody.replaceChildren();
+      lotes.forEach((lote) => {
+        const linha = document.createElement('tr');
+        adicionarCelula(linha, lote.NumeroLote ?? '-');
+        adicionarCelula(linha, numero(lote.Quantidade));
+        adicionarCelula(linha, lote.NomeProduto || nomeProduto);
+        lotesBody.appendChild(linha);
+
+        {% if pedido is not defined %}
+        adicionarOpcao(
+          loteControl,
+          String(lote.NumeroLote ?? ''),
+          `${lote.NumeroLote} (Qtd: ${numero(lote.Quantidade)})`
+        );
+        {% endif %}
+      });
+
+      atualizarCalculos();
+    }
+
+    function saldoLoteSelecionado() {
+      if (!loteControl || !loteControl.value) return null;
+      const lote = lotesDoEstoqueSelecionado().find(
+        (itemLote) => String(itemLote.NumeroLote) === String(loteControl.value)
+      );
+      return lote ? numero(lote.Quantidade) : null;
+    }
+    {% endif %}
+
+    function limiteDisponivel() {
+      const saldoOrigem = saldoRegistro(registroSelecionado('origem'));
+      {% if item.ControlaLote %}
+      const saldoLote = saldoLoteSelecionado();
+      return saldoLote === null ? saldoOrigem : Math.min(saldoOrigem, saldoLote);
+      {% else %}
+      return saldoOrigem;
+      {% endif %}
+    }
+
+    function atualizarCalculos() {
+      const origem = registroSelecionado('origem');
+      const destino = registroSelecionado('destino');
+      const saldoOrigem = saldoRegistro(origem);
+      const saldoDestino = saldoRegistro(destino);
+      const quantidade = Math.max(0, Math.trunc(numero(quantidadeInput.value)));
+      const limite = limiteDisponivel();
+      const mesmaLocalizacao = mesmaLocalizacaoSelecionada();
+      const destinoValido = Boolean(destino) && !mesmaLocalizacao;
+      const saldoFinalOrigem = destinoValido
+        ? Math.max(0, saldoOrigem - quantidade)
+        : saldoOrigem;
+      const saldoFinalDestino = destinoValido
+        ? saldoDestino + quantidade
+        : null;
+      const ultrapassouSaldo = quantidade > limite;
+      const loteSelecionadoValido = {% if item.ControlaLote %}Boolean(loteControl && loteControl.value){% else %}true{% endif %};
+
+      quantidadeInput.max = String(Math.max(0, limite));
+      quantidadeStatus.classList.toggle(
+        'is-error',
+        mesmaLocalizacao || !destino || ultrapassouSaldo || limite <= 0
+      );
+
+      if (mesmaLocalizacao) {
+        quantidadeStatus.textContent = 'Origem e destino não podem representar o mesmo estoque.';
+      } else if (!destino) {
+        quantidadeStatus.textContent = 'Selecione um estoque de destino diferente da origem.';
+      } else if (limite <= 0) {
+        quantidadeStatus.textContent = 'Não há saldo disponível para esta seleção.';
+      } else if (ultrapassouSaldo) {
+        quantidadeStatus.textContent = `Quantidade acima do disponível. Máximo: ${limite}.`;
+      } else {
+        quantidadeStatus.textContent = `Saldo disponível para transferência: ${limite} unidade(s).`;
+      }
+
+      document.getElementById('origem_restante').textContent = saldoFinalOrigem;
+      document.getElementById('destino_restante').textContent = saldoFinalDestino ?? '—';
+      document.getElementById('origem_atual').textContent = saldoOrigem;
+      document.getElementById('origem_transferido').textContent = saldoFinalOrigem;
+      document.getElementById('destino_atual').textContent = destinoValido ? saldoDestino : '—';
+      document.getElementById('destino_transferido').textContent = saldoFinalDestino ?? '—';
+
+      confirmarButton.disabled = !origem
+        || !destinoValido
+        || quantidade <= 0
+        || ultrapassouSaldo
+        || limite <= 0
+        || !loteSelecionadoValido;
+    }
+
+    {% if item.ControlaNumerodeSerie and pedido is not defined %}
+    const serieSection = document.getElementById('serie_section');
+    const serieContainer = document.getElementById('serie_container');
+    const addSerieButton = document.getElementById('add_serie_btn');
+    let seriesDisponiveis = [];
+
+    function ocultarSeries() {
+      serieSection.hidden = true;
+      serieContainer.replaceChildren();
+      seriesDisponiveis = [];
+    }
+
+    function adicionarSeletorSerie(series) {
+      const linha = document.createElement('div');
+      linha.className = 'st-series-select-row';
+
+      const select = document.createElement('select');
+      select.name = 'numero_serie_escolhido[]';
+      select.className = 'st-control';
+      adicionarOpcao(select, '', 'Selecione a série');
+      series.forEach((serie) => adicionarOpcao(select, String(serie), String(serie)));
+
+      const remover = document.createElement('button');
+      remover.type = 'button';
+      remover.className = 'st-btn st-btn-danger';
+      remover.setAttribute('aria-label', 'Remover seleção de série');
+      remover.textContent = '×';
+      remover.addEventListener('click', () => linha.remove());
+
+      linha.append(select, remover);
+      serieContainer.appendChild(linha);
+    }
+
+    async function carregarSeries() {
+      const lote = loteControl.value;
+      if (!lote) {
+        ocultarSeries();
+        return;
+      }
+
+      const opcaoOrigem = origemSelect.selectedOptions[0];
+      const tipoEstoque = opcaoOrigem ? opcaoOrigem.dataset.tipo : '';
+      const parametros = new URLSearchParams({
+        item: {{ item.IDItem|tojson }},
+        lote,
+        tipo: tipoEstoque
+      });
+
+      try {
+        const resposta = await fetch(`${seriesUrl}?${parametros.toString()}`, {
+          headers: { Accept: 'application/json' }
+        });
+        if (!resposta.ok) throw new Error('Falha ao carregar séries');
+
+        const dados = await resposta.json();
+        seriesDisponiveis = Array.isArray(dados.series) ? dados.series : [];
+        serieContainer.replaceChildren();
+
+        if (!seriesDisponiveis.length) {
+          ocultarSeries();
+          return;
+        }
+
+        serieSection.hidden = false;
+        adicionarSeletorSerie(seriesDisponiveis);
+      } catch (erro) {
+        ocultarSeries();
+      }
+    }
+
+    addSerieButton.addEventListener('click', () => {
+      const escolhidas = Array.from(serieContainer.querySelectorAll('select'))
+        .map((select) => select.value)
+        .filter(Boolean);
+      const restantes = seriesDisponiveis.filter((serie) => !escolhidas.includes(String(serie)));
+      if (restantes.length) adicionarSeletorSerie(restantes);
+    });
+    {% endif %}
+
+    origemSelect.addEventListener('change', () => atualizarProprietario('origem'));
+    destinoSelect.addEventListener('change', () => atualizarProprietario('destino'));
+    origemPropSelect.addEventListener('change', () => {
+      {% if item.ControlaLote %}popularLotes();{% endif %}
+      atualizarTiposDestino();
+    });
+    destinoPropSelect.addEventListener('change', atualizarCalculos);
+    quantidadeInput.addEventListener('input', atualizarCalculos);
+
+    {% if item.ControlaLote %}
+    loteControl.addEventListener('change', () => {
+      atualizarCalculos();
+      {% if item.ControlaNumerodeSerie and pedido is not defined %}carregarSeries();{% endif %}
+    });
+    {% endif %}
+
+    form.addEventListener('submit', (evento) => {
+      quantidadeInput.setCustomValidity('');
+      destinoPropSelect.setCustomValidity('');
+      const quantidade = Math.trunc(numero(quantidadeInput.value));
+      const limite = limiteDisponivel();
+      const destino = registroSelecionado('destino');
+      const mesmaLocalizacao = mesmaLocalizacaoSelecionada();
+
+      if (quantidade <= 0) {
+        quantidadeInput.setCustomValidity('Informe uma quantidade maior que zero.');
+      } else if (quantidade > limite) {
+        quantidadeInput.setCustomValidity(`A quantidade máxima disponível é ${limite}.`);
+      } else if (mesmaLocalizacao) {
+        destinoPropSelect.setCustomValidity(
+          'O estoque de destino deve ser diferente do estoque de origem.'
+        );
+      } else if (!destino) {
+        destinoPropSelect.setCustomValidity(
+          'Selecione um estoque de destino diferente da origem.'
+        );
+      }
+
+      if (!form.checkValidity()) {
+        evento.preventDefault();
+        form.reportValidity();
+        return;
+      }
+
+      confirmarButton.disabled = true;
+      confirmarTexto.textContent = 'Transferindo...';
+    });
+
+    atualizarProprietario('origem');
+    atualizarCalculos();
+  })();
+</script>
+{% endblock content %}

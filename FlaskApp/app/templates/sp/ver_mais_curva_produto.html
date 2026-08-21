@@ -1,0 +1,139 @@
+{# templates/ver_mais_curva_produto.html #}
+{% extends "midia/base_midia.html" %}
+{% block title %}Curva de Giro – Item {{ item_id }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-4">
+  <h2>Curva de Giro – Detalhes</h2>
+
+  <!-- Produto com miniaturas em linha -->
+  <div class="mb-3">
+    <p class="mb-1"><strong>Produto:</strong> {{ nome_prod }}</p>
+    <p class="mb-1"><strong>Referência:</strong> {{ ref_ext }}</p>
+    <p class="mb-0"><strong>ID:</strong> {{ item_id }}</p>
+  </div>
+  {% if images %}
+  <div class="d-flex mb-4">
+    {% for img in images %}
+      <div class="me-3" style="width:120px; height:120px; flex-shrink:0;">
+        <img src="{{ img.url }}"
+             alt="Imagem {{ img.ordem }}"
+             class="img-fluid rounded"
+             style="object-fit:cover; width:100%; height:100%;"
+             onerror="this.onerror=null;
+                      this.src='https://cdn.awsli.com.br/production/static/img/produto-sem-imagem.gif';">
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Seletor de Período -->
+  <form method="get" class="mb-3">
+    <label class="form-label me-2">Período:</label>
+    <select name="period" class="form-select d-inline-block w-auto"
+            onchange="this.form.submit()">
+      <option value="day"    {{ 'selected' if period=='day'    }}>Dias (mês atual)</option>
+      <option value="last90" {{ 'selected' if period=='last90' }}>Últimos 90 dias</option>
+      <option value="month"  {{ 'selected' if period=='month'  }}>Meses (últimos 12)</option>
+    </select>
+  </form>
+
+  <!-- Indicadores -->
+  <div class="row g-3 fs-6">
+    <div class="col-md-3"><strong>Estoque Atual:</strong> {{ estoque_atual }}</div>
+    <div class="col-md-3"><strong>Consumo diário:</strong> {{ consumo_diario }}</div>
+    <div class="col-md-3"><strong>Consumo % do Estoque/mês:</strong> {{ consumo_percent }} %</div>
+    <div class="col-md-3">
+      <strong>Projeção até zerar:</strong>
+      {% if previsao_dias %}~{{ previsao_dias }} dias{% else %}&mdash;{% endif %}
+    </div>
+  </div>
+
+  {% if base_iso and base_iso|length > 0 %}
+    <div class="card mt-4">
+      <div class="card-body" style="height:380px;">
+        <canvas id="curvaChart"></canvas>
+      </div>
+    </div>
+  {% else %}
+    <div class="alert alert-info mt-4">Sem dados para exibir gráfico.</div>
+  {% endif %}
+
+  <a href="{{ url_for('euro.curva_giro') }}" class="btn btn-secondary mt-4">← Voltar</a>
+</div>
+
+{% if base_iso and base_iso|length > 0 %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <script>
+    const dates        = {{ base_iso       | tojson }};
+    const entradas     = {{ entradas_data  | tojson }};
+    const vendas       = {{ vendas_data    | tojson }};
+    const saldo        = {{ saldo_corrente | tojson }};
+
+    const ds = dates.map(d => {
+      const [y,m,day] = d.split('-').map(Number);
+      return new Date(y, m - 1, day);
+    });
+
+    const saldoSeries    = ds.map((d,i) => ({ x: d, y: saldo[i]    }));
+    const entradasSeries = ds.map((d,i) => ({ x: d, y: entradas[i]}));
+    const vendasSeries   = ds.map((d,i) => ({ x: d, y: vendas[i]  }));
+
+    new Chart(document.getElementById("curvaChart"), {
+      type: "line",
+      data: {
+        datasets: [
+          {
+            label: "Saldo em Estoque",
+            data: saldoSeries,
+            borderColor: "rgba(75,192,192,1)",
+            backgroundColor: "rgba(75,192,192,0.15)",
+            fill: true,
+            tension: 0.25,
+            pointRadius: 3
+          },
+          {
+            label: "Entradas",
+            data: entradasSeries,
+            borderColor: "rgba(255,159,64,1)",
+            backgroundColor: "rgba(255,159,64,0.2)",
+            fill: false,
+            tension: 0.25,
+            pointRadius: 4
+          },
+          {
+            label: "Vendas",
+            data: vendasSeries,
+            borderColor: "rgba(255,99,132,1)",
+            borderDash: [5,4],
+            fill: false,
+            tension: 0.25,
+            pointRadius: 4
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        spanGaps: true,
+        scales: {
+          x: {
+            type: "time",
+            time: { unit: "day", tooltipFormat: "dd/MM" },
+            title: { display: true, text: "Data" }
+          },
+          y: {
+            beginAtZero: true,
+            title: { display: true, text: "Quantidade" }
+          }
+        },
+        plugins: {
+          legend: { position: "top" }
+        }
+      }
+    });
+  </script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "midia/base_midia.html" %}
+{% block title %}Família PMV 2000{% endblock %}
+
+{% block content %}
+<h2>Famílias</h2>
+
+{% if items %}
+  <p class="text-muted">
+    <strong>Nome da Família:</strong> {{ items[0].NomeFamilia }}<br>
+    <strong>Descrição:</strong> {{ items[0].DescricaoFamilia or '-' }}
+  </p>
+{% endif %}
+
+<img src="https://via.placeholder.com/600x300?text=PMV+2000+Gen%C3%A9rico" alt="PMV" class="img-fluid rounded mb-3">
+
+<h3 class="mt-4">Produtos da Família</h3>
+<p>Clique no nome do produto para ver os detalhes e os produtos compatíveis.</p>
+
+<div class="table-responsive">
+  <table class="table table-striped table-hover align-middle">
+    <thead class="table-success">
+      <tr>
+        <th>ID Item</th>
+        <th>Referência</th>
+        <th>Nome Produto</th>
+        <th>Categoria</th>
+        <th>Ativo</th>
+        <th>Qtd Disponível</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>{{ item.IDItem }}</td>
+        <td>{{ item.ReferenciaExterna }}</td>
+        <td>
+          <a href="{{ url_for('euro.produto_compativeis', produto_id=item.IDItem) }}">
+            {{ item.NomeProduto }}
+          </a>
+        </td>
+        <td>{{ item.NomeCategoria or '-' }}</td>
+        <td>{{ 'Sim' if item.BitAtivo else 'Não' }}</td>
+        <td>{{ item.Quantidade if item.Quantidade is not none else 0 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<nav aria-label="Page navigation">
+  <ul class="pagination justify-content-center">
+    {% if page > 1 %}
+    <li class="page-item">
+      <a class="page-link" href="{{ url_for('euro.familia', familia_id=familia_id, page=page-1) }}">Anterior</a>
+    </li>
+    {% else %}
+    <li class="page-item disabled"><span class="page-link">Anterior</span></li>
+    {% endif %}
+
+    {% for p in range(1, total_pages + 1) %}
+    <li class="page-item {% if p == page %}active{% endif %}">
+      <a class="page-link" href="{{ url_for('euro.familia', familia_id=familia_id, page=p) }}">{{ p }}</a>
+    </li>
+    {% endfor %}
+
+    {% if page < total_pages %}
+    <li class="page-item">
+      <a class="page-link" href="{{ url_for('euro.familia', familia_id=familia_id, page=page+1) }}">Próxima</a>
+    </li>
+    {% else %}
+    <li class="page-item disabled"><span class="page-link">Próxima</span></li>
+    {% endif %}
+  </ul>
+</nav>
+
+<a href="{{ url_for('euro.index') }}" class="btn btn-secondary mt-3">Voltar</a>
+{% endblock %}

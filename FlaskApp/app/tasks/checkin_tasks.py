@@ -80,7 +80,7 @@ def processar_checkin_upload(
     )
 
     try:
-        from ..euromidia.controle_paineis_views import _processar_upload_checkin_por_caminho
+        from ..midia.controle_paineis_views import _processar_upload_checkin_por_caminho
 
         resultado = _processar_upload_checkin_por_caminho(
             id_empresa=int(id_empresa),
