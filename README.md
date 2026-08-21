@@ -42,7 +42,7 @@ Com a plataforma, informações antes estáticas passam a ser **estruturadas, re
 
 ---
 
-## 🎯 Objetivo da Solução
+## Objetivo da Solução
 
 O principal objetivo da plataforma é construir uma **infraestrutura corporativa integrada de dados e processos**, capaz de conectar:
 
@@ -74,7 +74,7 @@ A proposta é transformar processos corporativos em **fontes contínuas de dados
 
 ---
 
-## 🔗 Centralização e Integração de Dados
+## Centralização e Integração de Dados
 
 A solução foi criada para formar uma **base de dados unificada e confiável**, conectando informações que anteriormente estavam distribuídas entre diferentes arquivos, bancos de dados e sistemas.
 
@@ -94,7 +94,7 @@ Isso permite que diferentes áreas trabalhem sobre uma estrutura integrada de in
 
 ---
 
-## 🧩 Captura de Novos Dados Operacionais
+## Captura de Novos Dados Operacionais
 
 A plataforma não apenas consolida dados que já existiam.
 
@@ -190,7 +190,7 @@ A rastreabilidade pode incluir:
 
 ---
 
-## 🔍 Rastreabilidade de Materiais e Equipamentos
+## Rastreabilidade de Materiais e Equipamentos
 
 A estrutura de estoque não funciona apenas como um controle de saldo.
 
@@ -231,7 +231,7 @@ Dessa forma, o estoque deixa de representar apenas um saldo quantitativo e passa
 
 ---
 
-## 🏗️ Gestão de Ativos Operacionais
+## Gestão de Ativos Operacionais
 
 A plataforma também estrutura o controle dos próprios **ativos operacionais da empresa**, relacionando unidades físicas, equipamentos e componentes às suas respectivas informações operacionais e comerciais.
 
@@ -268,7 +268,7 @@ Faturamento
 
 ---
 
-## 🧾 Gestão de Contratos
+## Gestão de Contratos
 
 A solução possui uma camada voltada à **geração e gestão de contratos**.
 
@@ -301,7 +301,7 @@ Atualização da Base Central
 
 ---
 
-## 🔌 Integrações com Sistemas Externos
+## Integrações com Sistemas Externos
 
 A plataforma possui integração com diferentes sistemas corporativos.
 
@@ -323,7 +323,7 @@ A integração com ERP possibilita relacionar informações financeiras e cadast
 
 ---
 
-## 🏗️ Engenharia de Dados
+## Engenharia de Dados
 
 A arquitetura da solução possui uma camada específica de **Engenharia de Dados**, responsável por coletar, transformar, validar, integrar e disponibilizar informações provenientes de diferentes fontes.
 
@@ -347,7 +347,7 @@ Aplicações / Analytics / BI / ML
 
 ---
 
-## 🌬️ Orquestração de Pipelines com Apache Airflow
+## Orquestração de Pipelines com Apache Airflow
 
 Grande parte da arquitetura de dados é organizada por meio de **pipelines orquestrados com Apache Airflow**.
 
