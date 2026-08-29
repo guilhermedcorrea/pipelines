@@ -32,17 +32,17 @@ from hooks.BancodeDados.SqlServer import HookSqlServer
 
 logger = logging.getLogger(__name__)
 
-DAG_ID = "pipeline_notificacoes_midia"
+DAG_ID = "pipeline_notificacoes_euromidia"
 DAG_ID_CANCELAMENTO = "pipeline_cancela_reserva"
 SQLSERVER_CONN_ID = os.getenv(
-    "MIDIA_SQLSERVER_CONN_ID", "mssql_integracao"
+    "EUROMIDIA_SQLSERVER_CONN_ID", "mssql_integracao"
 ).strip()
-SMTP_CONN_ID = os.getenv("MIDIA_SMTP_CONN_ID", "smtp_default").strip()
-SMTP_USUARIO_PADRAO = "notificacoes@midia.com.br"
+SMTP_CONN_ID = os.getenv("EUROMIDIA_SMTP_CONN_ID", "smtp_default").strip()
+SMTP_USUARIO_PADRAO = "notificacoes@euromidia.com.br"
 TIMEZONE_SAO_PAULO = pendulum.timezone("America/Sao_Paulo")
 
 ORIGEM_NOTIFICACAO = "AIRFLOW"
-SISTEMA_ORIGEM = "PAINEIS_MIDIA"
+SISTEMA_ORIGEM = "PAINEIS_EUROMIDIA"
 MODULO_ORIGEM = "RESERVAS"
 TIPO_REFERENCIA = "RESERVA"
 
@@ -76,13 +76,13 @@ def _inteiro_ambiente(nome: str, padrao: int, minimo: int, maximo: int) -> int:
 
 
 LOOKBACK_CANCELAMENTO_HORAS = _inteiro_ambiente(
-    "MIDIA_NOTIFICACOES_LOOKBACK_CANCELAMENTO_HORAS",
+    "EUROMIDIA_NOTIFICACOES_LOOKBACK_CANCELAMENTO_HORAS",
     padrao=24,
     minimo=1,
     maximo=24 * 30,
 )
 LIMITE_EMAILS_POR_EXECUCAO = _inteiro_ambiente(
-    "MIDIA_NOTIFICACOES_LIMITE_EMAILS",
+    "EUROMIDIA_NOTIFICACOES_LIMITE_EMAILS",
     padrao=100,
     minimo=1,
     maximo=1000,
@@ -90,12 +90,12 @@ LIMITE_EMAILS_POR_EXECUCAO = _inteiro_ambiente(
 
 
 DOC_MD = """
-# Pipeline Notificações Midia
+# Pipeline Notificações Euromidia
 
 ## Objetivo
 
 Monitora as reservas da tabela
-`Integracao.Silver.FatoOcupacaoPaineisMidia`, cria uma fila idempotente em
+`Integracao.Silver.FatoOcupacaoPaineisEuromidia`, cria uma fila idempotente em
 `Integracao.Silver.FatoNotificacoes` e envia os e-mails pendentes.
 
 ## Eventos
@@ -124,22 +124,22 @@ confirmada.
 Os campos de vínculo são gravados assim:
 
 - `Origem = AIRFLOW`
-- `SistemaOrigem = PAINEIS_MIDIA`
+- `SistemaOrigem = PAINEIS_EUROMIDIA`
 - `ModuloOrigem = RESERVAS`
 - `TipoReferencia = RESERVA`
-- `IDReferencia = IDFatoOcupacaoPaineisMidia`
+- `IDReferencia = IDFatoOcupacaoPaineisEuromidia`
 
 ## Configuração
 
 - SQL Server: Airflow Connection `mssql_integracao` ou variável
-  `MIDIA_SQLSERVER_CONN_ID`.
+  `EUROMIDIA_SQLSERVER_CONN_ID`.
 - SMTP: usa primeiro as mesmas variáveis do Flask (`SMTP`, `porta`,
   `criptografia` e `SENHA_EMAIL`) e o usuário
-  `notificacoes@midia.com.br`. A Airflow Connection `smtp_default` é
+  `notificacoes@euromidia.com.br`. A Airflow Connection `smtp_default` é
   somente fallback para valores que realmente não estiverem no ambiente.
 - Na primeira execução, considera cancelamentos ocorridos nas últimas 24 horas;
   esse alcance pode ser alterado por
-  `MIDIA_NOTIFICACOES_LOOKBACK_CANCELAMENTO_HORAS`.
+  `EUROMIDIA_NOTIFICACOES_LOOKBACK_CANCELAMENTO_HORAS`.
 - Agendamento: a cada 5 minutos.
 """
 
@@ -264,7 +264,7 @@ SQL_BUSCAR_EVENTOS = f"""
 ;WITH BaseReservas AS
 (
     SELECT
-        reserva.IDFatoOcupacaoPaineisMidia AS IDReserva,
+        reserva.IDFatoOcupacaoPaineisEuromidia AS IDReserva,
         reserva.Referencia,
         reserva.CodPonto,
         reserva.CodFace,
@@ -312,9 +312,9 @@ SQL_BUSCAR_EVENTOS = f"""
                 OR EXISTS
                 (
                     SELECT 1
-                    FROM [Integracao].[Silver].[FatoControleContratosItensMidia] AS item_pref
+                    FROM [Integracao].[Silver].[FatoControleContratosItensEuromidia] AS item_pref
                     WHERE
-                        item_pref.IDFatoControleContratosItensMidia =
+                        item_pref.IDFatoControleContratosItensEuromidia =
                             reserva.IDFatoControleContratosItemOrigem
                         AND ISNULL(item_pref.BitPreferencia, 0) = 1
                         AND ISNULL(item_pref.BitAtivo, 1) = 1
@@ -322,7 +322,7 @@ SQL_BUSCAR_EVENTOS = f"""
             THEN 1
             ELSE 0
         END AS ReservaPreferencia
-    FROM [Integracao].[Silver].[FatoOcupacaoPaineisMidia] AS reserva
+    FROM [Integracao].[Silver].[FatoOcupacaoPaineisEuromidia] AS reserva
     LEFT JOIN [Integracao].[dbo].[Vendedores] AS vendedor
         ON vendedor.IDVendedor = reserva.IDVendedor
     LEFT JOIN [Integracao].[Silver].[DimUsuarios] AS criador
@@ -572,30 +572,30 @@ def _obter_configuracao_smtp() -> ConfiguracaoSmtp:
     # sobre valores antigos ou incorretos cadastrados no smtp_default.
     host = _primeiro_valor_ambiente(
         "SMTP",
-        "MIDIA_SMTP_HOST",
+        "EUROMIDIA_SMTP_HOST",
         "MAIL_SERVER",
         "SMTP_HOST",
         "SMTP_SERVER",
     )
     port_texto = _primeiro_valor_ambiente(
-        "porta", "MIDIA_SMTP_PORT", "MAIL_PORT", "SMTP_PORT"
+        "porta", "EUROMIDIA_SMTP_PORT", "MAIL_PORT", "SMTP_PORT"
     )
     username = _primeiro_valor_ambiente(
-        "MIDIA_SMTP_USERNAME",
+        "EUROMIDIA_SMTP_USERNAME",
         padrao=SMTP_USUARIO_PADRAO,
     )
     password = _primeiro_valor_ambiente(
         "SENHA_EMAIL",
-        "MIDIA_SMTP_PASSWORD",
+        "EUROMIDIA_SMTP_PASSWORD",
         "MAIL_PASSWORD",
         "SMTP_PASSWORD",
     )
     remetente = _primeiro_valor_ambiente(
-        "MIDIA_SMTP_FROM",
+        "EUROMIDIA_SMTP_FROM",
         padrao=username,
     )
     criptografia = _primeiro_valor_ambiente(
-        "criptografia", "MIDIA_SMTP_CRIPTOGRAFIA"
+        "criptografia", "EUROMIDIA_SMTP_CRIPTOGRAFIA"
     )
 
     conexao_airflow = None
@@ -642,7 +642,7 @@ def _obter_configuracao_smtp() -> ConfiguracaoSmtp:
         ) from erro
 
     autenticar = _booleano(
-        _primeiro_valor_ambiente("MIDIA_SMTP_AUTH"), padrao=True
+        _primeiro_valor_ambiente("EUROMIDIA_SMTP_AUTH"), padrao=True
     )
     criptografia_normalizada = (criptografia or "").strip().upper()
     padrao_ssl = criptografia_normalizada in {"SSL", "SMTPS"}
@@ -653,12 +653,12 @@ def _obter_configuracao_smtp() -> ConfiguracaoSmtp:
     )
 
     usar_ssl = _booleano(
-        _primeiro_valor_ambiente("MIDIA_SMTP_SSL", "MAIL_USE_SSL"),
+        _primeiro_valor_ambiente("EUROMIDIA_SMTP_SSL", "MAIL_USE_SSL"),
         padrao=padrao_ssl,
     )
     starttls = _booleano(
         _primeiro_valor_ambiente(
-            "MIDIA_SMTP_STARTTLS", "MAIL_USE_TLS", "SMTP_STARTTLS"
+            "EUROMIDIA_SMTP_STARTTLS", "MAIL_USE_TLS", "SMTP_STARTTLS"
         ),
         padrao=padrao_starttls,
     )
@@ -668,7 +668,7 @@ def _obter_configuracao_smtp() -> ConfiguracaoSmtp:
 
     if not remetente:
         raise AirflowFailException(
-            "Remetente SMTP não configurado. Defina MIDIA_SMTP_FROM ou MAIL_DEFAULT_SENDER."
+            "Remetente SMTP não configurado. Defina EUROMIDIA_SMTP_FROM ou MAIL_DEFAULT_SENDER."
         )
 
     if autenticar and (not username or not password):
@@ -685,14 +685,14 @@ def _obter_configuracao_smtp() -> ConfiguracaoSmtp:
         password=password,
         remetente=remetente,
         nome_remetente=_primeiro_valor_ambiente(
-            "MIDIA_SMTP_FROM_NAME", padrao="Euromídia"
+            "EUROMIDIA_SMTP_FROM_NAME", padrao="Euromídia"
         )
         or "Euromídia",
         starttls=starttls,
         usar_ssl=usar_ssl,
         autenticar=autenticar,
         timeout_segundos=_inteiro_ambiente(
-            "MIDIA_SMTP_TIMEOUT", padrao=30, minimo=5, maximo=180
+            "EUROMIDIA_SMTP_TIMEOUT", padrao=30, minimo=5, maximo=180
         ),
     )
 
@@ -803,12 +803,12 @@ def _conteudo_evento(evento: dict[str, Any]) -> tuple[str, str, str]:
     motivo = _texto(evento.get("Observacao"), "Conforme a regra da reserva")
     url_base = (
         _primeiro_valor_ambiente(
-            "MIDIA_BASE_URL", padrao="http://189.45.251.100:5000"
+            "EUROMIDIA_BASE_URL", padrao="http://189.45.251.100:5000"
         )
         or "http://189.45.251.100:5000"
     ).rstrip("/")
     logo_url = _primeiro_valor_ambiente(
-        "MIDIA_LOGO_URL",
+        "EUROMIDIA_LOGO_URL",
         padrao=f"{url_base}/static/imagens/logoeuro.png",
     )
     link_reservas = (
@@ -1077,7 +1077,7 @@ def _obter_filtro_do_disparo() -> tuple[bool, list[int], str]:
 @dag(
     dag_id=DAG_ID,
     description=(
-        "Pipeline Notificações Midia: envia alertas de 24h e e-mails de "
+        "Pipeline Notificações Euromidia: envia alertas de 24h e e-mails de "
         "cancelamento manual ou automático de reservas."
     ),
     schedule="*/5 * * * *",
@@ -1090,7 +1090,7 @@ def _obter_filtro_do_disparo() -> tuple[bool, list[int], str]:
     max_active_runs=2,
     dagrun_timeout=timedelta(minutes=10),
     tags=[
-        "midia",
+        "euromidia",
         "paineis",
         "reservas",
         "notificacoes",
@@ -1104,12 +1104,12 @@ def _obter_filtro_do_disparo() -> tuple[bool, list[int], str]:
         "retry_delay": timedelta(minutes=1),
     },
 )
-def pipeline_notificacoes_midia():
+def pipeline_notificacoes_euromidia():
     @task(task_id="preparar_notificacoes")
     def preparar_notificacoes() -> dict[str, Any]:
         hook_sql_server = HookSqlServer(conn_id=SQLSERVER_CONN_ID)
         engine = hook_sql_server.obter_engine()
-        email_copia = _primeiro_valor_ambiente("MIDIA_EMAIL_COPIA")
+        email_copia = _primeiro_valor_ambiente("EUROMIDIA_EMAIL_COPIA")
         (
             filtrar_ids_cancelados,
             ids_reservas_canceladas,
@@ -1365,4 +1365,4 @@ def pipeline_notificacoes_midia():
     enviar_notificacoes_pendentes(preparar_notificacoes())
 
 
-pipeline_notificacoes_midia()
+pipeline_notificacoes_euromidia()
